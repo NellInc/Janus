@@ -1,0 +1,55 @@
+; NTMINI.INF - NT Miniport Bridge for Windows 98
+;
+; Installs the NTMINI.PDR port driver that loads an unmodified NT4
+; atapi.sys miniport driver inside Windows 98 for ATAPI CD-ROM/DVD support.
+;
+; Installation:
+;   1. Right-click this file and select "Install"
+;   2. Reboot Windows 98
+;   3. The CD-ROM drive should appear in My Computer
+;
+; Manual installation:
+;   1. Copy NTMINI.PDR to C:\WINDOWS\SYSTEM\IOSUBSYS\
+;   2. Reboot
+;
+; AUTHORS: Claude Commons & Nell Watson, March 2026
+; LICENSE: MIT License
+; HOMEPAGE: https://github.com/nellwatson/ntmini-win98-cdrom
+
+[Version]
+Signature="$CHICAGO$"
+Class=SCSIAdapter
+ClassGUID={4D36E97B-E325-11CE-BFC1-08002BE10318}
+Provider=%MFGNAME%
+DriverVer=03/22/2026,1.0.0.0
+
+[Manufacturer]
+%MFGNAME%=DeviceList
+
+[DeviceList]
+%DEVDESC%=Install_NTMINI,*NTMINI
+
+[DestinationDirs]
+DefaultDestDir=12          ; LDID_IOSUBSYS = %WINDIR%\SYSTEM\IOSUBSYS
+
+[Install_NTMINI]
+CopyFiles=CopyPDR
+AddReg=Install_NTMINI.AddReg
+
+[CopyPDR]
+NTMINI.PDR
+
+[Install_NTMINI.AddReg]
+HKR,,DevLoader,,*ios
+HKR,,PortDriver,,NTMINI.PDR
+
+[SourceDisksNames]
+1=%DISKNAME%,,0
+
+[SourceDisksFiles]
+NTMINI.PDR=1
+
+[Strings]
+MFGNAME="NT Miniport Bridge Project"
+DEVDESC="NT4 ATAPI Miniport Bridge (CD-ROM/DVD)"
+DISKNAME="NT Miniport Bridge Driver Disk"

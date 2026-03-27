@@ -1,0 +1,16 @@
+# Binary files
+*.VXD binary
+*.PDR binary
+*.obj binary
+
+# Windows line endings for batch files
+*.BAT text eol=crlf
+*.bat text eol=crlf
+*.INF text eol=crlf
+
+# Assembly and C source (keep as-is for historical accuracy)
+*.ASM text eol=crlf
+*.C text eol=crlf
+*.H text eol=crlf
+*.INC text eol=crlf
+*.lnk text eol=crlf

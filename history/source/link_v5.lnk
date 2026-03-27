@@ -1,0 +1,12 @@
+format windows vxd dynamic
+name V5RAW.VXD
+file V5R_wrap.obj
+file V5R_c.obj
+file V5R_pe.obj
+export NTMINI_DDB
+segment _TEXT class 'LCODE'
+segment _DATA class 'LCODE'
+segment _BSS class 'LCODE'
+segment CONST class 'LCODE'
+segment CONST2 class 'LCODE'
+option quiet

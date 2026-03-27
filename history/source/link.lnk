@@ -1,0 +1,9 @@
+format windows vxd dynamic
+name NTMINI.VXD
+file PELOAD.obj
+file IRQHOOK.obj
+file IOSBRIDGE.obj
+file NTMINI.obj
+file NTKRNL.obj
+file VXDWRAP.obj
+export NTMINI_DDB
