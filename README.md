@@ -114,6 +114,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-This project was developed with and for the Vogons retro-computing community
-(vogons.org), whose collective knowledge of legacy PC hardware and operating systems
-made it possible.
+Thanks to Björn Korneli for the inspiration for this project.
