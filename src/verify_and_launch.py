@@ -300,7 +300,7 @@ fi
     os.chmod(script_path, 0o755)
     print(f"  Written: {script_path}")
     print()
-    print("  Run:  cd research/win98-dvd-fix/ntmini && ./launch_debug.sh")
+    print("  Run:  ./launch_debug.sh")
     print()
     print("  After Win98 boots, close QEMU and check:")
     print("    cat /tmp/vxd_debug.log    # port 0xE9 output")
