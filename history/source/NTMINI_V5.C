@@ -62,6 +62,13 @@ typedef ULONG              *PULONG;
 #define STATUS_SUCCESS      0x00000000
 #define STATUS_UNSUCCESSFUL 0xC0000001
 
+/* SCSI_ADAPTER_CONTROL_TYPE values (NT5 HwScsiAdapterControl) */
+#define ScsiQuerySupportedControlTypes  0
+#define ScsiStopAdapter                 1
+#define ScsiRestartAdapter              2
+#define ScsiSetBootConfig               3
+#define ScsiSetRunningConfig            4
+
 /* Physical address */
 typedef union {
     struct { ULONG LowPart; LONG HighPart; };
@@ -186,6 +193,7 @@ static struct {
     ULONG   (__stdcall *HwFindAdapter)(PVOID,PVOID,PVOID,PVOID,
                              PPORT_CONFIGURATION_INFORMATION,PUCHAR);
     BOOLEAN (__stdcall *HwResetBus)(PVOID, ULONG);
+    ULONG   (__stdcall *HwAdapterControl)(PVOID DeviceExtension, ULONG ControlType, PVOID Parameters);
     PVOID   DeviceExtension;
     ULONG   DeviceExtensionSize;
 } g_state;
@@ -439,6 +447,19 @@ static ULONG __stdcall sp_Initialize(
                             HwInitData->HwResetBus;
     g_state.DeviceExtensionSize = HwInitData->DeviceExtensionSize;
 
+    /* Detect NT5 extended HW_INITIALIZATION_DATA (HwScsiAdapterControl support).
+       NT4: HwInitializationDataSize == 0x40 (no HwAdapterControl field)
+       NT5: HwInitializationDataSize >= 0x44 (HwAdapterControl at offset 0x40) */
+    log_hex("SP: HwInitializationDataSize=", HwInitData->HwInitializationDataSize, "\r\n");
+    if (HwInitData->HwInitializationDataSize >= 0x44) {
+        g_state.HwAdapterControl = (ULONG(__stdcall *)(PVOID, ULONG, PVOID))
+                                    HwInitData->HwAdapterControl;
+        log_hex("SP: NT5 miniport detected, HwAdapterControl=", (ULONG)g_state.HwAdapterControl, "\r\n");
+    } else {
+        g_state.HwAdapterControl = NULL;
+        VxD_Debug_Printf("SP: NT4 miniport detected\r\n");
+    }
+
     /* Allocate device extension from static buffer */
     if (HwInitData->DeviceExtensionSize > sizeof(g_devext_buf)) {
         VxD_Debug_Printf("SP: DevExt too large!\r\n");
@@ -541,6 +562,15 @@ static ULONG __stdcall sp_Initialize(
     }
 
     VxD_Debug_Printf("SP: HwInitialize OK!\r\n");
+
+    /* NT5: notify miniport that adapter is running */
+    if (g_state.HwAdapterControl != NULL) {
+        ULONG acResult;
+        VxD_Debug_Printf("SP: Calling HwAdapterControl(ScsiSetRunningConfig)...\r\n");
+        acResult = g_state.HwAdapterControl(g_state.DeviceExtension,
+                                            ScsiSetRunningConfig, NULL);
+        log_hex("SP: HwAdapterControl(ScsiSetRunningConfig) returned ", acResult, "\r\n");
+    }
 
     /* Clear any pending interrupt state from HwFindAdapter/HwInitialize
        BEFORE patching the device extension. */
