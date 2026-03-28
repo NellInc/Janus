@@ -1,13 +1,13 @@
 # NT5-9x Driver Backport
 
-A reverse engineering project that backports Windows NT5 (2000/XP) miniport drivers
-to run on Windows 9x and NT4. The core achievement is a VxD (Virtual Device Driver)
-wrapper that presents the correct LE (Linear Executable) binary structure so the
-Windows 98 SE loader accepts it.
+A reverse engineering project that backports Windows NT4 ScsiPort miniport drivers
+and Windows NT5 (2000/XP) WDM kernel drivers to run on Windows 9x. The core
+achievement is a VxD (Virtual Device Driver) wrapper that presents the correct LE
+(Linear Executable) binary structure so the Windows 98 SE loader accepts it.
 
-This makes it possible to use modern storage controller drivers on legacy Windows
-installations, bridging the gap between the NT5 miniport model and the older IOS/VxD
-driver stack that Windows 9x expects.
+This makes it possible to use NT era storage controller drivers on legacy Windows
+installations, bridging both the NT4 ScsiPort miniport model and the NT5 WDM
+driver stack into the older IOS/VxD subsystem that Windows 9x expects.
 
 Developed for the Vogons retro-computing community (vogons.org).
 
@@ -84,6 +84,12 @@ validates strictly:
 The reference driver used for comparison during development was `ESDI_506.PDR`, the
 standard IDE/ATAPI port driver shipped with Windows 98 SE.
 
+For NT5 WDM drivers (pciidex.sys, pciide.sys, atapi.sys), a separate compatibility
+layer provides shims for ntoskrnl.exe and HAL.dll functions, an IRP infrastructure,
+a minimal PnP/Power manager, PCI bus simulation, and a bridge that translates IOS
+I/O Requests into WDM IRPs. This allows unmodified NT5 WDM driver stacks to operate
+within the Win9x VxD environment.
+
 ## Status
 
 This is a proof of concept. The current build wraps the NEC ATAPI miniport as
@@ -94,19 +100,17 @@ Real hardware validation has not yet been performed.
 
 ## Unimplemented Areas
 
-The following subsystems remain unfinished, as documented in BUILD.TXT:
+Phase 1 through 3 code (NT4 ScsiPort support and NT5 WDM compatibility layer) is
+written. The following areas require integration testing with real NT5 binaries:
 
-- **Memory allocation**: The wrapper does not yet implement the VMM page allocation
-  calls that a full VxD port driver needs for DMA buffers and adapter structures.
-- **PE loading**: The embedded NT5 miniport PE image is not yet parsed or relocated
-  at runtime. Headers are read but sections are not mapped.
-- **IOS registration**: The wrapper does not register with the IOS (I/O Supervisor)
-  subsystem as a port driver. It loads but does not claim any devices.
-- **IOR to SRB translation**: I/O Request Packets (IORs) from the IOS layer must be
-  translated into SCSI Request Blocks (SRBs) that the NT5 miniport expects. This
-  translation layer is stubbed but not functional.
-- **Interrupt hooking**: Hardware interrupt virtualization through VPICD is not
-  implemented. The miniport's ISR cannot be called.
+- **Multi-DLL PE loader**: The PE loader handles single .sys files. Loading the full
+  NT5 IDE stack (pciidex.sys + pciide.sys + atapi.sys) with cross-image imports
+  has not been tested.
+- **End-to-end NT5 IDE stack**: The WDM bridge, PnP manager, and IRP infrastructure
+  are implemented but have not been exercised with live NT5 driver binaries.
+- **VPICD interrupt wiring**: Hardware interrupt virtualization code is written but
+  not yet connected to the runtime path.
+- **Real hardware validation**: All testing has been performed in QEMU.
 
 ## License
 

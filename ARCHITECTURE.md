@@ -250,3 +250,62 @@ Testing uses a Win98 SE virtual machine. Serial debug output from the VxD is
 captured via the VM's virtual COM port. IOS registration, DCB creation, and
 calldown installation are verified through debug trace messages before attempting
 any I/O operations.
+
+
+## NT5 WDM Compatibility Layer
+
+Five modules implement a shim layer that allows unmodified NT5 WDM drivers to
+run inside the Win9x VxD environment. The layer targets the NT5 IDE stack:
+pciidex.sys (bus driver), pciide.sys (vendor minidriver), and atapi.sys (miniport).
+
+### Layer Diagram
+
+```
+Win98 VMM
+    |
+NTKSHIM          ntoskrnl/HAL shim (memory, spinlocks, DPC, registry)
+    |
+IRPMGR           IRP infrastructure (device objects, IoCallDriver, completion)
+    |
+PNPMGR           PnP/Power manager (AddDevice, START_DEVICE, PoXxx stubs)
+    |
+PCIBUS           PCI bus scan, PDO creation, BUS_INTERFACE_STANDARD
+    |
+NT5 Drivers      pciidex.sys + pciide.sys + atapi.sys (unmodified binaries)
+    |
+WDMBRIDGE        IOR <-> IRP/SRB translation
+    |
+IOS              Win9x I/O Supervisor (calldown chain)
+```
+
+### Module Descriptions
+
+**NTKSHIM** implements ntoskrnl.exe and HAL.dll functions on top of Win98 VMM
+services. Many NT primitives that handle SMP and preemption collapse to trivial
+operations in the single-CPU, non-preemptive Win9x ring 0 environment.
+
+**IRPMGR** provides the core NT I/O manager: device object creation and teardown,
+IRP allocation with contiguous stack locations, IoCallDriver dispatch through
+device stacks, and IoCompleteRequest with completion routine unwinding.
+
+**PNPMGR** fabricates the PnP bootstrap sequence. It calls AddDevice to create
+FDOs, builds CM_RESOURCE_LISTs from hardcoded IDE parameters (e.g., 0x170, IRQ
+15), and sends IRP_MN_START_DEVICE. Real PnP discovery is unnecessary because
+Win9x Configuration Manager already knows the hardware.
+
+**PCIBUS** scans PCI bus 0 for IDE controllers (class 0x0101), creates PDOs for
+each, and exposes BUS_INTERFACE_STANDARD so that pciidex.sys can read PCI config
+space through the standard NT interface rather than direct port access.
+
+**WDMBRIDGE** sits between IOS and the NT5 device stack. IORs arriving via the
+calldown chain are translated into IRPs carrying SCSI SRBs, dispatched through
+IoCallDriver, and completed back to IOS via IOS_BD_Command_Complete.
+
+### Notes
+
+PCI bus simulation uses direct port access (0xCF8/0xCFC), the same mechanism as
+the existing ScsiPort path. The bus interface callbacks wrap this access in the
+NT BUS_INTERFACE_STANDARD structure that pciidex.sys expects.
+
+All five modules are compiled and structurally complete. Integration testing with
+actual NT5 driver binaries has not yet been performed.
