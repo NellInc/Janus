@@ -1,4 +1,4 @@
-# Backporting NT5 miniport drivers to Windows 9x: a VxD shim for atapi.sys
+# Backporting NT4 and NT5 drivers to Windows 9x: running miniports and WDM stacks inside a VxD shim
 
 ## The Idea
 
@@ -9,6 +9,8 @@ Windows 9x has none of this. Its storage stack depends on vendor-specific VxDs a
 So I built a shim. NTMINI.VXD is a Win98 VxD that loads an unmodified NT4 miniport binary at ring 0, provides a ScsiPort API for it to call into, and bridges the result to Win98's IOS (I/O Supervisor) subsystem. No modifications to the NT driver. The same binary that ships with NT4 SP6a, running inside Win98's kernel.
 
 In principle, this approach could work with any NT4 SCSI miniport: atapi.sys, sym_hi.sys for Symbios/LSI SCSI, aic78xx.sys for Adaptec, and so on. The current proof of concept uses atapi.sys because IDE controllers are everywhere and easy to test.
+
+NT5 (Windows 2000/XP) went further, redesigning the IDE stack entirely. atapi.sys became a full WDM driver communicating with pciidex.sys through an internal protocol, importing from ntoskrnl.exe and HAL.dll. Loading this requires more than a ScsiPort shim. It requires a WDM compatibility layer: IRP infrastructure, a PnP manager, kernel primitives, and a bridge back to Win9x's IOS. So I built that too.
 
 The source is on GitHub: https://github.com/NellInc/nt5-9x-driver-backport
 
@@ -34,6 +36,28 @@ NTMINI.VXD (Win98 LE VxD)
   |                        yet wired)
   |
   +-- ATAPI_EMBEDDED.H   : NT4 atapi.sys as a 27,600-byte C array
+```
+
+```
+NT5 WDM PATH (via compatibility layer):
+  |
+  +-- NTKSHIM.C         : ntoskrnl/HAL shim (spinlocks, DPC, timers,
+  |                        pool allocation, registry stubs)
+  |
+  +-- IRPMGR.C          : IRP infrastructure (allocate, dispatch,
+  |                        complete, device objects)
+  |
+  +-- PNPMGR.C          : Minimal PnP manager (START_DEVICE with
+  |                        fabricated resources), Power stubs
+  |
+  +-- PCIBUS.C           : PCI IDE controller scan, PDO creation,
+  |                        bus interface for pciidex.sys
+  |
+  +-- WDMBRIDGE.C        : IOR-to-IRP translation, NT5 device stack
+  |                        assembly, IOS bridge
+  |
+  +-- NTKEXPORTS.C       : Export tables mapping ~50 NT function names
+                            to shim implementations
 ```
 
 The boot sequence:
@@ -126,6 +150,14 @@ During deployment testing, the VM stopped booting. After hours of debugging: cod
 
 The FAT32 dirty flag lives in the FAT itself, in cluster 1's entry (FAT offset + 4 bytes, bit 27). Never touch BPB offsets 0x24-0x27.
 
+### 11. Building a Mini NT Kernel on Top of Win98 VMM
+
+NT5's atapi.sys imports from ntoskrnl.exe and HAL.dll, not ScsiPort. It uses IRPs, PnP, Power management, DPCs, spinlocks, timers, and the full NT I/O model. Loading it requires reimplementing these primitives on top of Win98's VMM.
+
+Spinlocks map to cli/sti (Win98 is single-CPU). DPCs run inline or queue for post-ISR drain. Timers use VMM Set_Global_Time_Out. Pool allocation routes to VxD_HeapAllocate. The IRP infrastructure handles allocation, driver stack dispatch, and completion callbacks. A minimal PnP manager fabricates resource lists and sends START_DEVICE IRPs. PCI bus simulation scans for IDE controllers and creates physical device objects.
+
+The result: pciidex.sys, pciide.sys, and atapi.sys can load inside a Win98 VxD, with their imports resolved against ~50 shimmed NT kernel functions. IRPs flow down the NT5 device stack and completion flows back up, bridging to IOS through IOR-to-IRP translation.
+
 ## Current Status
 
 **Working:**
@@ -146,6 +178,8 @@ The IOR-to-SRB translation layer is implemented with CDB construction for READ(1
 
 VPICD interrupt virtualization code is written but not yet wired into the runtime path (using polling for now).
 
+The NT5 WDM compatibility layer is implemented: ntoskrnl/HAL shim (~50 functions), IRP infrastructure, PnP/Power manager, PCI bus simulation, and WDM-to-IOS bridge. The multi-DLL PE loader resolves imports across ntoskrnl.exe, HAL.dll, and SCSIPORT.SYS simultaneously. This code is written but has not yet been tested with actual NT5 binaries.
+
 **Tested in QEMU only.** The QEMU-specific status register workarounds (master DRDY after reset, slave echo suppression) would not be needed on real hardware and should be conditionally applied.
 
 ## What Would Help
@@ -153,6 +187,8 @@ VPICD interrupt virtualization code is written but not yet wired into the runtim
 The main thing this project needs is **real hardware testing**. Everything has been developed and validated in QEMU. If you have Pentium-class hardware with an IDE CD-ROM drive and would be willing to try this, that would be extremely valuable.
 
 Reports of what works (or does not) on real controllers would help identify where the QEMU-specific workarounds end and where genuine hardware edge cases begin.
+
+If you have a Windows 2000 installation, the NT5 binaries needed for testing are atapi.sys, pciidex.sys, and pciide.sys from the system32\drivers directory.
 
 The source is on GitHub: https://github.com/NellInc/nt5-9x-driver-backport
 

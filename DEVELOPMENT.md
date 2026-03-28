@@ -244,7 +244,69 @@ VxD to IOSUBSYS. When imported, it exposes FAT32 utility functions:
 that needs to read or write the disk image's file system imports this module.
 
 
-## 7. Adding Support for New Miniport Drivers
+## 7. NT5 WDM Development
+
+This section covers the NT5 (Windows 2000/XP) WDM driver loading path, which
+loads native .sys binaries through a shim layer running inside the VxD.
+
+### 7.1 Source Files
+
+| File | Role |
+|------|------|
+| NTKSHIM.C/H | Shim implementations for ntoskrnl.exe and HAL.dll functions. Each shimmed function logs its call, validates parameters, and maps NT semantics onto VxD equivalents where possible. |
+| IRPMGR.C/H | IRP (I/O Request Packet) infrastructure. Allocates, builds, dispatches, and completes IRPs within the VxD environment. |
+| PNPMGR.C/H | Plug and Play manager and Power manager. Synthesizes PnP enumeration events and power state transitions that NT5 drivers expect during initialization. |
+| PCIBUS.C/H | PCI bus simulation. Reads real PCI config space via VxD services and presents it through the NT PCI bus interface structures. |
+| WDMBRIDGE.C/H | WDM to IOS bridge. Translates completed IRPs back into IOS request packets so the rest of the Win9x storage stack sees normal block I/O. |
+| NTKEXPORTS.C | Export table definitions. Maps function name strings to shim function pointers for the multi-DLL PE loader to resolve. |
+| PELOAD.C additions | `pe_load_image_multi()` loads multiple interdependent PE binaries, resolving cross-DLL imports. The stub generator creates logging stubs for any import that has no shim yet. |
+
+### 7.2 Build Workflow
+
+Compile all new .C files with Open Watcom using the same flags as the existing
+VxD source (see `reference/BUILD.TXT`). Link the resulting objects together with
+the existing modules. No separate build step is needed for the NT5 path.
+
+The NT5 code path is activated by calling `wdm_load_nt5_ide_stack()` from the
+VxD's Device_Init handler. This function triggers the multi-DLL PE loader,
+initializes the shim export tables, synthesizes PnP enumeration, and hands
+control to the loaded NT5 driver's DriverEntry.
+
+### 7.3 Adding New ntoskrnl Shim Functions
+
+1. Add the function implementation to NTKSHIM.C. Follow the existing pattern:
+   log entry with the "NTK:" prefix, perform the work, log exit.
+2. Add the prototype to NTKSHIM.H.
+3. Add the name to pointer mapping in the export array in NTKEXPORTS.C.
+4. Rebuild. The multi-DLL PE loader will auto-resolve the new export.
+
+### 7.4 Debugging NT5 Driver Loading
+
+All subsystems use distinct log prefixes for filtering:
+
+| Prefix | Subsystem |
+|--------|-----------|
+| NTK: | ntoskrnl/HAL shim functions |
+| IRP: | IRP allocation, dispatch, completion |
+| PNP: | Plug and Play enumeration and power transitions |
+| WDM: | WDM to IOS bridge operations |
+| PCI: | PCI config space reads and bus scanning |
+
+When the PE loader encounters an import with no matching shim, it generates a
+stub function that logs `NTK: STUB called for <name>` and returns
+STATUS_NOT_IMPLEMENTED. Watch for STUB messages in the debug output to identify
+which functions need real implementations next.
+
+### 7.5 Key Gotcha: DLL Name Case Sensitivity
+
+PELOAD.C's multi-DLL loader performs case-insensitive DLL name matching. This
+is necessary because NT5 binaries may import from "ntoskrnl.exe",
+"NTOSKRNL.EXE", or "NTOSKRNL.exe" depending on which linker produced them.
+No code changes are needed to handle variant casing, but be aware of this when
+reading import tables manually or adding new DLL name entries to NTKEXPORTS.C.
+
+
+## 8. Adding Support for New Miniport Drivers
 
 To wrap a different NT miniport (e.g. a SCSI or NVMe driver):
 
