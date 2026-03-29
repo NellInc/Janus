@@ -16,7 +16,7 @@ NASM_CMD = nasm
 # -i=.         : include path
 # -w4          : max warnings
 # -ze          : enable extensions
-CFLAGS = -bt=windows -3s -s -zl -d0 -i=. -w4 -ze
+CFLAGS = -bt=windows -3s -s -zl -d0 -i=. -w4 -ze -dDEBUG
 
 # NASM flags: OMF output for wlink
 NASMFLAGS = -f obj

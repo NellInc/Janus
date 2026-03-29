@@ -31,6 +31,7 @@ extern void VxD_File_Close(int handle);
 extern void VxD_Debug_Printf(const char *fmt, ...);
 
 /* VxD heap (for file read buffer) */
+extern void  dbg_mark(char c);
 extern PVOID VxD_HeapAllocate(ULONG size, ULONG flags);
 extern void  VxD_HeapFree(PVOID ptr, ULONG flags);
 #define HEAPF_ZEROINIT  0x00000001
@@ -127,7 +128,7 @@ static PVOID            g_nt5_image_base; /* loaded PE image base */
 #define DLL_TABLE_COUNT     4
 
 /* File path for disk-loaded atapi.sys */
-static const char g_atapi_path[] = "C:\\WINDOWS\\SYSTEM\\W2K_ATAPI.SYS";
+static const char g_atapi_path[] = "C:\\WINDOWS\\SYSTEM\\W2K_ATAP.SYS";
 
 /* Max file size we'll try to load (256 KB) */
 #define NT5_MAX_IMAGE_SIZE  (256UL * 1024UL)
@@ -564,11 +565,24 @@ static int nt5_load_file(const char *filename, PVOID *out_data, ULONG *out_size)
     *out_data = NULL;
     *out_size = 0;
 
-    VxD_Debug_Printf("NT5: Opening file: %s\n", filename);
+    VxD_Debug_Printf("NT5: Opening file: ");
+    VxD_Debug_Printf(filename);
+    VxD_Debug_Printf("\n");
+
+    /* Diagnostic: try opening a known file first */
+    {
+        static const char test_path[] = "C:\\MSDOS.SYS";
+        int test_h = VxD_File_Open(test_path);
+        VxD_Debug_Printf("NT5: Test open MSDOS.SYS = ");
+        dbg_mark('0' + (test_h < 0 ? 0 : (test_h > 9 ? 9 : test_h)));
+        if (test_h > 0) VxD_File_Close(test_h);
+    }
 
     handle = VxD_File_Open(filename);
+    VxD_Debug_Printf("NT5: File_Open returned: ");
+    dbg_mark('0' + (handle < 0 ? 0 : (handle > 9 ? 9 : handle)));
     if (handle <= 0) {
-        VxD_Debug_Printf("NT5: Failed to open %s\n", filename);
+        VxD_Debug_Printf("NT5: OPEN FAILED\n");
         return -1;
     }
 
@@ -698,19 +712,9 @@ int nt5_init(BOOLEAN use_primary)
     g_nt5_bridge.TargetId   = 0;
     g_nt5_bridge.Active     = TRUE;
 
-    /* Step 6: Register with IOS as a port driver
-     *
-     * This calls ios_register_port_driver() from IOSBRIDGE.C,
-     * which sets up the DDB, AEP handler, and calldown chain
-     * so IOS routes CD-ROM I/O requests to our bridge. */
-    result = ios_register_port_driver();
-    if (result != 0) {
-        VxD_Debug_Printf("NT5: WARNING: IOS registration failed\n");
-        VxD_Debug_Printf("NT5:   Driver loaded but not connected to IOS.\n");
-        /* Not fatal: the driver is still loaded and can be tested */
-    } else {
-        VxD_Debug_Printf("NT5: IOS port driver registered\n");
-    }
+    /* IOS registration is handled by ios_register_port_driver() in
+     * IOSBRIDGE.C, which is our caller. Do NOT call it here - that
+     * creates infinite recursion (nt5_init -> ios_register -> nt5_init). */
 
     VxD_Debug_Printf("NT5: ======================================\n");
     VxD_Debug_Printf("NT5: atapi.sys loaded and operational\n");
