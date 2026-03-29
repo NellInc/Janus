@@ -18,7 +18,49 @@
 #ifndef _PNPMGR_H_
 #define _PNPMGR_H_
 
+#ifndef NTKSHIM_H
 #include "NTKRNL.H"
+#else
+/* When using NTKSHIM.H path, provide power types that PNPMGR.H
+ * prototypes need. These are defined in NTKRNL.H for the old path. */
+typedef enum _SYSTEM_POWER_STATE {
+    PowerSystemUnspecified = 0,
+    PowerSystemWorking     = 1,
+    PowerSystemSleeping1   = 2,
+    PowerSystemSleeping2   = 3,
+    PowerSystemSleeping3   = 4,
+    PowerSystemHibernate   = 5,
+    PowerSystemShutdown    = 6,
+    PowerSystemMaximum     = 7
+} SYSTEM_POWER_STATE, *PSYSTEM_POWER_STATE;
+
+typedef enum _DEVICE_POWER_STATE {
+    PowerDeviceUnspecified = 0,
+    PowerDeviceD0          = 1,
+    PowerDeviceD1          = 2,
+    PowerDeviceD2          = 3,
+    PowerDeviceD3          = 4,
+    PowerDeviceMaximum     = 5
+} DEVICE_POWER_STATE, *PDEVICE_POWER_STATE;
+
+typedef union _POWER_STATE {
+    SYSTEM_POWER_STATE  SystemState;
+    DEVICE_POWER_STATE  DeviceState;
+} POWER_STATE, *PPOWER_STATE;
+
+typedef enum _POWER_STATE_TYPE {
+    SystemPowerState = 0,
+    DevicePowerState = 1
+} POWER_STATE_TYPE, *PPOWER_STATE_TYPE;
+
+typedef VOID (NTAPI *PREQUEST_POWER_COMPLETE)(
+    PDEVICE_OBJECT DeviceObject,
+    UCHAR MinorFunction,
+    POWER_STATE PowerState,
+    PVOID Context,
+    PIO_STATUS_BLOCK IoStatus
+);
+#endif
 #include "IRPMGR.H"
 
 /* ================================================================

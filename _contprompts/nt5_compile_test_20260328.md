@@ -1,8 +1,9 @@
 ---
 topic: NT5 compile and integration testing
 date: 2026-03-28
-status: NOT_STARTED
-stepsCompleted: 0
+status: IN_PROGRESS
+stepsCompleted: 5
+nextStep: 6 (Debug DriverEntry failures - WPE during init)
 ---
 
 # NT5 WDM Driver: Compile, Debug, and Integration Testing

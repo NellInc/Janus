@@ -34,6 +34,15 @@
 /* Packing for structures that must match NT binary layout */
 #pragma pack(push, 1)
 
+/*
+ * When NTKSHIM.H is already included, the primitive NT types
+ * (UCHAR..ACCESS_MASK) and shared kernel structures (LARGE_INTEGER,
+ * UNICODE_STRING, IO_STATUS_BLOCK, LIST_ENTRY, KEVENT, KDPC, KTIMER,
+ * KDEVICE_QUEUE, MDL, etc.) are already defined. Skip to the unique
+ * types that only NTKRNL.H provides.
+ */
+#ifndef NTKSHIM_H  /* {{{ skip if NT5 shim headers present */
+
 /* ================================================================
  * PRIMITIVE TYPES
  * ================================================================ */
@@ -368,6 +377,8 @@ typedef struct _MDL {
     ULONG           ByteCount;
     ULONG           ByteOffset;
 } MDL, *PMDL;
+
+#endif /* }}} !NTKSHIM_H -- end of shared type definitions */
 
 #define MDL_MAPPED_TO_SYSTEM_VA     0x0001
 #define MDL_PAGES_LOCKED            0x0002

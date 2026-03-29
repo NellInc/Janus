@@ -36,8 +36,20 @@
 #include "W9XDDK.H"
 #include "PORTIO.H"
 #include "NTKSHIM.H"
+#include "IRPMGR.H"
 #include "PCIBUS.H"
 #include "WDMBRIDGE.H"
+
+/* Status codes not in NTKSHIM.H (they are in NTKRNL.H) */
+#ifndef STATUS_NOT_SUPPORTED
+#define STATUS_NOT_SUPPORTED            ((NTSTATUS)0xC00000BBL)
+#endif
+#ifndef STATUS_MORE_PROCESSING_REQUIRED
+#define STATUS_MORE_PROCESSING_REQUIRED ((NTSTATUS)0xC0000016L)
+#endif
+
+/* IofCallDriver is the fastcall alias for IoCallDriver */
+#define IofCallDriver IrpMgr_IoCallDriver
 
 /* ================================================================
  * NT5 SCSI Structures (needed for IRP_MJ_SCSI dispatch)

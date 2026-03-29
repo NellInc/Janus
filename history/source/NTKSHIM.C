@@ -2581,3 +2581,127 @@ KIRQL NTAPI KeGetCurrentIrql(void)
      */
     return g_CurrentIrql;
 }
+
+
+/* ================================================================
+ * EXPORTED VARIABLE: KeQueryTimeIncrement
+ *
+ * On NT this returns the number of 100ns units per clock tick.
+ * Default is 10ms = 100,000 units of 100ns.
+ * ================================================================ */
+
+ULONG ntk_KeQueryTimeIncrement = 100000; /* 10ms in 100ns units */
+
+
+/* ================================================================
+ * HAL: HalGetInterruptVector
+ *
+ * On x86 ISA/PCI, the interrupt vector is typically the IRQ
+ * number plus a base offset. For legacy IDE (IRQ 14/15), the
+ * vector mapping is identity on our shim. We return the
+ * BusInterruptVector unchanged and set IRQL to DIRQL.
+ * ================================================================ */
+
+ULONG NTAPI ntk_HalGetInterruptVector(
+    ULONG InterfaceType, ULONG BusNumber, ULONG BusInterruptLevel,
+    ULONG BusInterruptVector, PKIRQL Irql, PULONG Affinity)
+{
+    (void)InterfaceType;
+    (void)BusNumber;
+    (void)BusInterruptLevel;
+
+    if (Irql) {
+        *Irql = DIRQL;
+    }
+    if (Affinity) {
+        *Affinity = 1;  /* single CPU */
+    }
+    return BusInterruptVector;
+}
+
+
+/* ================================================================
+ * HAL: Kf* (fast IRQL/spinlock) stubs
+ *
+ * On NT these are FASTCALL. In our single-CPU VxD they are cdecl
+ * wrappers around cli/sti and the notional IRQL variable.
+ * ================================================================ */
+
+KIRQL __cdecl ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
+{
+    KIRQL oldIrql;
+    ULONG flags;
+
+    PORT_SAVE_FLAGS_CLI(flags);
+    oldIrql = g_CurrentIrql;
+    g_CurrentIrql = DISPATCH_LEVEL;
+
+    if (SpinLock) {
+        *SpinLock = flags;
+    }
+    return oldIrql;
+}
+
+VOID __cdecl ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql)
+{
+    ULONG flags = 0;
+
+    if (SpinLock) {
+        flags = *SpinLock;
+    }
+    g_CurrentIrql = OldIrql;
+    PORT_RESTORE_FLAGS(flags);
+}
+
+KIRQL __cdecl ntk_KfRaiseIrql(KIRQL NewIrql)
+{
+    KIRQL old = g_CurrentIrql;
+    if (NewIrql > g_CurrentIrql) {
+        g_CurrentIrql = NewIrql;
+    }
+    return old;
+}
+
+VOID __cdecl ntk_KfLowerIrql(KIRQL NewIrql)
+{
+    g_CurrentIrql = NewIrql;
+}
+
+
+/* ================================================================
+ * HAL: KeStallExecutionProcessor
+ *
+ * Busy-wait for the specified number of microseconds using port
+ * 0x80 reads (~1us each on ISA bus). Same technique as the
+ * PORT_STALL_ONE macro from PORTIO.H.
+ * ================================================================ */
+
+VOID NTAPI ntk_KeStallExecutionProcessor(ULONG Microseconds)
+{
+    ULONG i;
+    for (i = 0; i < Microseconds; i++) {
+        PORT_STALL_ONE();
+    }
+}
+
+
+/* ================================================================
+ * HAL: Buffer port I/O (USHORT)
+ *
+ * READ_PORT_BUFFER_USHORT / WRITE_PORT_BUFFER_USHORT use REP
+ * INSW/OUTSW via the PORTIO.H macros for efficient PIO transfers.
+ * ================================================================ */
+
+VOID NTAPI ntk_READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer,
+                                        ULONG Count)
+{
+    PORT_READ_BUFFER_USHORT((unsigned short)(unsigned long)Port,
+                            Buffer, Count);
+}
+
+VOID NTAPI ntk_WRITE_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer,
+                                          ULONG Count)
+{
+    PORT_WRITE_BUFFER_USHORT((unsigned short)(unsigned long)Port,
+                             Buffer, Count);
+}

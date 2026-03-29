@@ -1,0 +1,25 @@
+format windows vxd dynamic
+name NT5RAW.VXD
+file vxdwrap_nasm.obj
+file NTKSHIM.obj
+file NTKEXPORTS.obj
+file IRPMGR.obj
+file PNPMGR.obj
+file PCIBUS.obj
+file WDMBRIDGE.obj
+file NT5LOADER.obj
+file PELOAD.obj
+file IOSBRIDGE.obj
+file IRQHOOK.obj
+export NTMINI_DDB
+option quiet
+order
+    clname LCODE
+        segment _LTEXT
+        segment _LDATA
+        segment _TEXT
+        segment _DATA
+        segment _BSS
+        segment CONST
+        segment CONST2
+        segment _TLS

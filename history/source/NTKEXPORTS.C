@@ -25,105 +25,36 @@
 #include "IRPMGR.H"
 #include "PNPMGR.H"
 #include "PCIBUS.H"
-#include "NTKRNL.H"    /* IMPORT_FUNC_ENTRY typedef */
+/* IMPORT_FUNC_ENTRY - also defined in NTKRNL.H and PELOAD.C.
+ * We define it locally to avoid pulling in NTKRNL.H which has
+ * type conflicts with NTKSHIM.H (LARGE_INTEGER, UNICODE_STRING, etc.) */
+typedef struct {
+    const char *name;
+    void       *func;
+} IMPORT_FUNC_ENTRY;
 
 /* ================================================================
  * EXTERN DECLARATIONS
  *
- * Functions implemented in other modules (NTKSHIM, IRPMGR, PNPMGR)
- * that are not prototyped in included headers, or that need stub
- * implementations to be added later. Cast to (PVOID) in the tables
- * to avoid type mismatch warnings.
+ * Most functions are already prototyped by the included headers
+ * (NTKSHIM.H, IRPMGR.H, PNPMGR.H). Only items NOT in those
+ * headers are declared here.
  * ================================================================ */
 
-/*
- * Stub functions not yet implemented in any module.
- * These are declared here so the export table compiles.
- * Each should be implemented as a proper stub or full
- * function before the driver is actually loaded.
- */
-extern NTSTATUS NTAPI ntk_IoBuildDeviceIoControlRequest(
-    ULONG, PDEVICE_OBJECT, PVOID, ULONG, PVOID, ULONG,
-    BOOLEAN, PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_IoConnectInterrupt(
-    PVOID, PVOID, PVOID, PVOID, ULONG, UCHAR, UCHAR,
-    ULONG, BOOLEAN, ULONG, BOOLEAN);
-extern PCONFIGURATION_INFORMATION NTAPI ntk_IoGetConfigurationInformation(void);
-extern NTSTATUS NTAPI ntk_IoCreateSymbolicLink(PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_IoDeleteSymbolicLink(PVOID);
-extern VOID    NTAPI ntk_MmUnmapIoSpace(PVOID, ULONG);
-extern VOID    NTAPI ntk_IoQueueWorkItem(PVOID, PVOID, ULONG, PVOID);
-extern PVOID   NTAPI ntk_IoAllocateWorkItem(PVOID);
-extern VOID    NTAPI ntk_IoFreeWorkItem(PVOID);
-extern NTSTATUS NTAPI ntk_ObReferenceObjectByPointer(PVOID, ULONG, PVOID, ULONG);
-extern VOID    NTAPI ntk_RtlAnsiStringToUnicodeString(PVOID, PVOID, BOOLEAN);
-extern VOID    NTAPI ntk_RtlInitAnsiString(PVOID, PVOID);
-extern LONG    NTAPI ntk_InterlockedDecrement(LONG *);
-extern VOID    NTAPI ntk_IoDisconnectInterrupt(PVOID);
-extern LONG    NTAPI ntk_RtlCompareUnicodeString(PVOID, PVOID, BOOLEAN);
-extern VOID    NTAPI ntk_IoInvalidateDeviceRelations(PVOID, ULONG);
-extern NTSTATUS NTAPI ntk_IoReportDetectedDevice(
-    PVOID, ULONG, ULONG, ULONG, PVOID, PVOID, BOOLEAN, PVOID);
-extern LONG    NTAPI ntk_InterlockedIncrement(LONG *);
-extern PVOID   NTAPI ntk_MmMapIoSpace(PHYSICAL_ADDRESS, ULONG, ULONG);
-extern VOID    __cdecl ntk_ObfDereferenceObject(PVOID);
-extern VOID    NTAPI ntk_IoInvalidateDeviceState(PVOID);
-extern int     __cdecl ntk_sprintf(char *, const char *, ...);
-extern ULONG   NTAPI ntk_RtlxAnsiStringToUnicodeSize(PVOID);
-extern BOOLEAN NTAPI ntk_KeInsertByKeyDeviceQueue(PVOID, PVOID, ULONG);
-extern PVOID   NTAPI ntk_PoRegisterDeviceForIdleDetection(PVOID, ULONG, ULONG, ULONG);
-extern LONG    NTAPI ntk_InterlockedExchange(LONG *, LONG);
-extern PVOID   NTAPI ntk_MmMapLockedPagesSpecifyCache(PVOID, ULONG, ULONG, PVOID, ULONG, ULONG);
-extern NTSTATUS NTAPI ntk_ObReferenceObjectByHandle(PVOID, ULONG, PVOID, ULONG, PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_ZwCreateDirectoryObject(PVOID, ULONG, PVOID);
-extern PVOID   NTAPI ntk_IoBuildSynchronousFsdRequest(ULONG, PVOID, PVOID, ULONG, PVOID, PVOID, PVOID);
-extern VOID    NTAPI ntk_RtlCopyUnicodeString(PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_IoAllocateDriverObjectExtension(PVOID, PVOID, ULONG, PVOID);
-extern NTSTATUS NTAPI ntk_IoReportResourceForDetection(PVOID, PVOID, ULONG, PVOID, PVOID, ULONG, PVOID);
-extern VOID   *__cdecl ntk_memmove(void *, const void *, ULONG);
-extern VOID    NTAPI ntk_RtlFreeUnicodeString(PVOID);
-extern VOID    NTAPI ntk_IoStartTimer(PVOID);
-extern VOID    NTAPI ntk_ZwCreateKey(PVOID, ULONG, PVOID, ULONG, PVOID, ULONG, PVOID);
-extern VOID    NTAPI ntk_RtlAppendUnicodeStringToString(PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_RtlIntegerToUnicodeString(ULONG, ULONG, PVOID);
-extern VOID    NTAPI ntk_IoStartPacket(PVOID, PVOID, PVOID, PVOID);
-extern BOOLEAN NTAPI ntk_KeSynchronizeExecution(PVOID, PVOID, PVOID);
-extern VOID    NTAPI ntk_IoStartNextPacket(PVOID, BOOLEAN);
-extern PVOID   NTAPI ntk_IoBuildAsynchronousFsdRequest(ULONG, PVOID, PVOID, ULONG, PVOID, PVOID);
-extern VOID    NTAPI ntk_IoFreeMdl(PVOID);
-extern VOID    NTAPI ntk_MmUnlockPages(PVOID);
-extern PVOID   NTAPI ntk_KeRemoveByKeyDeviceQueue(PVOID, ULONG);
-extern PVOID   NTAPI ntk_MmBuildMdlForNonPagedPool(PVOID);
-extern PVOID   NTAPI ntk_IoAllocateMdl(PVOID, ULONG, BOOLEAN, BOOLEAN, PVOID);
-extern PVOID   NTAPI ntk_KeRemoveDeviceQueue(PVOID);
-extern NTSTATUS NTAPI ntk_IoOpenDeviceRegistryKey(PVOID, ULONG, ULONG, PVOID);
-extern NTSTATUS NTAPI ntk_RtlWriteRegistryValue(ULONG, PVOID, PVOID, ULONG, PVOID, ULONG);
-extern long long __cdecl ntk_aulldiv(long long, long long);
-extern long long __cdecl ntk_allmul(long long, long long);
-extern long long __cdecl ntk_alldiv(long long, long long);
-extern int     __cdecl ntk_except_handler3(PVOID, PVOID, PVOID, PVOID);
-extern PVOID   NTAPI ntk_MmLockPagableDataSection(PVOID);
-extern VOID    NTAPI ntk_MmUnlockPagableImageSection(PVOID);
-extern BOOLEAN NTAPI ntk_RtlPrefixUnicodeString(PVOID, PVOID, BOOLEAN);
-extern NTSTATUS NTAPI ntk_IoWMIRegistrationControl(PVOID, ULONG);
-extern int     __cdecl ntk_swprintf(PVOID, PVOID, ...);
-extern VOID    NTAPI ntk_RtlInitUnicodeString(PVOID, PVOID);
-extern PVOID   NTAPI ntk_IoGetDriverObjectExtension(PVOID, PVOID);
-extern VOID    NTAPI ntk_IoInitializeTimer(PVOID, PVOID, PVOID);
-extern NTSTATUS NTAPI ntk_RtlQueryRegistryValues(ULONG, PVOID, PVOID, PVOID, PVOID);
-extern char   *__cdecl ntk_strstr(const char *, const char *);
-extern char   *__cdecl ntk_strupr(char *);
-
-/* Globals that W2K atapi.sys imports */
-extern ULONG  ntk_KeTickCount;
+/* Global variable not in NTKSHIM.H */
 extern ULONG  ntk_KeQueryTimeIncrement;
-extern ULONG  ntk_NlsMbCodePageTag;
-extern ULONG  ntk_InitSafeBootMode;
-extern PVOID  ntk_MmHighestUserAddress;
 
-/* WMI functions (WMILIB.SYS) */
-extern NTSTATUS NTAPI ntk_WmiCompleteRequest(PVOID, PVOID, NTSTATUS, ULONG, UCHAR);
-extern NTSTATUS NTAPI ntk_WmiSystemControl(PVOID, PVOID, PVOID, PVOID);
+/* HAL functions used in the export table but not in NTKSHIM.H */
+extern ULONG  NTAPI ntk_HalGetInterruptVector(
+    ULONG InterfaceType, ULONG BusNumber, ULONG BusInterruptLevel,
+    ULONG BusInterruptVector, PKIRQL Irql, PULONG Affinity);
+extern KIRQL __cdecl ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock);
+extern VOID  __cdecl ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql);
+extern KIRQL __cdecl ntk_KfRaiseIrql(KIRQL NewIrql);
+extern VOID  __cdecl ntk_KfLowerIrql(KIRQL NewIrql);
+extern VOID  NTAPI ntk_KeStallExecutionProcessor(ULONG Microseconds);
+extern VOID  NTAPI ntk_READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count);
+extern VOID  NTAPI ntk_WRITE_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count);
 
 /* ================================================================
  * ntoskrnl.exe EXPORT TABLE
@@ -404,8 +335,14 @@ static const IMPORT_FUNC_ENTRY wmilib_exports[] = {
  * the table here once the sp_* functions are factored out.
  * ================================================================ */
 
-/* Forward declaration: defined in NTMINI_V5.C */
-extern const IMPORT_FUNC_ENTRY scsiport_funcs[];
+/*
+ * Stub table: NTMINI_V5.C (which defined the real scsiport_funcs[])
+ * has been removed from the build. Provide an empty stub so the
+ * master DLL table links. ScsiPort resolution will simply find
+ * no matching functions, which is correct until we re-add SCSI
+ * miniport support.
+ */
+const IMPORT_FUNC_ENTRY scsiport_funcs[] = { {NULL, NULL} };
 
 /* ================================================================
  * EXPORT COUNT MACROS
@@ -445,7 +382,7 @@ typedef struct _DLL_EXPORT_TABLE {
     ULONG                    func_count;
 } DLL_EXPORT_TABLE;
 
-static const DLL_EXPORT_TABLE g_dll_tables[] = {
+const DLL_EXPORT_TABLE g_dll_tables[] = {
     { "ntoskrnl.exe",   ntoskrnl_exports,   NTOSKRNL_EXPORT_COUNT },
     { "HAL.dll",        hal_exports,        HAL_EXPORT_COUNT },
     { "WMILIB.SYS",    wmilib_exports,     WMILIB_EXPORT_COUNT },
