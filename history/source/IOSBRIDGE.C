@@ -314,16 +314,21 @@ static void complete_ior(PIOR ior, USHORT status);
 /* NT5 loader entry point (from NT5LOADER.C) */
 extern int nt5_init(int use_primary);
 
+extern void dbg_mark(char c);
+
 int ios_register_port_driver(void)
 {
     ULONG result;
 
+    dbg_mark('C');  /* breadcrumb: entered C function */
     DBGPRINT("NTMINI: ios_register_port_driver()\n");
 
     /* Initialize NT5 WDM driver stack (load W2K atapi.sys).
      * This must happen before IOS registration so the bridge
      * knows what devices exist when IOS sends AEP events. */
+    dbg_mark('D');  /* breadcrumb: about to call nt5_init */
     result = nt5_init(1);  /* 1 = primary IDE channel */
+    dbg_mark('E');  /* breadcrumb: returned from nt5_init */
     if (result != 0) {
         DBGPRINT("NTMINI: NT5 init failed (%d), continuing with IOS anyway\n",
                  (int)result);

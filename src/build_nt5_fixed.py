@@ -152,7 +152,10 @@ for pg in range(num_pages):
 
             new_target = obj_offsets[obj_num - 1] + target
 
-            page_fixups.append(0x07)   # src_type: 32-bit offset
+            # Preserve original src_type: 0x07 = 32-bit offset,
+            # 0x08 = 32-bit self-relative (for CALL/JMP rel32).
+            # Using 0x07 for self-relative fixups corrupts all cross-object calls.
+            page_fixups.append(src_type & 0x0F)  # preserve src_type, clear flags
             if new_target <= 0xFFFF:
                 page_fixups.append(0x00)   # internal, 16-bit target
                 page_fixups.extend(struct.pack('<H', src_offset))

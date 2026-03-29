@@ -23,10 +23,12 @@
 %define VMM_HeapAllocate        0x00010256
 %define VMM_HeapFree            0x00010257
 %define VMM_Out_Debug_String    0x0001001D
-%define VMM_R0_OpenCreateFile   0x000102DE
-%define VMM_R0_ReadFile         0x000102E1
-%define VMM_R0_CloseFile        0x000102E0
-%define VMM_R0_GetFileSize      0x000102DF
+; VMM R0 file I/O services DON'T EXIST in Win98 SE (ordinals 0x02DE-0x02E1).
+; Use IFSMgr Ring0_FileIO instead (cdecl, stack-based).
+%define IFSMgr_Ring0_FileIO     0x00400032
+%define R0_OPENCREATFILE        0xD500
+%define R0_READFILE             0xD600
+%define R0_CLOSEFILE            0xD700
 %define VMM_Set_Global_Time_Out 0x0001003C
 %define VMM_Cancel_Time_Out     0x0001003D
 %define VMM__RegOpenKey         0x00010100
@@ -104,16 +106,21 @@ NTMINI_Control:
     mov     al, 0x0A
     out     0xE9, al
     pop     eax
-    cmp     eax, Device_Init
+    ; Only init at Init_Complete (filesystem ready for Ring0_FileIO)
+    ; or Sys_Dynamic_Device_Init (hot-load). Return success for earlier messages.
+    cmp     eax, Init_Complete
     je      .do_init
     cmp     eax, Sys_Dynamic_Device_Init
     je      .do_init
     cmp     eax, Sys_Dynamic_Device_Exit
     je      .do_exit
-    cmp     eax, Init_Complete
-    je      .do_init
+    cmp     eax, Device_Init
+    je      .do_early_ok
     cmp     eax, Sys_Critical_Init
-    je      .do_init
+    je      .do_early_ok
+    clc
+    ret
+.do_early_ok:
     clc
     ret
 
@@ -150,14 +157,32 @@ ntmini_init:
     mov     ebp, esp
     push    esi
 
-    ; Print init banner
+    ; Print init banner via port 0xE9 (Out_Debug_String ordinal 0x1D is wrong
+    ; on retail VMM - it maps to Map_Lin_To_VM_Addr, causing WPE)
     mov     esi, _szInitBanner
-    int     0x20
-    dd      VMM_Out_Debug_String
+.init_banner_loop:
+    lodsb
+    test    al, al
+    jz      .init_banner_done
+    out     0xE9, al
+    jmp     .init_banner_loop
+.init_banner_done:
+
+    ; Breadcrumb A: about to call ios_register_port_driver
+    mov     al, 'A'
+    out     0xE9, al
+    mov     al, 10
+    out     0xE9, al
 
     ; Call IOS bridge registration
     call    ios_register_port_driver
     ; EAX = 0 on success
+
+    ; Breadcrumb B: returned from ios_register_port_driver
+    mov     al, 'B'
+    out     0xE9, al
+    mov     al, 10
+    out     0xE9, al
 
     pop     esi
     pop     ebp
@@ -484,11 +509,23 @@ _VxD_Debug_Printf:
     out     0xE9, al
     jmp     .dbg_loop
 .dbg_done:
-    ; Also try Out_Debug_String (works on debug VMM only)
-    mov     esi, [ebp+8]
-    int     0x20
-    dd      VMM_Out_Debug_String
+    ; Out_Debug_String removed - ordinal 0x1D is Map_Lin_To_VM_Addr on
+    ; retail VMM, not Out_Debug_String. Port 0xE9 output above is sufficient.
     pop     esi
+    pop     ebp
+    ret
+
+;--- Debug marker (callable from C: void dbg_mark(char c)) -----------------
+global dbg_mark
+global _dbg_mark
+dbg_mark:
+_dbg_mark:
+    push    ebp
+    mov     ebp, esp
+    mov     eax, [ebp+8]       ; char argument
+    out     0xE9, al
+    mov     al, 10              ; newline
+    out     0xE9, al
     pop     ebp
     ret
 
@@ -496,6 +533,8 @@ _VxD_Debug_Printf:
 
 global VxD_File_Open
 global _VxD_File_Open
+; File I/O via IFSMgr_Ring0_FileIO (cdecl, stack-based)
+; Matches working V4 implementation (VXDWRAP_V4.ASM)
 VxD_File_Open:
 _VxD_File_Open:
     push    ebp
@@ -503,25 +542,26 @@ _VxD_File_Open:
     push    ebx
     push    esi
     push    edi
-    mov     esi, [ebp+8]
-    mov     eax, R0_OPEN_ACCESS_READONLY | R0_OPEN_SHARE_DENYWRITE
-    xor     ecx, ecx
-    mov     edx, R0_OPEN_FLAGS_EXISTING | R0_NO_CACHE
-    xor     ebx, ebx
+
+    ; cdecl: push params right-to-left
+    push    dword 0                         ; pAction (NULL)
+    push    dword 0                         ; attr (normal)
+    push    dword 1                         ; action: open existing only
+    push    dword R0_OPEN_ACCESS_READONLY | R0_OPEN_SHARE_DENYWRITE | R0_NO_CACHE
+    push    dword [ebp+8]                   ; pFilename
+    push    dword R0_OPENCREATFILE          ; function code
     int     0x20
-    dd      VMM_R0_OpenCreateFile
-    jnc     .fo_ok
-    xor     eax, eax
+    dd      IFSMgr_Ring0_FileIO
+    add     esp, 24                         ; clean 6 params
+
+    ; EAX = file handle (>0) on success
+    test    eax, eax
+    jz      .fo_fail
+    cmp     eax, 0
+    jl      .fo_fail
     jmp     short .fo_done
-.fo_ok:
-    mov     edi, [ebp+12]
-    test    edi, edi
-    jz      .fo_done
-    push    eax
-    int     0x20
-    dd      VMM_R0_GetFileSize
-    mov     [edi], eax
-    pop     eax
+.fo_fail:
+    mov     eax, -1
 .fo_done:
     pop     edi
     pop     esi
@@ -531,6 +571,7 @@ _VxD_File_Open:
 
 global VxD_File_Read
 global _VxD_File_Read
+; int VxD_File_Read(int handle, void *buffer, int count)
 VxD_File_Read:
 _VxD_File_Read:
     push    ebp
@@ -538,17 +579,27 @@ _VxD_File_Read:
     push    ebx
     push    esi
     push    edi
-    mov     eax, [ebp+8]
-    mov     esi, [ebp+12]
-    mov     ecx, [ebp+16]
-    mov     edx, 0xFFFFFFFF
+
+    ; cdecl: IFSMgr_Ring0_FileIO(R0_READFILE, pBuffer, hFile, count, position)
+    push    dword 0xFFFFFFFF                ; position (current)
+    push    dword [ebp+16]                  ; count
+    push    dword [ebp+8]                   ; hFile
+    push    dword [ebp+12]                  ; pBuffer
+    push    dword R0_READFILE               ; function code
     int     0x20
-    dd      VMM_R0_ReadFile
-    jnc     .fr_ok
-    xor     eax, eax
-    jmp     short .fr_done
-.fr_ok:
+    dd      IFSMgr_Ring0_FileIO
+    add     esp, 20                         ; clean 5 params
+
+    jc      .fr_fail
+    ; EAX = bytes read (or try ECX if EAX is 0)
+    test    eax, eax
+    jnz     .fr_done
     mov     eax, ecx
+    cmp     eax, 0
+    jl      .fr_fail
+    jmp     short .fr_done
+.fr_fail:
+    xor     eax, eax
 .fr_done:
     pop     edi
     pop     esi
@@ -558,14 +609,19 @@ _VxD_File_Read:
 
 global VxD_File_Close
 global _VxD_File_Close
+; void VxD_File_Close(int handle)
 VxD_File_Close:
 _VxD_File_Close:
     push    ebp
     mov     ebp, esp
     push    ebx
-    mov     eax, [ebp+8]
+
+    push    dword [ebp+8]                   ; hFile
+    push    dword R0_CLOSEFILE              ; function code
     int     0x20
-    dd      VMM_R0_CloseFile
+    dd      IFSMgr_Ring0_FileIO
+    add     esp, 8                          ; clean 2 params
+
     pop     ebx
     pop     ebp
     ret

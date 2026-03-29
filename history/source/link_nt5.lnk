@@ -13,6 +13,7 @@ file IOSBRIDGE.obj
 file IRQHOOK.obj
 export NTMINI_DDB
 option quiet
+option map=NT5RAW.MAP
 order
     clname LCODE
         segment _LTEXT
