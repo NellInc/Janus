@@ -16,6 +16,7 @@
 #include "W9XDDK.H"
 #include "PORTIO.H"
 #include "NTKSHIM.H"
+#include "IRPMGR.H"
 #include "PCIBUS.H"
 
 /* ================================================================

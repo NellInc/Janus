@@ -21,7 +21,303 @@
 #ifndef _IRPMGR_H_
 #define _IRPMGR_H_
 
+/* NT5 path: types come from NTKSHIM.H. Old NTKRNL.C path: from NTKRNL.H. */
+#ifndef NTKSHIM_H
 #include "NTKRNL.H"
+#else
+/* When using NTKSHIM.H path, provide the full struct definitions
+ * that NTKRNL.H would normally supply. These must match the NTKRNL.H
+ * layout exactly (field offsets matter for NT driver binary compat). */
+
+/* SHORT is in NTKRNL.H but not NTKSHIM.H */
+#ifndef _NTK_SHORT_DEFINED
+#define _NTK_SHORT_DEFINED
+typedef short SHORT;
+#endif
+
+/* IO_STACK_LOCATION forward + pointer typedef */
+struct _IO_STACK_LOCATION;
+typedef struct _IO_STACK_LOCATION IO_STACK_LOCATION, *PIO_STACK_LOCATION;
+
+/* IO completion routine callback */
+typedef NTSTATUS (NTAPI *PIO_COMPLETION_ROUTINE)(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp,
+    PVOID Context
+);
+
+/* IRP dispatch, StartIo, AddDevice, Unload, Timer */
+typedef NTSTATUS (NTAPI *PDRIVER_DISPATCH)(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+);
+typedef VOID (NTAPI *PDRIVER_STARTIO)(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp
+);
+typedef NTSTATUS (NTAPI *PDRIVER_ADD_DEVICE)(
+    PDRIVER_OBJECT DriverObject,
+    PDEVICE_OBJECT PhysicalDeviceObject
+);
+typedef VOID (NTAPI *PDRIVER_UNLOAD)(
+    PDRIVER_OBJECT DriverObject
+);
+
+/* IRP major function max */
+#ifndef IRP_MJ_MAXIMUM_FUNCTION
+#define IRP_MJ_MAXIMUM_FUNCTION 0x1B
+#endif
+#define IRP_MJ_MAXIMUM  (IRP_MJ_MAXIMUM_FUNCTION + 1)
+
+/* FILE_DEVICE codes */
+#ifndef FILE_DEVICE_CONTROLLER
+#define FILE_DEVICE_CONTROLLER  0x00000004
+#endif
+#ifndef FILE_DEVICE_DISK
+#define FILE_DEVICE_DISK        0x00000007
+#endif
+
+/* DO_xxx flags */
+#ifndef DO_BUFFERED_IO
+#define DO_BUFFERED_IO          0x00000004
+#define DO_DIRECT_IO            0x00000010
+#define DO_DEVICE_INITIALIZING  0x00000080
+#define DO_POWER_PAGABLE        0x00002000
+#endif
+
+/* DRIVER_EXTENSION */
+typedef struct _DRIVER_EXTENSION {
+    PDRIVER_OBJECT      DriverObject;
+    PDRIVER_ADD_DEVICE  AddDevice;
+    ULONG               Count;
+    UNICODE_STRING      ServiceKeyName;
+    PVOID               ClientDriverExtension;
+    PVOID               ClientIdentifier;
+} DRIVER_EXTENSION, *PDRIVER_EXTENSION;
+
+/* DRIVER_OBJECT */
+struct _DRIVER_OBJECT {
+    SHORT               Type;
+    SHORT               Size;
+    PDEVICE_OBJECT      DeviceObject;
+    ULONG               Flags;
+    PVOID               DriverStart;
+    ULONG               DriverSize;
+    PVOID               DriverSection;
+    PDRIVER_EXTENSION    DriverExtension;
+    UNICODE_STRING      DriverName;
+    PUNICODE_STRING     HardwareDatabase;
+    PVOID               FastIoDispatch;
+    PVOID               DriverInit;
+    PDRIVER_STARTIO     DriverStartIo;
+    PDRIVER_UNLOAD      DriverUnload;
+    PDRIVER_DISPATCH    MajorFunction[IRP_MJ_MAXIMUM];
+};
+
+/* DEVICE_OBJECT */
+struct _DEVICE_OBJECT {
+    SHORT               Type;
+    USHORT              Size;
+    LONG                ReferenceCount;
+    PDRIVER_OBJECT      DriverObject;
+    PDEVICE_OBJECT      NextDevice;
+    PDEVICE_OBJECT      AttachedDevice;
+    PIRP                CurrentIrp;
+    PVOID               Timer;
+    ULONG               Flags;
+    ULONG               Characteristics;
+    PVOID               Vpb;
+    PVOID               DeviceExtension;
+    ULONG               DeviceType;
+    CHAR                StackSize;
+    union {
+        LIST_ENTRY          ListEntry;
+        PVOID               Wcb;
+    } Queue;
+    ULONG               AlignmentRequirement;
+    KDEVICE_QUEUE       DeviceQueue;
+    KDPC                Dpc;
+    ULONG               ActiveThreadCount;
+    PVOID               SecurityDescriptor;
+    KEVENT              DeviceLock;
+    USHORT              SectorSize;
+    USHORT              Spare1;
+    PVOID               DeviceObjectExtension;
+    PVOID               Reserved;
+    PDEVICE_OBJECT      ShimLowerDevice;
+    PIO_TIMER_ROUTINE   ShimTimerRoutine;
+    PVOID               ShimTimerContext;
+    ULONG               ShimTimerHandle;
+    BOOLEAN             ShimTimerActive;
+};
+
+/* FILE_OBJECT (simplified) */
+struct _FILE_OBJECT {
+    SHORT               Type;
+    SHORT               Size;
+    PDEVICE_OBJECT      DeviceObject;
+    UNICODE_STRING      FileName;
+    LARGE_INTEGER       CurrentByteOffset;
+    ULONG               Flags;
+};
+
+/* IRP_SIZE macro */
+#define IRP_SIZE(StackSize) \
+    ((USHORT)(sizeof(IRP) + ((StackSize) * sizeof(IO_STACK_LOCATION))))
+
+/* IRP structure */
+struct _IRP {
+    SHORT               Type;
+    USHORT              Size;
+    PMDL                MdlAddress;
+    ULONG               Flags;
+    union {
+        struct _IRP    *MasterIrp;
+        PVOID           SystemBuffer;
+    } AssociatedIrp;
+    IO_STATUS_BLOCK     IoStatus;
+    CHAR                RequestorMode;
+    BOOLEAN             PendingReturned;
+    CHAR                StackCount;
+    CHAR                CurrentLocation;
+    BOOLEAN             Cancel;
+    KIRQL               CancelIrql;
+    PVOID               CancelRoutine;
+    PVOID               UserBuffer;
+    union {
+        struct {
+            union {
+                KDEVICE_QUEUE_ENTRY DeviceQueueEntry;
+                struct {
+                    PVOID DriverContext[4];
+                };
+            };
+            PVOID       Thread;
+            LIST_ENTRY  ListEntry;
+        } Overlay;
+    } Tail;
+    /* Shim: pointer to base of stack locations */
+    PIO_STACK_LOCATION  CurrentStackLocation;
+};
+
+/* IO_STACK_LOCATION */
+struct _IO_STACK_LOCATION {
+    UCHAR               MajorFunction;
+    UCHAR               MinorFunction;
+    UCHAR               Flags;
+    UCHAR               Control;
+    union {
+        struct {
+            PVOID SecurityContext;
+            ULONG Options;
+            USHORT FileAttributes;
+            USHORT ShareAccess;
+            ULONG EaLength;
+        } Create;
+        struct {
+            ULONG Length;
+            ULONG Key;
+            LARGE_INTEGER ByteOffset;
+        } Read;
+        struct {
+            ULONG Length;
+            ULONG Key;
+            LARGE_INTEGER ByteOffset;
+        } Write;
+        struct {
+            ULONG OutputBufferLength;
+            ULONG InputBufferLength;
+            ULONG IoControlCode;
+            PVOID Type3InputBuffer;
+        } DeviceIoControl;
+        struct {
+            PVOID Srb;
+        } Scsi;
+        struct {
+            ULONG Type;
+        } QueryDeviceRelations;
+        struct {
+            PVOID InterfaceType;
+            USHORT Size;
+            USHORT Version;
+            PVOID Interface;
+            PVOID InterfaceSpecificData;
+        } QueryInterface;
+        struct {
+            PVOID Capabilities;
+        } DeviceCapabilities;
+        struct {
+            ULONG WhichSpace;
+            PVOID Buffer;
+            ULONG Offset;
+            ULONG Length;
+        } ReadWriteConfig;
+        struct {
+            ULONG Type;
+            ULONG State;
+            ULONG ShutdownType;
+        } Power;
+        struct {
+            PVOID Argument1;
+            PVOID Argument2;
+            PVOID Argument3;
+            PVOID Argument4;
+        } Others;
+    } Parameters;
+    PDEVICE_OBJECT      DeviceObject;
+    PFILE_OBJECT        FileObject;
+    PIO_COMPLETION_ROUTINE CompletionRoutine;
+    PVOID               Context;
+};
+
+/* IO_STACK_LOCATION Control flags */
+#define SL_INVOKE_ON_SUCCESS    0x01
+#define SL_INVOKE_ON_ERROR      0x02
+#define SL_INVOKE_ON_CANCEL     0x04
+#define SL_PENDING_RETURNED     0x08
+
+/* IRP stack location macros */
+#define IoGetCurrentIrpStackLocation(Irp) ((Irp)->CurrentStackLocation)
+#define IoGetNextIrpStackLocation(Irp) \
+    ((Irp)->CurrentStackLocation + 1)
+#define IoSetNextIrpStackLocation(Irp) do {  \
+    (Irp)->CurrentLocation--;                 \
+    (Irp)->CurrentStackLocation--;            \
+} while (0)
+#define IoCopyCurrentIrpStackLocationToNext(Irp) do {     \
+    PIO_STACK_LOCATION _irpSp;                             \
+    PIO_STACK_LOCATION _nextIrpSp;                         \
+    _irpSp = IoGetCurrentIrpStackLocation(Irp);            \
+    _nextIrpSp = IoGetNextIrpStackLocation(Irp);           \
+    RtlCopyMemory(_nextIrpSp, _irpSp,                     \
+        (ULONG)((ULONG_PTR)&_irpSp->CompletionRoutine -   \
+                (ULONG_PTR)_irpSp));                       \
+    _nextIrpSp->CompletionRoutine = NULL;                  \
+    _nextIrpSp->Context = NULL;                            \
+    _nextIrpSp->Control = 0;                               \
+} while (0)
+#define IoSetCompletionRoutine(Irp, Routine, Ctx, Ok, Err, Cancel) do { \
+    PIO_STACK_LOCATION _nextIrpSp;                              \
+    _nextIrpSp = IoGetNextIrpStackLocation(Irp);                \
+    _nextIrpSp->CompletionRoutine = (Routine);                  \
+    _nextIrpSp->Context = (Ctx);                                \
+    _nextIrpSp->Control = 0;                                    \
+    if (Ok)     _nextIrpSp->Control |= SL_INVOKE_ON_SUCCESS;   \
+    if (Err)    _nextIrpSp->Control |= SL_INVOKE_ON_ERROR;     \
+    if (Cancel) _nextIrpSp->Control |= SL_INVOKE_ON_CANCEL;    \
+} while (0)
+
+/* Convenience macros mapping NT names to IRPMGR implementations */
+#define IoCreateDevice          IrpMgr_IoCreateDevice
+#define IoAllocateIrp           IrpMgr_IoAllocateIrp
+#define IoFreeIrp               IrpMgr_IoFreeIrp
+#define IoCallDriver            IrpMgr_IoCallDriver
+#define IoCompleteRequest       IrpMgr_IoCompleteRequest
+#define IoDeleteDevice          IrpMgr_IoDeleteDevice
+#define IoAttachDeviceToDeviceStack IrpMgr_IoAttachDeviceToDeviceStack
+#define IoDetachDevice          IrpMgr_IoDetachDevice
+
+#endif
 
 /* ================================================================
  * IRP MAJOR FUNCTION CODES

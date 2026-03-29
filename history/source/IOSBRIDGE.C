@@ -311,11 +311,24 @@ static void complete_ior(PIOR ior, USHORT status);
  * Sys_Dynamic_Device_Init handler (in NTMINI.ASM).
  * ================================================================ */
 
+/* NT5 loader entry point (from NT5LOADER.C) */
+extern int nt5_init(int use_primary);
+
 int ios_register_port_driver(void)
 {
     ULONG result;
 
     DBGPRINT("NTMINI: ios_register_port_driver()\n");
+
+    /* Initialize NT5 WDM driver stack (load W2K atapi.sys).
+     * This must happen before IOS registration so the bridge
+     * knows what devices exist when IOS sends AEP events. */
+    result = nt5_init(1);  /* 1 = primary IDE channel */
+    if (result != 0) {
+        DBGPRINT("NTMINI: NT5 init failed (%d), continuing with IOS anyway\n",
+                 (int)result);
+        /* Don't abort - IOS registration still needed for the NT4 fallback */
+    }
 
     /* Zero out bridge state */
     zero_mem(&g_bridge, sizeof(g_bridge));

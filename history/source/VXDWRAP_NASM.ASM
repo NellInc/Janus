@@ -34,6 +34,9 @@
 %define VMM__RegCreateKey       0x00010102
 %define VMM__RegQueryValueEx    0x00010104
 %define VMM__RegSetValueEx      0x00010105
+%define VMM_Get_System_Time     0x0001003F
+%define VMM__MapPhysToLinear    0x0001006C
+%define VMM_Time_Slice_Sleep    0x00010161
 
 %define VPICD_Virtualize_IRQ            0x00030000
 %define VPICD_Force_Default_Behavior    0x00030008
@@ -90,6 +93,17 @@ segment _LTEXT public use32 class=LCODE align=4
 ;----------------------------------------------------------------------------
 global NTMINI_Control
 NTMINI_Control:
+    ; Early heartbeat: write "NT!" to port 0xE9 to confirm VxD loaded
+    push    eax
+    mov     al, 'N'
+    out     0xE9, al
+    mov     al, 'T'
+    out     0xE9, al
+    mov     al, '!'
+    out     0xE9, al
+    mov     al, 0x0A
+    out     0xE9, al
+    pop     eax
     cmp     eax, Device_Init
     je      .do_init
     cmp     eax, Sys_Dynamic_Device_Init
@@ -348,9 +362,11 @@ _ISP_INSERT_CALLDOWN:
 global VxD_VPICD_Virtualize_IRQ
 global _VxD_VPICD_Virtualize_IRQ
 global VxD_VPICD_VirtualizeIRQ          ; NTKRNL variant
+global _VxD_VPICD_VirtualizeIrq         ; NTKSHIM variant (cdecl)
 VxD_VPICD_Virtualize_IRQ:
 _VxD_VPICD_Virtualize_IRQ:
 VxD_VPICD_VirtualizeIRQ:
+_VxD_VPICD_VirtualizeIrq:
     push    ebp
     mov     ebp, esp
     push    ebx
@@ -373,9 +389,11 @@ VxD_VPICD_VirtualizeIRQ:
 global VxD_VPICD_Force_Default_Behavior
 global _VxD_VPICD_Force_Default_Behavior
 global VxD_VPICD_UnvirtualizeIRQ        ; NTKRNL variant
+global _VxD_VPICD_ForceDefaultBehavior  ; NTKSHIM variant (cdecl)
 VxD_VPICD_Force_Default_Behavior:
 _VxD_VPICD_Force_Default_Behavior:
 VxD_VPICD_UnvirtualizeIRQ:
+_VxD_VPICD_ForceDefaultBehavior:
     push    ebp
     mov     ebp, esp
     push    ebx
@@ -389,9 +407,11 @@ VxD_VPICD_UnvirtualizeIRQ:
 global VxD_VPICD_Phys_EOI
 global _VxD_VPICD_Phys_EOI
 global VxD_VPICD_PhysicalEOI            ; NTKRNL variant
+global _VxD_VPICD_PhysicalEOI           ; NTKSHIM variant (cdecl)
 VxD_VPICD_Phys_EOI:
 _VxD_VPICD_Phys_EOI:
 VxD_VPICD_PhysicalEOI:
+_VxD_VPICD_PhysicalEOI:
     push    ebp
     mov     ebp, esp
     push    ebx
@@ -455,6 +475,16 @@ _VxD_Debug_Printf:
     push    ebp
     mov     ebp, esp
     push    esi
+    ; Write to port 0xE9 (QEMU -debugcon) byte by byte
+    mov     esi, [ebp+8]       ; string pointer
+.dbg_loop:
+    lodsb
+    test    al, al
+    jz      .dbg_done
+    out     0xE9, al
+    jmp     .dbg_loop
+.dbg_done:
+    ; Also try Out_Debug_String (works on debug VMM only)
     mov     esi, [ebp+8]
     int     0x20
     dd      VMM_Out_Debug_String
@@ -655,6 +685,49 @@ _VxD_CancelTimer:
     int     0x20
     dd      VMM_Cancel_Time_Out
     pop     esi
+    pop     ebp
+    ret
+
+;--- Get_System_Time (for NTKSHIM.C) ----------------------------------------
+
+global VxD_GetSystemTime
+global _VxD_GetSystemTime
+VxD_GetSystemTime:
+_VxD_GetSystemTime:
+    int     0x20
+    dd      VMM_Get_System_Time
+    ret
+
+;--- Time_Slice_Sleep (for NTKSHIM.C) ---------------------------------------
+
+global VxD_TimesliceSleep
+global _VxD_TimesliceSleep
+VxD_TimesliceSleep:
+_VxD_TimesliceSleep:
+    int     0x20
+    dd      VMM_Time_Slice_Sleep
+    ret
+
+;--- _MapPhysToLinear (for NTKSHIM.C MmMapIoSpace) --------------------------
+
+global VxD_MapPhysToLinear
+global _VxD_MapPhysToLinear
+VxD_MapPhysToLinear:
+_VxD_MapPhysToLinear:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+16]      ; flags
+    push    dword [ebp+12]      ; size
+    push    dword [ebp+8]       ; physAddr
+    int     0x20
+    dd      VMM__MapPhysToLinear
+    add     esp, 12
+    pop     edi
+    pop     esi
+    pop     ebx
     pop     ebp
     ret
 
