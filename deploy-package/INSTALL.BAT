@@ -1,6 +1,6 @@
 @ECHO OFF
 ECHO.
-ECHO NT5-9x Driver Backport: NTMINI VxD Installer
+ECHO Win98 DVD Fix - NTMINI VxD Installer
 ECHO ======================================
 ECHO.
 

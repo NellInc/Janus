@@ -120,7 +120,7 @@ for pg in range(num_pages):
 
             new_target = obj_offsets[obj_num - 1] + target
 
-            page_fixups.append(0x07)   # src_type: 32-bit offset
+            page_fixups.append(src_type & 0x0F)   # preserve original type (0x07=abs, 0x08=self-relative)
             if new_target <= 0xFFFF:
                 page_fixups.append(0x00)   # internal, 16-bit target
                 page_fixups.extend(struct.pack('<H', src_offset))

@@ -12,7 +12,7 @@ import struct
 import sys
 import os
 
-DISK = os.environ.get("WIN98_IMG", "/tmp/win98vm/win98.img")
+DISK = "/tmp/win98vm/win98.img"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Import FAT32 functions from deploy_to_iosubsys
@@ -241,7 +241,8 @@ def main():
 
         deploy_to_system_dir(f, vxd_data)
         edit_system_ini(f)
-        remove_from_iosubsys(f)
+        # NECATAPI must stay in IOSUBSYS — it creates the CDS/DCB we piggyback on.
+        # remove_from_iosubsys(f)
 
         # Clear FAT dirty flags
         print("\n--- Clear FAT dirty flags ---")

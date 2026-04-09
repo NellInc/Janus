@@ -1,8 +1,15 @@
-NT5-9x Driver Backport: NTMINI VxD
-===================================
+NTMINI - Win98 CD-ROM File System Driver
+=========================================
 
-This driver backports NT5 miniport drivers to Windows 9x. Current proof
-of concept: NEC ATAPI controller support on Windows 98 SE.
+This VxD driver restores CD-ROM file access on Windows 98 systems
+where the standard IOS/CDFS driver chain is broken. This is common
+on systems with NEC ATAPI controllers and certain hardware configs
+where Windows 98's built-in CD-ROM drivers fail to initialize.
+
+The driver registers as an IFSMgr File System Driver, mounts D:,
+and serves file I/O using direct ATAPI commands and ISO 9660
+filesystem parsing, bypassing the broken IOS chain entirely.
+
 
 INSTALLATION
 ------------
@@ -14,24 +21,48 @@ INSTALLATION
 
 3. Restart Windows
 
+Or simply run INSTALL.BAT from this directory.
+
+
 VERIFICATION
 ------------
-After reboot, check Device Manager for the DVD/CD-ROM drive.
-The driver registers during the Init_Complete phase of boot.
-DEVICEINIT showing as "failed" in BOOTLOG.TXT is normal and
-expected behavior (the driver defers IOS registration to
-Init_Complete by design).
+After reboot, D: should be accessible. Try opening a file on D:
+from a DOS prompt or Explorer.
+
+Note: DEVICEINIT showing as "failed" in BOOTLOG.TXT is normal.
+The driver defers initialization to Init_Complete by design.
+
 
 REMOVAL
 -------
 1. Delete C:\WINDOWS\SYSTEM\NTMINI.VXD
-2. Remove the device=C:\WINDOWS\SYSTEM\NTMINI.VXD line from SYSTEM.INI
+2. Remove the device= line from SYSTEM.INI
 3. Restart Windows
+
+
+LIMITATIONS
+-----------
+- Read-only access (appropriate for CD-ROM)
+- Root directory files only (no subdirectories)
+- Hardcoded to D: drive
+- Best with sequential open-read-close file access patterns
+
 
 TECHNICAL NOTES
 ---------------
-- This is a repacked NEC ATAPI miniport wrapper VxD
-- Contains an embedded NT SCSI miniport PE driver
-- Loads via SYSTEM.INI device= directive (not IOSUBSYS)
-- 682 internal fixup records, 8 pages, single merged object
-- Built with corrected LE/VLE header for Win98 VMM compatibility
+- Registers with IFSMgr via RegisterMount as a local FSD
+- Entry table provides Open, Read, Close, and other FSD functions
+- Direct ATAPI PACKET commands bypass the IOS layer
+- ISO 9660 primary volume descriptor and root directory parsing
+- Built with Open Watcom C 2.0 and NASM assembler
+
+
+SOURCE CODE
+-----------
+Full source code and build instructions are available in the
+project repository. Released under the MIT License.
+
+
+CREDITS
+-------
+Built with assistance from Claude (Anthropic).

@@ -19,7 +19,7 @@ import sys
 import os
 
 # ── Disk geometry (auto-detected from BPB) ────────────────────────────────
-DISK = os.environ.get("WIN98_IMG", "/tmp/win98vm/win98.img")
+DISK = "/tmp/win98vm/win98.img"
 # These are set by detect_fat32_geometry()
 PARTITION_LBA = 0
 BPS = 512

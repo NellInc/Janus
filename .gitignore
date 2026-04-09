@@ -1,8 +1,38 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# Build artifacts
+builds/*.obj
+builds/*.VXD
 *.obj
 *.MAP
 *.err
-.DS_Store
+V5FIXED4.VXD
+V5SMALL.VXD
+
+# VM disk images
+*.img
+*.vmdk
+*.qcow2
+
+# Archive intermediate binaries (100+ build iterations, too large to track)
+_archive/_intermediate/
+_archive/binaries/
+_archive/builds/
+_archive/extracted/*.bin
+_archive/extracted/*.VXD
+
+# Debug logs
 logs/
+**/logs/*.log
+debug.log
+blocked_commands.log
+
+# Runtime
+logs/
+__pycache__/
+
+# OS
+.DS_Store
