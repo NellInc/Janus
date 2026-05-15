@@ -12,7 +12,47 @@ import struct
 import sys
 import os
 
-DISK = os.environ.get("WIN98_IMG", "/tmp/win98vm/win98.img")
+PERSISTENT_VM_DIR = os.path.expanduser("~/Documents/VMs/win98vm")
+DEFAULT_DISK = "/tmp/win98vm/win98.img"
+REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+
+def resolve_disk_path():
+    env_disk = os.environ.get("WIN98_IMG")
+    candidates = [
+        env_disk,
+        DEFAULT_DISK,
+        "/tmp/win98vm/win98_nogeom.img",
+        os.path.join(PERSISTENT_VM_DIR, "win98.img"),
+        os.path.join(PERSISTENT_VM_DIR, "win98_nogeom.img"),
+    ]
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    return env_disk or DEFAULT_DISK
+
+
+def resolve_vxd_input_path(vxd_path):
+    """Resolve a VxD path from cwd, repo root, or the script directory."""
+    if os.path.isabs(vxd_path):
+        return vxd_path
+
+    candidates = [
+        os.path.abspath(vxd_path),
+        os.path.join(REPO_DIR, vxd_path),
+        os.path.join(SCRIPT_DIR, vxd_path),
+    ]
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    return os.path.abspath(vxd_path)
+
+
+DISK = resolve_disk_path()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Import FAT32 functions from deploy_to_iosubsys
@@ -193,6 +233,96 @@ def edit_system_ini(f):
     print(f"  Added '{device_line}' to [386Enh] section")
     return True
 
+
+def edit_msdos_sys(f):
+    """Normalize MSDOS.SYS boot options for unattended normal-mode boots.
+
+    This Win98 image reports BOOTLOG=1 as an invalid MSDOS.SYS setting during
+    early boot. Debug capture comes from QEMU debugcon, so forcing BOOTLOG here
+    is unnecessary and perturbs timing. Failed crash runs also leave the image
+    prone to the startup menu or Safe Mode path, so force the normal GUI boot
+    path here instead of relying on QEMU key injection.
+    """
+    print("\n--- Edit MSDOS.SYS ---")
+
+    entry, offset = fat.find_entry_in_dir(f, fat.ROOT_CLUSTER, b'MSDOS   SYS')
+    if entry is None:
+        print("  MSDOS.SYS not found in root directory")
+        return False
+
+    start_cluster = fat.parse_entry_cluster(entry)
+    file_size = fat.parse_entry_size(entry)
+    raw = read_file_content(f, start_cluster)
+    content = raw[:file_size].decode('ascii', errors='replace')
+    newline = '\r\n' if '\r\n' in content else '\n'
+
+    lines = content.splitlines()
+    new_lines = []
+    options_idx = None
+    seen_options = {}
+    forced_options = {
+        'autoscan': 'AutoScan=0',
+        'bootgui': 'BootGUI=1',
+        'bootmenu': 'BootMenu=0',
+        'bootmenudefault': 'BootMenuDefault=1',
+        'bootmenudelay': 'BootMenuDelay=0',
+        'bootwarn': 'BootWarn=0',
+        'bootsafe': 'BootSafe=0',
+    }
+
+    for line in lines:
+        stripped = line.strip()
+        lower = stripped.lower()
+        if lower.startswith('bootlog='):
+            continue
+
+        if lower == '[options]':
+            options_idx = len(new_lines)
+            new_lines.append(line)
+            continue
+
+        key = lower.split('=', 1)[0].strip() if '=' in lower else None
+        if key in forced_options:
+            if key not in seen_options:
+                seen_options[key] = len(new_lines)
+                new_lines.append(forced_options[key])
+            continue
+
+        new_lines.append(line)
+
+    if options_idx is None:
+        if new_lines and new_lines[-1].strip():
+            new_lines.append('')
+        options_idx = len(new_lines)
+        new_lines.append('[Options]')
+
+    insert_idx = options_idx + 1
+    for key, line in forced_options.items():
+        if key not in seen_options:
+            new_lines.insert(insert_idx, line)
+            insert_idx += 1
+
+    new_content = newline.join(new_lines)
+    if content.endswith('\r\n') or content.endswith('\n'):
+        new_content += newline
+
+    if new_content == content:
+        print("  MSDOS.SYS boot options already normalized")
+        return True
+
+    new_bytes = new_content.encode('ascii', errors='replace')
+    print(f"  MSDOS.SYS at cluster {start_cluster}, size {file_size}")
+
+    if not write_file_content(f, start_cluster, new_bytes):
+        print("  ERROR: Updated MSDOS.SYS does not fit existing cluster chain")
+        return False
+
+    f.seek(offset + 28)
+    f.write(struct.pack('<I', len(new_bytes)))
+    print(f"  Updated MSDOS.SYS size to {len(new_bytes)}")
+    print("  Normalized MSDOS.SYS boot options")
+    return True
+
 def remove_from_iosubsys(f):
     """Remove NECATAPI.VXD from IOSUBSYS by marking its dir entry as deleted."""
     print("\n--- Remove NECATAPI from IOSUBSYS ---")
@@ -229,8 +359,7 @@ def main():
         sys.exit(1)
 
     vxd_path = sys.argv[1]
-    if not os.path.isabs(vxd_path):
-        vxd_path = os.path.join(SCRIPT_DIR, vxd_path)
+    vxd_path = resolve_vxd_input_path(vxd_path)
 
     vxd_data = open(vxd_path, 'rb').read()
     print(f"VxD: {vxd_path} ({len(vxd_data)} bytes)")
@@ -241,6 +370,7 @@ def main():
 
         deploy_to_system_dir(f, vxd_data)
         edit_system_ini(f)
+        edit_msdos_sys(f)
         remove_from_iosubsys(f)
 
         # Clear FAT dirty flags

@@ -24,6 +24,9 @@
 /* NT5 path: types come from NTKSHIM.H. Old NTKRNL.C path: from NTKRNL.H. */
 #ifndef NTKSHIM_H
 #include "NTKRNL.H"
+#elif defined(_NTKRNL_H_)
+/* NTKSHIM.H plus NTKRNL.H path: use the canonical NTKRNL.H binary
+ * structure layouts. Do not redeclare IRP/DEVICE_OBJECT locally. */
 #else
 /* When using NTKSHIM.H path, provide the full struct definitions
  * that NTKRNL.H would normally supply. These must match the NTKRNL.H
@@ -165,7 +168,10 @@ struct _FILE_OBJECT {
 #define IRP_SIZE(StackSize) \
     ((USHORT)(sizeof(IRP) + ((StackSize) * sizeof(IO_STACK_LOCATION))))
 
-/* IRP structure */
+/* IRP structure. Keep this layout in lock-step with NTKRNL.H and the
+ * IRPMGR.C allocation/dispatch code. NT drivers touch nested Tail.Overlay
+ * fields directly, so a smaller shim-local IRP layout corrupts dispatch. */
+#pragma pack(push,4)
 struct _IRP {
     SHORT               Type;
     USHORT              Size;
@@ -173,15 +179,28 @@ struct _IRP {
     ULONG               Flags;
     union {
         struct _IRP    *MasterIrp;
+        LONG            IrpCount;
         PVOID           SystemBuffer;
     } AssociatedIrp;
+    LIST_ENTRY          ThreadListEntry;
     IO_STATUS_BLOCK     IoStatus;
     CHAR                RequestorMode;
-    BOOLEAN             PendingReturned;
+    UCHAR               PendingReturned;
     CHAR                StackCount;
     CHAR                CurrentLocation;
-    BOOLEAN             Cancel;
+    UCHAR               Cancel;
     KIRQL               CancelIrql;
+    CHAR                ApcEnvironment;
+    UCHAR               AllocationFlags;
+    PIO_STATUS_BLOCK    UserIosb;
+    PKEVENT             UserEvent;
+    union {
+        struct {
+            PVOID       UserApcRoutine;
+            PVOID       UserApcContext;
+        } AsynchronousParameters;
+        LARGE_INTEGER   AllocationSize;
+    } Overlay;
     PVOID               CancelRoutine;
     PVOID               UserBuffer;
     union {
@@ -193,11 +212,17 @@ struct _IRP {
                 };
             };
             PVOID       Thread;
-            LIST_ENTRY  ListEntry;
+            PCHAR       AuxiliaryBuffer;
+            struct {
+                LIST_ENTRY  ListEntry;
+                union {
+                    PIO_STACK_LOCATION  CurrentStackLocation;
+                    ULONG               PacketType;
+                };
+            };
+            PFILE_OBJECT    OriginalFileObject;
         } Overlay;
     } Tail;
-    /* Shim: pointer to base of stack locations */
-    PIO_STACK_LOCATION  CurrentStackLocation;
 };
 
 /* IO_STACK_LOCATION */
@@ -269,20 +294,24 @@ struct _IO_STACK_LOCATION {
     PIO_COMPLETION_ROUTINE CompletionRoutine;
     PVOID               Context;
 };
+#pragma pack(pop)
 
-/* IO_STACK_LOCATION Control flags */
-#define SL_INVOKE_ON_SUCCESS    0x01
-#define SL_INVOKE_ON_ERROR      0x02
-#define SL_INVOKE_ON_CANCEL     0x04
-#define SL_PENDING_RETURNED     0x08
+/* IO_STACK_LOCATION Control flags.
+ * NT drivers write these bits directly, so the values must match the
+ * NT DDK layout. Atapi.sys sets 0xE0 for invoke-on-success/error/cancel. */
+#define SL_PENDING_RETURNED     0x01
+#define SL_ERROR_RETURNED       0x02
+#define SL_INVOKE_ON_CANCEL     0x20
+#define SL_INVOKE_ON_SUCCESS    0x40
+#define SL_INVOKE_ON_ERROR      0x80
 
 /* IRP stack location macros */
-#define IoGetCurrentIrpStackLocation(Irp) ((Irp)->CurrentStackLocation)
+#define IoGetCurrentIrpStackLocation(Irp) ((Irp)->Tail.Overlay.CurrentStackLocation)
 #define IoGetNextIrpStackLocation(Irp) \
-    ((Irp)->CurrentStackLocation + 1)
+    ((Irp)->Tail.Overlay.CurrentStackLocation - 1)
 #define IoSetNextIrpStackLocation(Irp) do {  \
     (Irp)->CurrentLocation--;                 \
-    (Irp)->CurrentStackLocation--;            \
+    (Irp)->Tail.Overlay.CurrentStackLocation--;            \
 } while (0)
 #define IoCopyCurrentIrpStackLocationToNext(Irp) do {     \
     PIO_STACK_LOCATION _irpSp;                             \
@@ -535,6 +564,7 @@ VOID __cdecl IrpMgr_IoFreeIrp(PIRP Irp);
  *   Status returned by the dispatch routine
  */
 NTSTATUS __cdecl IrpMgr_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+NTSTATUS FASTCALL IrpMgr_IofCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp);
 
 /*
  * IoCompleteRequest - Complete an IRP
@@ -547,6 +577,17 @@ NTSTATUS __cdecl IrpMgr_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp);
  *   PriorityBoost - Scheduling boost (ignored on Win9x)
  */
 VOID __cdecl IrpMgr_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost);
+VOID FASTCALL IrpMgr_IofCompleteRequest(PIRP Irp, CHAR PriorityBoost);
+PIRP NTAPI IrpMgr_IoBuildDeviceIoControlRequest(
+    ULONG IoControlCode,
+    PDEVICE_OBJECT DeviceObject,
+    PVOID InputBuffer,
+    ULONG InputBufferLength,
+    PVOID OutputBuffer,
+    ULONG OutputBufferLength,
+    BOOLEAN InternalDeviceIoControl,
+    PKEVENT Event,
+    PIO_STATUS_BLOCK IoStatusBlock);
 
 /* --- IRP stack location helpers (function versions) --- */
 

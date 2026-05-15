@@ -341,8 +341,7 @@ int pe_load_image(
     dos = (const IMAGE_DOS_HEADER *)raw;
 
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
-        DBGPRINT("PELOAD: bad DOS signature: 0x%04X (expected 0x%04X)\n",
-                 (unsigned)dos->e_magic, (unsigned)IMAGE_DOS_SIGNATURE);
+        DBGPRINT("PELOAD: bad DOS signature\n");
         return PE_ERR_BAD_DOS_SIG;
     }
 
@@ -442,7 +441,6 @@ int pe_load_image(
         /* Bounds check: virtual address + size must fit in image */
         if (vaddr + vsize > image_size) {
             /* Use the larger of VirtualSize and SizeOfRawData for check */
-            ULONG actual_end = vaddr + (vsize > raw_size ? vsize : raw_size);
             if (vaddr >= image_size) {
                 DBGPRINT("PELOAD: section %.8s VA beyond image bounds\n",
                          sec[i].Name);
@@ -1002,8 +1000,7 @@ int pe_load_image_multi(
     dos = (const IMAGE_DOS_HEADER *)raw;
 
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
-        DBGPRINT("PELOAD: bad DOS signature: 0x%04X (expected 0x%04X)\n",
-                 (unsigned)dos->e_magic, (unsigned)IMAGE_DOS_SIGNATURE);
+        DBGPRINT("PELOAD: bad DOS signature\n");
         return PE_ERR_BAD_DOS_SIG;
     }
 
@@ -1099,7 +1096,6 @@ int pe_load_image_multi(
                  sec[i].Name, vaddr, vsize, raw_off, raw_size);
 
         if (vaddr + vsize > image_size) {
-            ULONG actual_end = vaddr + (vsize > raw_size ? vsize : raw_size);
             if (vaddr >= image_size) {
                 DBGPRINT("PELOAD: section %.8s VA beyond image bounds\n",
                          sec[i].Name);

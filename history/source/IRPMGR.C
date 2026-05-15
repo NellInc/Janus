@@ -21,6 +21,8 @@
 #include "IRPMGR.H"
 #include "W9XDDK.H"
 
+extern void dbg_mark(char c);
+
 /* ================================================================
  * INTERNAL STATE
  * ================================================================ */
@@ -50,6 +52,22 @@ static void irp_copy_mem(PVOID dst, PVOID src, ULONG size)
     for (i = 0; i < size; i++) {
         d[i] = s[i];
     }
+}
+
+static void irp_mark_hex8(UCHAR v)
+{
+    UCHAR hi = (UCHAR)((v >> 4) & 0x0F);
+    UCHAR lo = (UCHAR)(v & 0x0F);
+    dbg_mark((char)(hi < 10 ? ('0' + hi) : ('A' + hi - 10)));
+    dbg_mark((char)(lo < 10 ? ('0' + lo) : ('A' + lo - 10)));
+}
+
+static void irp_mark_hex32(ULONG v)
+{
+    irp_mark_hex8((UCHAR)((v >> 24) & 0xFF));
+    irp_mark_hex8((UCHAR)((v >> 16) & 0xFF));
+    irp_mark_hex8((UCHAR)((v >> 8) & 0xFF));
+    irp_mark_hex8((UCHAR)(v & 0xFF));
 }
 
 /* ================================================================
@@ -112,6 +130,10 @@ PIRP __cdecl IrpMgr_IoAllocateIrp(CHAR StackSize, BOOLEAN ChargeQuota)
      * (will be decremented by IoCallDriver before first use). */
     stack_base = (PIO_STACK_LOCATION)((PUCHAR)irp + sizeof(IRP));
     irp->Tail.Overlay.CurrentStackLocation = stack_base + StackSize;
+    if (StackSize > 0) {
+        *(PVOID *)((PUCHAR)irp + 0x60) =
+            (PVOID)((PUCHAR)(stack_base + StackSize - 1) + 0x24);
+    }
 
     VxD_Debug_Printf("IRP: IoAllocateIrp stacks=%d size=%lu -> %lx\n",
                      (int)StackSize, alloc_size, (ULONG)irp);
@@ -127,6 +149,7 @@ VOID __cdecl IrpMgr_IoFreeIrp(PIRP Irp)
     }
 
     VxD_Debug_Printf("IRP: IoFreeIrp %lx\n", (ULONG)Irp);
+    dbg_mark('i');
     VxD_HeapFree(Irp, 0);
 }
 
@@ -163,6 +186,7 @@ NTSTATUS __cdecl IrpMgr_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 
     /* Get the current (now active) stack location */
     irp_sp = Irp->Tail.Overlay.CurrentStackLocation;
+    *(PVOID *)((PUCHAR)Irp + 0x60) = (PVOID)irp_sp;
 
     /* Set the device object for this stack entry */
     irp_sp->DeviceObject = DeviceObject;
@@ -190,14 +214,91 @@ NTSTATUS __cdecl IrpMgr_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp)
     VxD_Debug_Printf("IRP: IoCallDriver dev=%lx major=%d loc=%d\n",
                      (ULONG)DeviceObject, (int)major,
                      (int)Irp->CurrentLocation);
+    if (major == IRP_MJ_SCSI) {
+        PUCHAR ext = (PUCHAR)DeviceObject->DeviceExtension;
+        dbg_mark('D');
+        irp_mark_hex32((ULONG)DeviceObject);
+        dbg_mark('E');
+        irp_mark_hex32((ULONG)ext);
+        dbg_mark('K');
+        irp_mark_hex32((ULONG)irp_sp);
+        dbg_mark('B');
+        irp_mark_hex32((ULONG)irp_sp->Parameters.Scsi.Srb);
+        dbg_mark('S');
+        irp_mark_hex8((UCHAR)DeviceObject->StackSize);
+        dbg_mark('Z');
+        irp_mark_hex32((ULONG)driver->DriverStartIo);
+        if (ext) {
+            ULONG ext_a0;
+            dbg_mark('e');
+            irp_mark_hex32(*(ULONG *)(ext + 0x00));
+            dbg_mark('L');
+            irp_mark_hex32(*(ULONG *)(ext + 0x5C));
+            dbg_mark('U');
+            ext_a0 = *(ULONG *)(ext + 0xA0);
+            irp_mark_hex32(ext_a0);
+            dbg_mark('H');
+            irp_mark_hex32(*(ULONG *)(ext + 0x108));
+            if (ext_a0 >= 0x80000000UL) {
+                dbg_mark('u');
+                irp_mark_hex32(*(ULONG *)((PUCHAR)ext_a0 + 0x40));
+            }
+        }
+    }
+    if (major == IRP_MJ_PNP) {
+        ULONG pnp_raw4;
+        ULONG pnp_raw8;
+        ULONG pnp_i;
+        dbg_mark('M');
+        dbg_mark('P');
+        dbg_mark((char)('0' + (irp_sp->MinorFunction & 0x0F)));
+        pnp_raw4 = *(ULONG *)((PUCHAR)irp_sp + 0x04);
+        pnp_raw8 = *(ULONG *)((PUCHAR)irp_sp + 0x08);
+        dbg_mark('R');
+        irp_mark_hex32(pnp_raw4);
+        dbg_mark('T');
+        irp_mark_hex32(pnp_raw8);
+        if (irp_sp->MinorFunction == IRP_MN_START_DEVICE &&
+            pnp_raw8 >= 0x80000000UL) {
+            PUCHAR pnp_res = (PUCHAR)pnp_raw8;
+            dbg_mark('r');
+            for (pnp_i = 0; pnp_i < 48; pnp_i++) {
+                irp_mark_hex8(pnp_res[pnp_i]);
+            }
+        }
+        VxD_Debug_Printf("IRPDBG: PNP minor=%d information=%lx status=%lx\n",
+                         (int)irp_sp->MinorFunction,
+                         (ULONG)Irp->IoStatus.Information,
+                         (ULONG)Irp->IoStatus.Status);
+    }
 
     /* Call the dispatch routine.
      * On real NT, this is __stdcall. Our shim drivers may use __cdecl
      * internally, but the function pointer type is PDRIVER_DISPATCH
      * which is NTAPI (__stdcall). */
+    dbg_mark('>');
+    VxD_Debug_Printf("IRPDBG: before dispatch\n");
     status = dispatch(DeviceObject, Irp);
+    dbg_mark('<');
+    VxD_Debug_Printf("IRPDBG: after dispatch status=%lx\n", status);
+    if (major == IRP_MJ_PNP) {
+        dbg_mark('m');
+        dbg_mark('P');
+        dbg_mark((char)('0' + (irp_sp->MinorFunction & 0x0F)));
+        VxD_Debug_Printf("IRPDBG: PNP after status=%lx information=%lx iostatus=%lx\n",
+                         (ULONG)status,
+                         (ULONG)Irp->IoStatus.Information,
+                         (ULONG)Irp->IoStatus.Status);
+    }
 
     return status;
+}
+
+
+NTSTATUS FASTCALL IrpMgr_IofCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    dbg_mark('o');
+    return IrpMgr_IoCallDriver(DeviceObject, Irp);
 }
 
 
@@ -259,7 +360,14 @@ VOID __cdecl IrpMgr_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost)
                 invoke = TRUE;
             }
 
+            if (!invoke) {
+                dbg_mark('q');
+                irp_mark_hex8(irp_sp->Control);
+            }
+
             if (invoke) {
+                dbg_mark('Q');
+                irp_mark_hex8(irp_sp->Control);
                 VxD_Debug_Printf("IRP: Calling completion at loc=%d\n",
                                  (int)location);
 
@@ -267,6 +375,8 @@ VOID __cdecl IrpMgr_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost)
                     irp_sp->DeviceObject,
                     Irp,
                     irp_sp->Context);
+                dbg_mark('Y');
+                irp_mark_hex32((ULONG)comp_status);
 
                 if (comp_status == STATUS_MORE_PROCESSING_REQUIRED) {
                     /* Completion routine wants to keep the IRP.
@@ -276,14 +386,109 @@ VOID __cdecl IrpMgr_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost)
                                      (int)location);
                     return;
                 }
+
+                /* Diagnostic: atapi.sys completion routines can consume
+                 * IoAllocateIrp IRPs themselves via IoFreeIrp. Returning here
+                 * avoids touching or freeing a possibly-consumed IRP while we
+                 * isolate the StartDevice path. */
+                dbg_mark('y');
+                return;
             }
         }
 
         location++;
     }
 
-    /* All completion routines have run. Free the IRP. */
-    IrpMgr_IoFreeIrp(Irp);
+    /* Diagnostic: do not auto-free IRPs from IoCompleteRequest. NT miniports
+     * often pair IoAllocateIrp with a completion routine that frees the IRP
+     * explicitly. */
+    dbg_mark('v');
+}
+
+
+VOID FASTCALL IrpMgr_IofCompleteRequest(PIRP Irp, CHAR PriorityBoost)
+{
+    dbg_mark('O');
+    IrpMgr_IoCompleteRequest(Irp, PriorityBoost);
+}
+
+
+PIRP NTAPI IrpMgr_IoBuildDeviceIoControlRequest(
+    ULONG IoControlCode,
+    PDEVICE_OBJECT DeviceObject,
+    PVOID InputBuffer,
+    ULONG InputBufferLength,
+    PVOID OutputBuffer,
+    ULONG OutputBufferLength,
+    BOOLEAN InternalDeviceIoControl,
+    PKEVENT Event,
+    PIO_STATUS_BLOCK IoStatusBlock)
+{
+    PIRP irp;
+    PIO_STACK_LOCATION irp_sp;
+    PVOID sysbuf = NULL;
+    ULONG sysbuf_len;
+    CHAR stack_size;
+
+    (void)Event;
+
+    if (!DeviceObject) {
+        return NULL;
+    }
+
+    stack_size = DeviceObject->StackSize;
+    if (stack_size < 1) {
+        stack_size = 1;
+    }
+
+    dbg_mark('j');
+    irp_mark_hex32(IoControlCode);
+    irp_mark_hex8((UCHAR)(InternalDeviceIoControl ? 1 : 0));
+    irp_mark_hex8((UCHAR)stack_size);
+
+    irp = IrpMgr_IoAllocateIrp(stack_size, FALSE);
+    if (!irp) {
+        return NULL;
+    }
+
+    sysbuf_len = InputBufferLength;
+    if (OutputBufferLength > sysbuf_len) {
+        sysbuf_len = OutputBufferLength;
+    }
+
+    if (sysbuf_len && (InputBuffer || OutputBuffer)) {
+        sysbuf = ExAllocatePoolWithTag(0, sysbuf_len, 'BDIO');
+        if (!sysbuf) {
+            IrpMgr_IoFreeIrp(irp);
+            return NULL;
+        }
+        irp_zero_mem(sysbuf, sysbuf_len);
+        if (InputBuffer && InputBufferLength) {
+            irp_copy_mem(sysbuf, InputBuffer, InputBufferLength);
+        }
+    }
+
+    irp->AssociatedIrp.SystemBuffer = sysbuf;
+    irp->UserBuffer = OutputBuffer;
+    irp->IoStatus.Status = STATUS_SUCCESS;
+    irp->IoStatus.Information = 0;
+
+    if (IoStatusBlock) {
+        IoStatusBlock->Status = STATUS_SUCCESS;
+        IoStatusBlock->Information = 0;
+    }
+
+    irp_sp = irp->Tail.Overlay.CurrentStackLocation - 1;
+    irp_zero_mem(irp_sp, sizeof(*irp_sp));
+    irp_sp->MajorFunction = InternalDeviceIoControl
+        ? IRP_MJ_INTERNAL_DEVICE_CONTROL
+        : IRP_MJ_DEVICE_CONTROL;
+    irp_sp->Parameters.DeviceIoControl.OutputBufferLength = OutputBufferLength;
+    irp_sp->Parameters.DeviceIoControl.InputBufferLength = InputBufferLength;
+    irp_sp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;
+    irp_sp->Parameters.DeviceIoControl.Type3InputBuffer = InputBuffer;
+
+    return irp;
 }
 
 
@@ -392,6 +597,7 @@ NTSTATUS __cdecl IrpMgr_IoCreateDevice(
     PDEVICE_OBJECT dev;
     PVOID extension;
     ULONG dev_size;
+    ULONG extension_alloc_size;
 
     (void)DeviceName;    /* Named devices not supported in shim */
     (void)Exclusive;     /* Exclusive access not enforced in shim */
@@ -420,7 +626,8 @@ NTSTATUS __cdecl IrpMgr_IoCreateDevice(
     /* Allocate the device extension if requested */
     extension = NULL;
     if (ExtensionSize > 0) {
-        extension = VxD_HeapAllocate(ExtensionSize, HEAPF_ZEROINIT);
+        extension_alloc_size = ExtensionSize + 0x400;
+        extension = VxD_HeapAllocate(extension_alloc_size, HEAPF_ZEROINIT);
         if (!extension) {
             VxD_Debug_Printf("IRP: IoCreateDevice extension alloc FAILED\n");
             VxD_HeapFree(dev, 0);
@@ -442,6 +649,11 @@ NTSTATUS __cdecl IrpMgr_IoCreateDevice(
     dev->Flags = DO_DEVICE_INITIALIZING;
     dev->AlignmentRequirement = 0;
     dev->StackSize = 1; /* Minimum: just this device */
+    dev->DeviceQueue.Type = 4;
+    dev->DeviceQueue.Size = sizeof(KDEVICE_QUEUE);
+    InitializeListHead(&dev->DeviceQueue.DeviceListHead);
+    dev->DeviceQueue.Busy = FALSE;
+    InitializeListHead(&dev->Queue.ListEntry);
 
     /* Link into the driver's device list (insert at head) */
     dev->NextDevice = DriverObject->DeviceObject;

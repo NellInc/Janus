@@ -38,6 +38,8 @@ MAX_FIXUPS = int(sys.argv[1]) if len(sys.argv) > 1 else 99999
 OUT_NAME = sys.argv[2] if len(sys.argv) > 2 else 'NT5FIXED.VXD'
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+BIN_DIR = os.path.join(REPO_DIR, 'binaries')
 MZ_SIZE = 0x80  # MZ header = LE file offset
 
 # --- Read NT5RAW ---
@@ -315,11 +317,11 @@ struct.pack_into('<I', le_hdr, 0xC0, 0x04000000)           # Win386 OS type
 # --- Build object table entry ---
 obj_e = bytearray(24)
 struct.pack_into('<I', obj_e, 0, merged_vsize)
-struct.pack_into('<I', obj_e, 4, 0x10000)  # reloc base = 0x10000 (standard VxD base)
+struct.pack_into('<I', obj_e, 4, 0x00000000)  # reloc base = 0, matching ESDI_506.PDR obj1
 struct.pack_into('<I', obj_e, 8, 0x2045)  # flags: readable, writable, executable, preload, 32-bit
 struct.pack_into('<I', obj_e, 12, 1)      # page map idx (1-based)
 struct.pack_into('<I', obj_e, 16, NP)     # page count
-struct.pack_into('<I', obj_e, 20, 0)           # reserved = 0 (matching V5SMALL)
+struct.pack_into('<I', obj_e, 20, 0x444F434C)  # reserved = 'LCOD', matching ESDI_506.PDR obj1
 
 # --- Build page map ---
 pm = bytearray(NP * 4)
@@ -366,9 +368,20 @@ out.extend(all_pages[:NP * page_size])
 # Nonresident names table (immediately after page data)
 out.extend(nrn)
 
-outpath = os.path.join(SCRIPT_DIR, OUT_NAME)
+legacy_outpath = os.path.join(SCRIPT_DIR, OUT_NAME)
+
+if os.path.isabs(OUT_NAME) or os.path.dirname(OUT_NAME):
+    outpath = OUT_NAME
+else:
+    os.makedirs(BIN_DIR, exist_ok=True)
+    outpath = os.path.join(BIN_DIR, OUT_NAME)
 open(outpath, 'wb').write(out)
+if outpath != legacy_outpath:
+    open(legacy_outpath, 'wb').write(out)
 print(f'\n{OUT_NAME}: {len(out)} bytes')
+print(f'  Output path: {outpath}')
+if outpath != legacy_outpath:
+    print(f'  Legacy copy: {legacy_outpath}')
 print(f'  1 object (merged from {num_obj}), {NP} pages, vsize=0x{merged_vsize:X}')
 print(f'  {fixup_count} fixup records')
 print(f'  DDB at merged offset 0x{merged_ddb_off:X}')

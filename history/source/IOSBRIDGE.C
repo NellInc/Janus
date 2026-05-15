@@ -32,7 +32,7 @@
  *
  * 1. Registers with IOS as a port driver (AEP_INITIALIZE)
  * 2. Detects ATAPI devices via the NT miniport (AEP_CONFIG_DCB)
- * 3. Receives IORs from IOS (AEP_IOR / calldown chain)
+ * 3. Receives I/O through IOS calldown routing
  * 4. Translates IORs to SRBs (SCSI READ/WRITE/INQUIRY/TEST UNIT READY)
  * 5. Dispatches SRBs to the miniport's HwStartIo
  * 6. On SRB completion, translates status back and completes the IOR
@@ -59,7 +59,117 @@
  */
 
 #include "W9XDDK.H"
+#include "WDMBRIDGE.H"
 #include "PORTIO.H"
+
+#pragma pack(push,1)
+typedef struct _IOS_DRP {
+    UCHAR   eyecatch[8];
+    ULONG   lgn;
+    ULONG   aer;
+    ULONG   ilb;
+    UCHAR   ascii_name[16];
+    UCHAR   revision;
+    ULONG   feature_code;
+    USHORT  if_requirements;
+    UCHAR   bus_type;
+    USHORT  reg_result;
+    ULONG   reference_data;
+    UCHAR   reserved1[2];
+    ULONG   reserved2;
+} IOS_DRP, *PIOS_DRP;
+
+typedef struct _IOS_ILB {
+    ULONG   service_rtn;
+    ULONG   dprintf_rtn;
+    ULONG   wait_10th_sec;
+    ULONG   internal_request;
+    ULONG   io_criteria_rtn;
+    ULONG   int_io_criteria_rtn;
+    ULONG   dvt;
+    ULONG   ios_mem_virt;
+    ULONG   enqueue_iop;
+    ULONG   dequeue_iop;
+} IOS_ILB, *PIOS_ILB;
+
+typedef struct _ISP_CREATE_DCB_PKT {
+    USHORT  func;
+    USHORT  result;
+    USHORT  dcb_size;
+    ULONG   dcb_ptr;
+    UCHAR   pad[2];
+} ISP_CREATE_DCB_PKT;
+
+typedef struct _ISP_DCB_DESTROY_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+} ISP_DCB_DESTROY_PKT;
+
+typedef struct _ISP_INSERT_CD_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    ULONG   req;
+    ULONG   ddb;
+    USHORT  expan_len;
+    ULONG   flags;
+    UCHAR   lgn;
+    UCHAR   pad;
+} ISP_INSERT_CD_PKT;
+
+typedef struct _ISP_ASSOC_DCB_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    UCHAR   drive;
+    UCHAR   flags;
+    UCHAR   pad[2];
+} ISP_ASSOC_DCB_PKT;
+
+typedef struct _ISP_PICK_DRIVE_LETTER_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    UCHAR   letter[2];
+    UCHAR   flags;
+    UCHAR   pad;
+} ISP_PICK_DRIVE_LETTER_PKT;
+
+typedef struct _ISP_GET_DCB_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    ULONG   drive;
+} ISP_GET_DCB_PKT;
+
+typedef struct _ISP_QUERY_MATCH_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    ULONG   drives;
+} ISP_QUERY_MATCH_PKT;
+
+typedef struct _ISP_BCAST_AEP_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   paep;
+} ISP_BCAST_AEP_PKT;
+
+typedef struct _ISP_DEV_ARRIVED_PKT {
+    USHORT  func;
+    USHORT  result;
+    ULONG   dcb;
+    ULONG   flags;
+} ISP_DEV_ARRIVED_PKT;
+
+typedef struct _REAL_CALLDOWN_NODE {
+    ULONG handler;
+    ULONG flags;
+    ULONG ddb;
+    ULONG next;
+} REAL_CALLDOWN_NODE;
+#pragma pack(pop)
 
 /* ================================================================
  * NT Miniport Structures (shared with NTMINI.C)
@@ -100,8 +210,8 @@ typedef union {
 #define SRB_STATUS_DATA_OVERRUN     0x12
 
 /* SRB Flags */
-#define SRB_FLAGS_DATA_IN           0x00000008
-#define SRB_FLAGS_DATA_OUT          0x00000010
+#define SRB_FLAGS_DATA_IN           0x00000040
+#define SRB_FLAGS_DATA_OUT          0x00000080
 #define SRB_FLAGS_NO_DATA_TRANSFER  0x00000000
 #define SRB_FLAGS_DISABLE_SYNCH_TRANSFER 0x00000020
 #define SRB_FLAGS_DISABLE_AUTOSENSE 0x00000040
@@ -226,7 +336,8 @@ typedef struct _IOR_QUEUE_ENTRY {
 /* Bridge global state */
 static struct {
     /* Our identity */
-    DDB         ddb;                    /* Device Descriptor Block */
+    IOS_DRP     drp;                    /* IOS Driver Registration Packet */
+    ULONG       ios_ddb;                /* IOS DDB id/handle from AEP_INITIALIZE */
     CALLDOWN    calldown;               /* Our calldown chain entry */
     BOOLEAN     initialized;            /* Driver is ready */
     BOOLEAN     boot_complete;          /* Boot sequence finished */
@@ -273,6 +384,9 @@ static void aep_system_shutdown(PAEP aep);
 static void aep_uninitialize(PAEP aep);
 
 /* IOR handler and SRB translation */
+static void __cdecl ios_ior_entry(PVOID iop_ptr);
+void __cdecl ios_wdm_ior_entry(PVOID iop_ptr);
+void __cdecl ios_wdm_log_iop(PVOID iop_ptr);
 static void ior_handler(PIOR ior, PDCB dcb);
 static void build_srb_from_ior(PIOR ior, PDCB dcb,
                                 PSCSI_REQUEST_BLOCK srb);
@@ -299,6 +413,43 @@ static PBRIDGE_DEVICE find_device_by_target(UCHAR target_id, UCHAR lun);
 static void zero_mem(PVOID dst, ULONG size);
 static void copy_mem(PVOID dst, PVOID src, ULONG size);
 static void complete_ior(PIOR ior, USHORT status);
+static void ios_dbg_hex8(UCHAR value);
+static void ios_dbg_hex16(USHORT value);
+static void ios_dbg_hex32(ULONG value);
+static int is_ring0_ptr(ULONG ptr);
+static PIOS_ILB find_existing_ilb(void);
+static int ios_late_create_device(void);
+int ios_late_destroy_device(void);
+void __cdecl ios_late_cdrom_attach_probe(void);
+void __cdecl ios_schedule_late_cdrom_attach_probe(void);
+
+extern ULONG __cdecl VMM_Get_DDB_Wrapper(USHORT device_id);
+extern void __cdecl Call_ILB_Service(ULONG service_rtn, PVOID isp_packet);
+extern void __cdecl IFSMgr_NotifyVolumeArrival_Wrapper(ULONG drive);
+extern ULONG __cdecl IFSMgr_CDROM_Attach_Wrapper(ULONG drive, PULONG out_vrp);
+extern ULONG __cdecl IFSMgr_RegisterMount_Wrapper(ULONG pfnMount, ULONG version, ULONG is_default);
+extern ULONG __cdecl IFSMgr_InstallFSHook_Wrapper(ULONG pfnHook);
+extern ULONG __cdecl IFSMgr_FSDAttachSFT_Wrapper(ULONG pir);
+extern ULONG __cdecl VWIN32_CopyMem_Wrapper(ULONG dst, ULONG src, ULONG cb);
+
+static UCHAR g_iso_read_bounce[2048];
+extern int __cdecl IFSMgr_CallPrevHook_Far16_32(ULONG packedPrev, int fn, int drive, int resType, int cpid, ULONG pir);
+extern int __cdecl IFSMgr_CallPrevFSHook(ULONG ppPrevHook, ULONG fsdFnAddr, int fn, int drive, int resType, int cpid, ULONG pir);
+extern int __cdecl IFSMgr_CallPrevFSHook5(ULONG ppPrevHook, int fn, int drive, int resType, int cpid, ULONG pir);
+extern ULONG __cdecl VxD_SetTimer(ULONG milliseconds, PVOID callback, PVOID refdata);
+extern void __cdecl IOS_BD_Complete_IOP(PVOID iop);
+extern void ios_ior_stub(void);
+extern int ntmini_search_stub_asm(void);
+extern int ntmini_netdir_stub_asm(void);
+extern int ntmini_shutdown_stub_asm(void);
+extern void ios_aep_bridge(void);
+extern void ios_wdm_passthru_stub(void);
+extern void ios_wdm_preserve_stub(void);
+extern int nt5_read_lba(ULONG lba, UCHAR *data_buf);
+extern int nt5_get_iso_root_cache(UCHAR *pvd_buf, UCHAR *root_buf,
+                                  ULONG *root_lba, ULONG *root_size);
+extern int nt5_get_iso_pvd_info(ULONG *root_lba, ULONG *root_size);
+extern ULONG NTMINI_DDB;
 
 
 /* ================================================================
@@ -316,65 +467,2424 @@ extern int nt5_init(int use_primary);
 
 extern void dbg_mark(char c);
 
-int ios_register_port_driver(void)
+static int g_nt5_init_done = 0;
+static int g_ios_registered = 0;
+static ULONG g_late_dcb_ptr = 0;
+static ULONG g_late_delta_to_ior = 0;
+static int g_late_dcb_destroyed = 0;
+static int g_wdm_iop_dump_count = 0;
+ULONG g_late_next_handler = 0;
+static int g_fsd_registered = 0;
+static ULONG g_fsd_provider_id = 0;
+static ULONG g_fsd_prev_hook_ptr = 0;
+static ULONG g_fsd_table[17];
+static int g_fsd_table_inited = 0;
+static ULONG g_fsd_volume_data[8];
+static int g_fsd_search_emitted = 0;
+static int g_fsd_hook_installed = 0;
+static int g_fsd_hook_pending = 0;
+static int g_fsd_log_count = 0;
+static int g_ifs_hook_all_log_count = 0;
+static ULONG g_fsd_search_ctx_last = 0;
+static ULONG g_fsd_search_ctx_alloc_count = 0;
+static REAL_CALLDOWN_NODE g_vrp_calldown;
+static UCHAR g_dummy_vrp[64];
+static int g_late_attach_done = 0;
+static int g_late_attach_scheduled = 0;
+
+#define IFSFN_READ       0
+#define IFSFN_CLOSE      11
+#define IFSFN_OPEN       36
+#define MAX_ISO_FILES    8
+
+typedef struct _ISO_FILE_ENTRY {
+    int in_use;
+    ULONG file_lba;
+    ULONG file_size;
+    ULONG file_pos;
+    ULONG handle;
+} ISO_FILE_ENTRY;
+
+static ISO_FILE_ENTRY g_iso_files[MAX_ISO_FILES];
+static int g_last_opened_slot = -1;
+static UCHAR g_iso_sector_buf[2048];
+static UCHAR g_iso_enum_sector_buf[2048];
+static int g_iso_pvd_valid = 0;
+static ULONG g_iso_root_lba = 0;
+static ULONG g_iso_root_size = 0;
+static int g_iso_root_cached = 0;
+static ULONG g_search_dir_offset = 0;
+static int g_search_active = 0;
+static ULONG g_fsd_find_misc[9];
+
+typedef int (__cdecl *PFN_IFS_FUNC)(int fn, int drive, int resType, int cpid, ULONG pir);
+
+static int __cdecl ntmini_fsd_mount_probe(ULONG pir);
+static int __cdecl ntmini_fsd_stub_common(char slot, int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_1(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_2(ULONG pir);
+static int __cdecl ntmini_fsd_file_attributes(ULONG arg0, int drive, int resType, int cpid, ULONG arg4);
+static int __cdecl ntmini_fsd_stub_3(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_fileinfo_diag(ULONG pir);
+static int __cdecl ntmini_fsd_stub_4(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_5(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_6(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_7(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_8(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_9(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_stub_A(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_getdiskinfo(int fn, int drive, int resType, int cpid, ULONG pir);
+int __cdecl ntmini_gdi31_callback(ULONG pir);
+int __cdecl ntmini_gdi_error5_callback(ULONG pir);
+static volatile ULONG g_gdi_callback_keepalive[2] = {
+    (ULONG)ntmini_gdi31_callback,
+    (ULONG)ntmini_gdi_error5_callback
+};
+static int __cdecl ntmini_fsd_open(int fn, int drive, int resType, int cpid, ULONG pir);
+static int __cdecl ntmini_fsd_open_onearg(ULONG pir);
+static int __cdecl ntmini_fsd_slot15_search_fail(ULONG pir);
+static int __cdecl ntmini_fsd_handle_fail(ULONG pir);
+static int __cdecl ntmini_fsd_findclose(ULONG pir);
+static int __cdecl ntmini_fsd_search(ULONG pir);
+static int __cdecl ntmini_fsd_shutdown(ULONG pir);
+int __cdecl ntmini_ifs_hook(ULONG pfnPrev, int fn, int drive, int resType, int cpid, ULONG pir);
+void __cdecl ntmini_install_fsd_hook_timer(void);
+void __cdecl ios_schedule_late_cdrom_attach_probe(void);
+static int iso_namecmp(const char *a, ULONG alen, const char *b, ULONG blen);
+static int iso9660_read_pvd(void);
+static int iso9660_prefetch_root(void);
+static int iso9660_find_file(ULONG dir_lba, ULONG dir_size, const char *name,
+                             ULONG name_len, ULONG *out_lba, ULONG *out_size);
+static int iso9660_enum_dir(ULONG dir_lba, ULONG dir_size, int index,
+                            char *out_name, ULONG *out_name_len,
+                            ULONG *out_lba, ULONG *out_size, UCHAR *out_flags);
+static int iso9660_read_file(ULONG file_lba, ULONG file_size, ULONG offset,
+                             UCHAR *buffer, ULONG count);
+
+static int __cdecl ntmini_fsd_stub_common(char slot, int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    (void)resType;
+    (void)cpid;
+    dbg_mark('d');
+    dbg_mark(slot);
+    dbg_mark('<');
+    ios_dbg_hex32((ULONG)fn);
+    ios_dbg_hex8((UCHAR)drive);
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    return -1;
+}
+
+#define DEFINE_FSD_STUB(name, marker) \
+static int __cdecl ntmini_fsd_stub_##name(int fn, int drive, int resType, int cpid, ULONG pir) \
+{ \
+    return ntmini_fsd_stub_common(marker, fn, drive, resType, cpid, pir); \
+}
+
+DEFINE_FSD_STUB(1, '1')
+static int __cdecl ntmini_fsd_stub_2(ULONG pir)
+{
+    ULONG i;
+    ULONG *pi;
+
+    dbg_mark('D');
+    dbg_mark('2');
+    dbg_mark('E');
+    if (!is_ring0_ptr(pir)) {
+        dbg_mark('!');
+        return -1;
+    }
+
+    pi = (ULONG *)pir;
+    dbg_mark('[');
+    for (i = 0; i < 16; i++) {
+        ios_dbg_hex32(pi[i]);
+    }
+    dbg_mark(']');
+    if (((UCHAR *)pir)[4] == 2 && pi[4] == (ULONG)(g_fsd_table + 1)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+        dbg_mark('R');
+        return 0;
+    }
+    *(USHORT *)((UCHAR *)pir + 0x1A) = 5;
+    g_search_dir_offset = 0;
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    dbg_mark('e');
+    return 5;
+}
+DEFINE_FSD_STUB(3, '3')
+static int __cdecl ntmini_fsd_fileinfo_diag(ULONG pir)
+{
+    ULONG *pi;
+    ULONG ppath_addr;
+    char filename[64];
+    int nc;
+    int fi;
+
+    dbg_mark('V');
+    dbg_mark('4');
+    if (!is_ring0_ptr(pir)) {
+        dbg_mark('!');
+        return 5;
+    }
+
+    pi = (ULONG *)pir;
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    ppath_addr = pi[3];
+    ios_dbg_hex32(ppath_addr);
+
+    nc = 0;
+    if (is_ring0_ptr(ppath_addr)) {
+        UCHAR *pp;
+        USHORT elem_len;
+
+        pp = (UCHAR *)ppath_addr;
+        elem_len = *(USHORT *)(pp + 4);
+        if (elem_len > 0 && elem_len <= 126) {
+            USHORT *uc;
+
+            uc = (USHORT *)(pp + 6);
+            nc = elem_len / 2;
+            if (nc > 63) {
+                nc = 63;
+            }
+            for (fi = 0; fi < nc; fi++) {
+                filename[fi] = (char)(uc[fi] & 0xFF);
+            }
+            filename[nc] = 0;
+            while (nc > 0 && filename[nc - 1] == 0) {
+                nc--;
+            }
+        } else {
+            nc = 0;
+        }
+    }
+
+    ios_dbg_hex8((UCHAR)nc);
+    dbg_mark('>');
+
+    if (nc != 0 && (iso_namecmp(filename, (ULONG)nc, "README.TXT", 10) ||
+                    iso_namecmp(filename, (ULONG)nc, "README", 6))) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+        dbg_mark('M');
+        ios_dbg_hex8((UCHAR)nc);
+        dbg_mark('v');
+        return 0;
+    }
+
+    *(USHORT *)((UCHAR *)pir + 0x1A) = 5;
+    dbg_mark('N');
+    return 5;
+}
+
+static int __cdecl ntmini_fsd_stub_4(int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    (void)resType;
+    (void)cpid;
+    dbg_mark('d');
+    dbg_mark('4');
+    dbg_mark('<');
+    ios_dbg_hex32((ULONG)fn);
+    ios_dbg_hex8((UCHAR)drive);
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+    }
+    return 0;
+}
+DEFINE_FSD_STUB(5, '5')
+DEFINE_FSD_STUB(6, '6')
+DEFINE_FSD_STUB(7, '7')
+static int __cdecl ntmini_fsd_stub_8(int arg0, int drive, int resType, int cpid, ULONG arg4)
+{
+    ULONG pir;
+
+    (void)drive;
+    (void)resType;
+    (void)cpid;
+
+    pir = is_ring0_ptr((ULONG)arg0) ? (ULONG)arg0 : arg4;
+    dbg_mark('d');
+    dbg_mark('8');
+    dbg_mark('<');
+    ios_dbg_hex32((ULONG)arg0);
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    return 5;
+}
+DEFINE_FSD_STUB(9, '9')
+static int __cdecl ntmini_fsd_shutdown(ULONG pir)
+{
+    dbg_mark('K');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+    }
+    return 0;
+}
+
+static int __cdecl ntmini_fsd_extra_ok(int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    dbg_mark('X');
+    dbg_mark('(');
+    ios_dbg_hex32((ULONG)fn);
+    ios_dbg_hex32((ULONG)drive);
+    ios_dbg_hex32((ULONG)resType);
+    ios_dbg_hex32((ULONG)cpid);
+    ios_dbg_hex32(pir);
+    dbg_mark(')');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 5;
+    }
+    dbg_mark('x');
+    return 5;
+}
+
+static int __cdecl ntmini_fsd_extra12_onearg(ULONG pir)
+{
+    USHORT status;
+
+    dbg_mark('Y');
+    dbg_mark('2');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    if (is_ring0_ptr(pir)) {
+        if (*(USHORT *)((UCHAR *)pir + 0x18) == 2) {
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+            dbg_mark('S');
+            return 0x12;
+        }
+        status = *(USHORT *)((UCHAR *)pir + 0x1A);
+        ios_dbg_hex16(status);
+        return (int)status;
+    }
+    return 0;
+}
+
+static int __cdecl ntmini_fsd_extra14_onearg(ULONG pir)
+{
+    USHORT status;
+
+    dbg_mark('Y');
+    dbg_mark('4');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    if (is_ring0_ptr(pir)) {
+        status = *(USHORT *)((UCHAR *)pir + 0x1A);
+        ios_dbg_hex16(status);
+        return (int)status;
+    }
+    return 0;
+}
+
+static int __cdecl ntmini_fsd_stub_A(int arg0, int drive, int resType, int cpid, ULONG arg4)
+{
+    ULONG pir;
+
+    (void)drive;
+    (void)resType;
+    (void)cpid;
+
+    dbg_mark('E');
+    dbg_mark('A');
+    pir = is_ring0_ptr((ULONG)arg0) ? (ULONG)arg0 : arg4;
+    if (is_ring0_ptr(pir)) {
+        ULONG *pi;
+        ULONG i;
+        ULONG candidates[5];
+        UCHAR labels[5];
+
+        pi = (ULONG *)pir;
+        dbg_mark('<');
+        ios_dbg_hex32(pir);
+        for (i = 0; i < 16; i++) {
+            ios_dbg_hex32(pi[i]);
+        }
+        dbg_mark('>');
+        candidates[0] = pi[3];  labels[0] = '3';
+        candidates[1] = pi[4];  labels[1] = '4';
+        candidates[2] = pi[5];  labels[2] = '5';
+        candidates[3] = pi[10]; labels[3] = 'A';
+        candidates[4] = pi[11]; labels[4] = 'B';
+        for (i = 0; i < 5; i++) {
+            if (is_ring0_ptr(candidates[i])) {
+                ULONG j;
+                UCHAR *pb;
+
+                pb = (UCHAR *)candidates[i];
+                dbg_mark('|');
+                dbg_mark((char)labels[i]);
+                dbg_mark('=');
+                ios_dbg_hex32(candidates[i]);
+                dbg_mark(':');
+                for (j = 0; j < 32; j++) {
+                    ios_dbg_hex8(pb[j]);
+                }
+                dbg_mark(';');
+            }
+        }
+        pi[4] = 0x12;
+        dbg_mark('N');
+        return 0x12;  /* ERROR_NO_MORE_FILES */
+        if (!g_fsd_search_emitted && is_ring0_ptr(pi[5])) {
+            UCHAR *ob;
+            ULONG z;
+
+            ob = (UCHAR *)pi[5];
+            for (z = 0; z < 0x130; z++) {
+                ob[z] = 0;
+            }
+            *(ULONG *)(ob + 0x00) = 0x00000001UL;  /* FILE_ATTRIBUTE_READONLY */
+            *(ULONG *)(ob + 0x1C) = 0;
+            *(ULONG *)(ob + 0x20) = 19;
+            ob[0x2C] = 'R';
+            ob[0x2D] = 'E';
+            ob[0x2E] = 'A';
+            ob[0x2F] = 'D';
+            ob[0x30] = 'M';
+            ob[0x31] = 'E';
+            ob[0x32] = '.';
+            ob[0x33] = 'T';
+            ob[0x34] = 'X';
+            ob[0x35] = 'T';
+            ob[0x36] = 0;
+            if (is_ring0_ptr(pi[4])) {
+                UCHAR *dta;
+
+                dta = (UCHAR *)pi[4];
+                dta[21] = 0x01;  /* FILE_ATTRIBUTE_READONLY */
+                dta[22] = 0x00;  /* DOS time */
+                dta[23] = 0x00;
+                dta[24] = 0x21;  /* DOS date: 1980-01-01 */
+                dta[25] = 0x00;
+                dta[26] = 19;
+                dta[27] = 0;
+                dta[28] = 0;
+                dta[29] = 0;
+                dta[30] = 'R';
+                dta[31] = 'E';
+                dta[32] = 'A';
+                dta[33] = 'D';
+                dta[34] = 'M';
+                dta[35] = 'E';
+                dta[36] = '.';
+                dta[37] = 'T';
+                dta[38] = 'X';
+                dta[39] = 'T';
+                dta[40] = 0;
+                dbg_mark('4');
+            }
+            g_fsd_search_emitted = 1;
+            dbg_mark('R');
+            return 0;
+        }
+        dbg_mark('N');
+        return 0x12;  /* ERROR_NO_MORE_FILES */
+        if (is_ring0_ptr(pi[4])) {
+            UCHAR *dta;
+
+            dbg_mark('x');
+            return -1;
+
+            dta = (UCHAR *)pi[4];
+            dta[21] = 0x01;  /* read-only */
+            dta[22] = 0;
+            dta[23] = 0;
+            dta[24] = 0;
+            dta[25] = 0;
+            dta[26] = 19;
+            dta[27] = 0;
+            dta[28] = 0;
+            dta[29] = 0;
+            dta[30] = 'R';
+            dta[31] = 'E';
+            dta[32] = 'A';
+            dta[33] = 'D';
+            dta[34] = 'M';
+            dta[35] = 'E';
+            dta[36] = '.';
+            dta[37] = 'T';
+            dta[38] = 'X';
+            dta[39] = 'T';
+            dta[40] = 0;
+            g_fsd_search_emitted = 1;
+            dbg_mark('r');
+        } else {
+            dbg_mark('n');
+            return -1;
+        }
+    } else {
+        dbg_mark('!');
+        return -1;
+    }
+    return 0;
+}
+
+static int __cdecl ntmini_fsd_file_attributes(ULONG arg0, int drive, int resType, int cpid, ULONG arg4)
+{
+    ULONG pir;
+    ULONG *pi;
+    ULONG i;
+    ULONG path_ptr;
+    int len;
+    int start;
+    int nc;
+    int fi;
+    char filename[64];
+    ULONG attr;
+
+    (void)drive;
+    (void)resType;
+    (void)cpid;
+
+    dbg_mark('A');
+    pir = is_ring0_ptr(arg0) ? arg0 : arg4;
+    if (!is_ring0_ptr(pir)) {
+        dbg_mark('!');
+        return -1;
+    }
+
+    pi = (ULONG *)pir;
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    for (i = 0; i < 16; i++) {
+        ios_dbg_hex32(pi[i]);
+    }
+    dbg_mark('>');
+
+    attr = 0x00000001UL;  /* FILE_ATTRIBUTE_READONLY */
+    path_ptr = pi[11];
+    nc = 0;
+    if (is_ring0_ptr(path_ptr)) {
+        USHORT *uc;
+
+        uc = (USHORT *)path_ptr;
+        len = 0;
+        while (len < 63 && uc[len] != 0) {
+            len++;
+        }
+        start = 0;
+        if (len >= 3 && uc[1] == ':' && (uc[2] == '\\' || uc[2] == '/')) {
+            start = 3;
+        } else if (len >= 1 && (uc[0] == '\\' || uc[0] == '/')) {
+            start = 1;
+        }
+        for (fi = start; fi < len && nc < 63; fi++) {
+            filename[nc++] = (char)(uc[fi] & 0xFF);
+        }
+        while (nc > 0 && (filename[nc - 1] == '\\' || filename[nc - 1] == '/')) {
+            nc--;
+        }
+    }
+    filename[nc] = 0;
+    if (nc == 0) {
+        attr = 0x00000011UL;  /* FILE_ATTRIBUTE_READONLY | DIRECTORY */
+    } else if (!(iso_namecmp(filename, (ULONG)nc, "README.TXT", 10) ||
+                 iso_namecmp(filename, (ULONG)nc, "README", 6))) {
+        ULONG file_lba;
+        ULONG file_size;
+
+        if (iso9660_find_file(g_iso_root_lba, g_iso_root_size,
+                              filename, (ULONG)nc,
+                              &file_lba, &file_size) != 0) {
+            pi[0] = 0xFFFFFFFFUL;
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 2;
+            dbg_mark('n');
+            return 2;
+        }
+    }
+    pi[0] = attr;
+    *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+    dbg_mark('a');
+    return 0;
+}
+
+static int iso_namecmp(const char *a, ULONG alen, const char *b, ULONG blen)
+{
+    ULONG i;
+
+    if (alen != blen) {
+        return 0;
+    }
+
+    for (i = 0; i < alen; i++) {
+        char ca;
+        char cb;
+
+        ca = a[i];
+        cb = b[i];
+        if (ca >= 'a' && ca <= 'z') {
+            ca = (char)(ca - 32);
+        }
+        if (cb >= 'a' && cb <= 'z') {
+            cb = (char)(cb - 32);
+        }
+        if (ca != cb) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int iso9660_read_pvd(void)
+{
+    int r;
+
+    r = nt5_read_lba(16, g_iso_sector_buf);
+    if (r != 0) {
+        dbg_mark('o');
+        dbg_mark('p');
+        ios_dbg_hex32((ULONG)r);
+        return -1;
+    }
+
+    if (g_iso_sector_buf[0] != 1 ||
+        g_iso_sector_buf[1] != 'C' ||
+        g_iso_sector_buf[2] != 'D' ||
+        g_iso_sector_buf[3] != '0' ||
+        g_iso_sector_buf[4] != '0' ||
+        g_iso_sector_buf[5] != '1') {
+        dbg_mark('o');
+        dbg_mark('!');
+        return -2;
+    }
+
+    g_iso_root_lba = *(ULONG *)(g_iso_sector_buf + 156 + 2);
+    g_iso_root_size = *(ULONG *)(g_iso_sector_buf + 156 + 10);
+    g_iso_pvd_valid = 1;
+    dbg_mark('O');
+    dbg_mark('{');
+    ios_dbg_hex32(g_iso_root_lba);
+    ios_dbg_hex32(g_iso_root_size);
+    dbg_mark('}');
+    return 0;
+}
+
+static int iso9660_prefetch_root(void)
+{
+    int r;
+
+    r = nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
+                               &g_iso_root_lba, &g_iso_root_size);
+    if (r != 0) {
+        dbg_mark('o');
+        dbg_mark('c');
+        ios_dbg_hex32((ULONG)r);
+        return -1;
+    }
+
+    g_iso_pvd_valid = 1;
+    g_iso_root_cached = 1;
+    dbg_mark('O');
+    dbg_mark('C');
+    return 0;
+}
+
+static int iso9660_find_file(ULONG dir_lba, ULONG dir_size, const char *name,
+                             ULONG name_len, ULONG *out_lba, ULONG *out_size)
+{
+    ULONG sectors;
+    ULONG s;
+
+    sectors = (dir_size + 2047) / 2048;
+    for (s = 0; s < sectors && s < 16; s++) {
+        ULONG pos;
+        int r;
+        UCHAR *buf;
+
+        if (dir_lba == g_iso_root_lba && g_iso_root_cached && s == 0) {
+            buf = g_iso_enum_sector_buf;
+        } else {
+            buf = g_iso_sector_buf;
+            r = nt5_read_lba(dir_lba + s, buf);
+            if (r != 0) {
+                return -1;
+            }
+        }
+
+        pos = 0;
+        while (pos + 33 < 2048) {
+            UCHAR rec_len;
+            UCHAR id_len;
+            char *id;
+            ULONG id_clean;
+
+            rec_len = buf[pos];
+            if (rec_len < 34) {
+                break;
+            }
+            if (pos + rec_len > 2048) {
+                break;
+            }
+
+            id_len = buf[pos + 32];
+            if (pos + 33 + id_len > 2048) {
+                break;
+            }
+            id = (char *)(buf + pos + 33);
+            id_clean = id_len;
+            if (id_clean > 2 && id[id_clean - 2] == ';') {
+                id_clean -= 2;
+            }
+            if (id_clean > 1 && id[id_clean - 1] == '.') {
+                id_clean -= 1;
+            }
+
+            if (iso_namecmp(name, name_len, id, id_clean)) {
+                *out_lba = *(ULONG *)(buf + pos + 2);
+                *out_size = *(ULONG *)(buf + pos + 10);
+                return 0;
+            }
+
+            pos += rec_len;
+        }
+    }
+
+    return -2;
+}
+
+static int iso9660_enum_dir(ULONG dir_lba, ULONG dir_size, int index,
+                            char *out_name, ULONG *out_name_len,
+                            ULONG *out_lba, ULONG *out_size, UCHAR *out_flags)
+{
+    ULONG sectors;
+    ULONG s;
+    int file_index;
+
+    sectors = (dir_size + 2047) / 2048;
+    file_index = 0;
+
+    for (s = 0; s < sectors && s < 16; s++) {
+        ULONG pos;
+        int r;
+
+        if (!(dir_lba == g_iso_root_lba && g_iso_root_cached && s == 0)) {
+            r = nt5_read_lba(dir_lba + s, g_iso_enum_sector_buf);
+            if (r != 0) {
+                return -1;
+            }
+        }
+
+        pos = 0;
+        while (pos + 34 <= 2048) {
+            UCHAR rec_len;
+            UCHAR id_len;
+            UCHAR flags;
+            char *id;
+            ULONG id_clean;
+
+            rec_len = g_iso_enum_sector_buf[pos];
+            if (rec_len < 34) {
+                break;
+            }
+            if (pos + rec_len > 2048) {
+                break;
+            }
+            id_len = g_iso_enum_sector_buf[pos + 32];
+            if (pos + 33 + id_len > 2048) {
+                break;
+            }
+
+            id = (char *)(g_iso_enum_sector_buf + pos + 33);
+            flags = g_iso_enum_sector_buf[pos + 25];
+            if (id_len == 1 && (id[0] == 0x00 || id[0] == 0x01)) {
+                pos += rec_len;
+                continue;
+            }
+
+            if (file_index == index) {
+                ULONG k;
+
+                id_clean = id_len;
+                if (id_clean > 2 && id[id_clean - 2] == ';') {
+                    id_clean -= 2;
+                }
+                if (id_clean > 1 && id[id_clean - 1] == '.') {
+                    id_clean -= 1;
+                }
+                if (id_clean > 63) {
+                    id_clean = 63;
+                }
+                for (k = 0; k < id_clean; k++) {
+                    out_name[k] = id[k];
+                }
+                out_name[id_clean] = 0;
+                *out_name_len = id_clean;
+                *out_lba = *(ULONG *)(g_iso_enum_sector_buf + pos + 2);
+                *out_size = *(ULONG *)(g_iso_enum_sector_buf + pos + 10);
+                *out_flags = flags;
+                return 0;
+            }
+
+            file_index++;
+            pos += rec_len;
+        }
+    }
+
+    return -2;
+}
+
+static int iso9660_read_file(ULONG file_lba, ULONG file_size, ULONG offset,
+                             UCHAR *buffer, ULONG count)
+{
+    ULONG bytes_read;
+
+    if (offset >= file_size) {
+        return 0;
+    }
+    if (offset + count > file_size) {
+        count = file_size - offset;
+    }
+
+    bytes_read = 0;
+    while (count > 0) {
+        ULONG sect;
+        ULONG off_in_sect;
+        ULONG chunk;
+        ULONG j;
+        int r;
+
+        sect = file_lba + (offset / 2048);
+        off_in_sect = offset % 2048;
+        chunk = 2048 - off_in_sect;
+        if (chunk > count) {
+            chunk = count;
+        }
+
+        r = nt5_read_lba(sect, g_iso_sector_buf);
+        if (r != 0) {
+            return -1;
+        }
+
+        for (j = 0; j < chunk; j++) {
+            buffer[bytes_read + j] = g_iso_sector_buf[off_in_sect + j];
+        }
+
+        bytes_read += chunk;
+        offset += chunk;
+        count -= chunk;
+    }
+
+    return (int)bytes_read;
+}
+
+static int __cdecl ntmini_fsd_getdiskinfo(int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    (void)fn;
+    (void)drive;
+    (void)resType;
+    (void)cpid;
+
+    dbg_mark('G');
+    return -1;
+    if (is_ring0_ptr(pir)) {
+        ULONG *pi;
+        UCHAR subfn;
+
+        pi = (ULONG *)pir;
+        subfn = (UCHAR)(pi[6] & 0xFF);
+        dbg_mark('Z');
+        dbg_mark('Q');
+        dbg_mark('<');
+        ios_dbg_hex32(pir);
+        ios_dbg_hex8(subfn);
+        dbg_mark('>');
+        if (subfn == 1) {
+            dbg_mark('1');
+            dbg_mark('T');
+            if (is_ring0_ptr(pi[4])) {
+                ULONG *out;
+                out = (ULONG *)pi[4];
+                out[0] = 0x000084C1UL;
+                out[1] = 0x00008512UL;
+                out[2] = 0x00000000UL;
+                dbg_mark('1');
+                dbg_mark('X');
+                dbg_mark('x');
+            }
+            *((UCHAR *)pir + 0x04) = 0;
+            *(USHORT *)((UCHAR *)pir + 0x18) = 1;
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+            *(ULONG *)pir = 1;
+            *(ULONG *)((UCHAR *)pir + 0x24) = 0;
+            *(ULONG *)((UCHAR *)pir + 0x20) = (ULONG)g_fsd_table;
+            *(ULONG *)((UCHAR *)pir + 0x28) = 0;
+            dbg_mark('1');
+            dbg_mark('E');
+            dbg_mark('e');
+            dbg_mark('t');
+            return 0;
+        }
+        if (subfn == 0 && is_ring0_ptr(pi[5])) {
+            USHORT *dp;
+
+            dp = (USHORT *)pi[5];
+            dp[0] = 1;
+            dp[1] = 2048;
+            dp[2] = 0;
+            dp[3] = 0xFFFF;
+        }
+    } else {
+        dbg_mark('!');
+    }
+
+    return -1;
+}
+
+int __cdecl ntmini_gdi31_callback(ULONG pir)
+{
+    dbg_mark('Y');
+    dbg_mark('1');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+    }
+    return 0;
+}
+
+int __cdecl ntmini_gdi_error5_callback(ULONG pir)
+{
+    dbg_mark('Y');
+    dbg_mark('5');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    dbg_mark('>');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 5;
+    }
+    return 5;
+}
+
+static int __cdecl ntmini_fsd_open(int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    ULONG *pi;
+    ULONG ppath_addr;
+    char filename[64];
+    int nc;
+    int fi;
+    ULONG file_lba;
+    ULONG file_size;
+    ULONG sft_result;
+
+    (void)fn;
+    (void)drive;
+    (void)resType;
+    (void)cpid;
+
+    dbg_mark('U');
+    if (!is_ring0_ptr(pir)) {
+        if (is_ring0_ptr((ULONG)fn)) {
+            dbg_mark('~');
+            pir = (ULONG)fn;
+        } else {
+            dbg_mark('!');
+            dbg_mark('<');
+            ios_dbg_hex32((ULONG)fn);
+            ios_dbg_hex32((ULONG)drive);
+            ios_dbg_hex32((ULONG)resType);
+            ios_dbg_hex32((ULONG)cpid);
+            ios_dbg_hex32(pir);
+            dbg_mark('>');
+            return 2;
+        }
+    }
+    pi = (ULONG *)pir;
+
+    ppath_addr = pi[3];
+    if (!is_ring0_ptr(ppath_addr)) {
+        pi[4] = 2;
+        dbg_mark('?');
+        dbg_mark('<');
+        ios_dbg_hex32(pir);
+        ios_dbg_hex32(ppath_addr);
+        ios_dbg_hex32(pi[0]);
+        ios_dbg_hex32(pi[1]);
+        ios_dbg_hex32(pi[2]);
+        dbg_mark('>');
+        return 2;
+    }
+
+    {
+        UCHAR *pp;
+        USHORT elem_len;
+
+        pp = (UCHAR *)ppath_addr;
+        elem_len = *(USHORT *)(pp + 4);
+        nc = 0;
+        if (elem_len > 0 && elem_len <= 126) {
+            USHORT *uc;
+
+            uc = (USHORT *)(pp + 6);
+            nc = elem_len / 2;
+            if (nc > 63) {
+                nc = 63;
+            }
+            for (fi = 0; fi < nc; fi++) {
+                filename[fi] = (char)(uc[fi] & 0xFF);
+            }
+            filename[nc] = 0;
+            while (nc > 0 && filename[nc - 1] == 0) {
+                nc--;
+            }
+        } else {
+            nc = 0;
+        }
+    }
+
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    ios_dbg_hex32(ppath_addr);
+    ios_dbg_hex8((UCHAR)nc);
+    dbg_mark('>');
+
+    if (nc == 0 ||
+               iso9660_find_file(g_iso_root_lba, g_iso_root_size,
+                                 filename, (ULONG)nc, &file_lba, &file_size) != 0) {
+        pi[4] = 2;
+        dbg_mark('n');
+        return 2;
+    }
+
+    {
+        int slot;
+
+        for (slot = 0; slot < MAX_ISO_FILES; slot++) {
+            if (!g_iso_files[slot].in_use) {
+                break;
+            }
+        }
+        if (slot >= MAX_ISO_FILES) {
+            slot = 0;
+        }
+
+        g_iso_files[slot].in_use = 1;
+        g_iso_files[slot].file_lba = file_lba;
+        g_iso_files[slot].file_size = file_size;
+        g_iso_files[slot].file_pos = 0;
+        g_iso_files[slot].handle = 0;
+        g_last_opened_slot = slot;
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+        dbg_mark('F');
+        sft_result = IFSMgr_FSDAttachSFT_Wrapper(pir);
+        ios_dbg_hex32(sft_result);
+        dbg_mark('f');
+        if (sft_result != 0) {
+            return (int)sft_result;
+        }
+        pi[4] = 0;
+        dbg_mark('u');
+        ios_dbg_hex8((UCHAR)slot);
+        ios_dbg_hex32(file_lba);
+        ios_dbg_hex32(file_size);
+        dbg_mark('H');
+        ios_dbg_hex32(0);
+        if (!g_fsd_hook_installed) {
+            ULONG prev_hook;
+
+            dbg_mark('L');
+            prev_hook = IFSMgr_InstallFSHook_Wrapper((ULONG)ntmini_ifs_hook);
+            g_fsd_prev_hook_ptr = prev_hook;
+            ios_dbg_hex32(prev_hook);
+            g_fsd_hook_installed = 1;
+            dbg_mark('l');
+        }
+    }
+
+    return 0;
+}
+
+static int __cdecl ntmini_fsd_open_onearg(ULONG pir)
+{
+    dbg_mark('O');
+    dbg_mark('1');
+    return ntmini_fsd_open(0, 4, 0, 0, pir);
+}
+
+static int __cdecl ntmini_fsd_slot15_search_fail(ULONG pir)
+{
+    dbg_mark('S');
+    dbg_mark('1');
+    dbg_mark('5');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    if (is_ring0_ptr(pir)) {
+        ULONG *pi;
+
+        pi = (ULONG *)pir;
+        ios_dbg_hex32(pi[0]);
+        ios_dbg_hex32(pi[1]);
+        ios_dbg_hex32(pi[2]);
+        ios_dbg_hex32(pi[3]);
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+    }
+    dbg_mark('>');
+    return 0x12;
+}
+
+static int __cdecl ntmini_fsd_handle_fail(ULONG pir)
+{
+    dbg_mark('H');
+    dbg_mark('F');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 5;
+    }
+    dbg_mark('>');
+    return 5;
+}
+
+static int __cdecl ntmini_fsd_findclose(ULONG pir)
+{
+    dbg_mark('F');
+    dbg_mark('C');
+    dbg_mark('<');
+    ios_dbg_hex32(pir);
+    if (is_ring0_ptr(pir)) {
+        ULONG *pi;
+        ULONG k;
+
+        pi = (ULONG *)pir;
+        for (k = 0; k < 12; k++) {
+            ios_dbg_hex32(pi[k]);
+        }
+        if (is_ring0_ptr(pi[8])) {
+            UCHAR *ctx;
+
+            ctx = (UCHAR *)pi[8];
+            if (*(USHORT *)(ctx + 0x08) == 1 &&
+                ctx[0x0B] == 2 &&
+                ctx[0x3C] == 'R' &&
+                ctx[0x3D] == 'E') {
+                ULONG rh;
+
+                dbg_mark('Q');
+                ios_dbg_hex32((ULONG)ctx);
+                rh = *(ULONG *)(ctx + 0x10);
+                if (is_ring0_ptr(rh)) {
+                    USHORT *ref_count;
+
+                    ref_count = (USHORT *)((UCHAR *)rh + 0x1C);
+                    if (*ref_count != 0) {
+                        (*ref_count)--;
+                    }
+                    dbg_mark('N');
+                    ios_dbg_hex16(*ref_count);
+                }
+                if (g_fsd_search_ctx_last == (ULONG)ctx) {
+                    g_fsd_search_ctx_last = 0;
+                }
+                if (g_fsd_search_ctx_alloc_count != 0) {
+                    g_fsd_search_ctx_alloc_count--;
+                }
+                VxD_HeapFree(ctx, 0);
+            }
+        }
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+    }
+    dbg_mark('>');
+    return 0;
+}
+
+static void ntmini_fill_find_output(UCHAR *out, const char *name,
+                                    ULONG name_len, ULONG size, UCHAR flags)
+{
+    ULONG k;
+    ULONG attr;
+
+    if (name_len > 63) {
+        name_len = 63;
+    }
+
+    for (k = 0; k < 320; k++) {
+        out[k] = 0;
+    }
+
+    attr = (flags & 0x02) ? 0x00000010UL : 0x00000001UL;
+    *(ULONG *)(out + 0x00) = attr;
+    *(ULONG *)(out + 0x1C) = 0;
+    *(ULONG *)(out + 0x20) = size;
+    for (k = 0; k < name_len; k++) {
+        ((USHORT *)(out + 0x2C))[k] = (USHORT)name[k];
+        out[0x130 + k] = (UCHAR)name[k];
+    }
+    ((USHORT *)(out + 0x2C))[name_len] = 0;
+    out[0x130 + name_len] = 0;
+}
+
+static int __cdecl ntmini_fsd_search(ULONG pir)
+{
+    ULONG req;
+    ULONG dump_i;
+    USHORT sub;
+    ULONG *pi;
+
+    dbg_mark('Z');
+    if (is_ring0_ptr(pir)) {
+        ULONG out_ptr;
+        UCHAR *out;
+        ULONG k;
+        ULONG *zpi;
+        ULONG search_attr;
+        char pattern[64];
+        int pattern_len;
+        int path_len;
+        int path_start;
+        int fi;
+        int wildcard;
+        ULONG file_lba;
+        ULONG file_size;
+        char found_name[64];
+        ULONG found_name_len;
+        UCHAR found_flags;
+
+        zpi = (ULONG *)pir;
+        search_attr = zpi[0] & 0xFFUL;
+        dbg_mark('[');
+        ios_dbg_hex32(pir);
+        for (k = 0; k < 16; k++) {
+            ios_dbg_hex32(zpi[k]);
+        }
+        dbg_mark(']');
+        if (is_ring0_ptr(zpi[7])) {
+            ULONG *p7;
+
+            p7 = (ULONG *)zpi[7];
+            dbg_mark('7');
+            dbg_mark('[');
+            ios_dbg_hex32(zpi[7]);
+            for (k = 0; k < 12; k++) {
+                ios_dbg_hex32(p7[k]);
+            }
+            dbg_mark(']');
+        }
+        if (is_ring0_ptr(zpi[5])) {
+            ULONG *p5;
+
+            p5 = (ULONG *)zpi[5];
+            dbg_mark('5');
+            dbg_mark('[');
+            ios_dbg_hex32(zpi[5]);
+            for (k = 0; k < 12; k++) {
+                ios_dbg_hex32(p5[k]);
+            }
+            dbg_mark(']');
+        }
+        if (is_ring0_ptr(zpi[4])) {
+            ULONG *p4;
+
+            p4 = (ULONG *)zpi[4];
+            dbg_mark('4');
+            dbg_mark('[');
+            ios_dbg_hex32(zpi[4]);
+            for (k = 0; k < 8; k++) {
+                ios_dbg_hex32(p4[k]);
+            }
+            dbg_mark(']');
+        }
+
+        if (is_ring0_ptr(zpi[8])) {
+            UCHAR *ctx;
+
+            ctx = (UCHAR *)zpi[8];
+            out_ptr = *(ULONG *)((UCHAR *)pir + 0x14);
+            if (ctx[0x09] != 0 && is_ring0_ptr(out_ptr) &&
+                iso9660_enum_dir(g_iso_root_lba, g_iso_root_size,
+                                 (int)ctx[0x0A],
+                                 found_name, &found_name_len,
+                                 &file_lba, &file_size, &found_flags) == 0) {
+                ntmini_fill_find_output((UCHAR *)out_ptr, found_name,
+                                        found_name_len, file_size, found_flags);
+                ctx[0x0A]++;
+                *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+                dbg_mark('X');
+                dbg_mark('Y');
+                return 0;
+            }
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+            dbg_mark('X');
+            dbg_mark('N');
+            ios_dbg_hex32(zpi[8]);
+            return 0x12;
+        }
+
+        sub = *(USHORT *)((UCHAR *)pir + 0x18);
+        if (sub == 2) {
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+            dbg_mark('L');
+            dbg_mark('N');
+            return 0x12;
+        }
+
+        pattern_len = 0;
+        if (is_ring0_ptr(zpi[11])) {
+            USHORT *uc;
+
+            uc = (USHORT *)zpi[11];
+            path_len = 0;
+            while (path_len < 63 && uc[path_len] != 0) {
+                path_len++;
+            }
+            path_start = 0;
+            if (path_len >= 3 && uc[1] == ':' &&
+                (uc[2] == '\\' || uc[2] == '/')) {
+                path_start = 3;
+            } else if (path_len >= 1 && (uc[0] == '\\' || uc[0] == '/')) {
+                path_start = 1;
+            }
+            for (fi = path_start; fi < path_len && pattern_len < 63; fi++) {
+                pattern[pattern_len++] = (char)(uc[fi] & 0xFF);
+            }
+            while (pattern_len > 0 &&
+                   (pattern[pattern_len - 1] == '\\' ||
+                    pattern[pattern_len - 1] == '/')) {
+                pattern_len--;
+            }
+        }
+        pattern[pattern_len] = 0;
+        wildcard = (pattern_len == 0 ||
+                    iso_namecmp(pattern, (ULONG)pattern_len, "*.*", 3) ||
+                    iso_namecmp(pattern, (ULONG)pattern_len, "*", 1) ||
+                    iso_namecmp(pattern, (ULONG)pattern_len, "*.TXT", 5));
+        file_lba = 0;
+        file_size = 0;
+        if (search_attr != 0x08UL && !wildcard &&
+            iso9660_find_file(g_iso_root_lba, g_iso_root_size,
+                              pattern, (ULONG)pattern_len,
+                              &file_lba, &file_size) != 0) {
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 2;
+            dbg_mark('N');
+            return 2;
+        }
+
+        out_ptr = *(ULONG *)((UCHAR *)pir + 0x14);
+        dbg_mark('O');
+        ios_dbg_hex32(out_ptr);
+        if (is_ring0_ptr(out_ptr)) {
+            out = (UCHAR *)out_ptr;
+            for (k = 0; k < 320; k++) {
+                out[k] = 0;
+            }
+            if (search_attr == 0x08UL) {
+                static const char vol_label[11] = {
+                    'N','T','M','I','N','I',' ','C','D',' ',' '
+                };
+
+                *(ULONG *)(out + 0x00) = 0x00000008UL;
+                *(ULONG *)(out + 0x1C) = 0;
+                *(ULONG *)(out + 0x20) = 0;
+                for (k = 0; k < 11; k++) {
+                    ((USHORT *)(out + 0x2C))[k] = (USHORT)vol_label[k];
+                    out[0x130 + k] = (UCHAR)vol_label[k];
+                }
+                ((USHORT *)(out + 0x2C))[11] = 0;
+                out[0x130 + 11] = 0;
+                dbg_mark('A');
+                dbg_mark('[');
+                for (k = 0; k < 16; k++) {
+                    ios_dbg_hex32(((ULONG *)out)[k]);
+                }
+                dbg_mark(']');
+                *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+                g_search_dir_offset = 0;
+                dbg_mark('V');
+                return 0;
+            }
+            if (wildcard) {
+                if (iso9660_enum_dir(g_iso_root_lba, g_iso_root_size, 0,
+                                     found_name, &found_name_len,
+                                     &file_lba, &file_size, &found_flags) != 0) {
+                    *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+                    dbg_mark('N');
+                    return 0x12;
+                }
+            } else {
+                found_name_len = (ULONG)pattern_len;
+                for (k = 0; k < found_name_len; k++) {
+                    found_name[k] = pattern[k];
+                }
+                found_name[found_name_len] = 0;
+                found_flags = 0;
+            }
+            ntmini_fill_find_output(out, found_name, found_name_len,
+                                    file_size, found_flags);
+            dbg_mark('A');
+            dbg_mark('[');
+            for (k = 0; k < 16; k++) {
+                ios_dbg_hex32(((ULONG *)out)[k]);
+            }
+            dbg_mark(']');
+            {
+                UCHAR *ctx;
+                ULONG name_len;
+
+                ctx = (UCHAR *)VxD_HeapAllocate(0x100, 1);
+                dbg_mark('H');
+                ios_dbg_hex32((ULONG)ctx);
+                if (is_ring0_ptr((ULONG)ctx)) {
+                    g_fsd_search_ctx_last = (ULONG)ctx;
+                    g_fsd_search_ctx_alloc_count++;
+                    *(ULONG *)(ctx + 0x04) = (ULONG)(ctx + 0x0C);
+                    *(USHORT *)(ctx + 0x08) = 1;
+                    ctx[0x09] = wildcard ? 1 : 0;
+                    ctx[0x0A] = 1;
+                    ctx[0x0B] = 2;
+                    *(ULONG *)(ctx + 0x10) = zpi[7];
+                    if (is_ring0_ptr(zpi[7])) {
+                        USHORT *ref_count;
+
+                        ref_count = (USHORT *)((UCHAR *)zpi[7] + 0x1C);
+                        (*ref_count)++;
+                        dbg_mark('n');
+                        ios_dbg_hex16(*ref_count);
+                    }
+                    name_len = found_name_len;
+                    *(USHORT *)(ctx + 0x3A) = (USHORT)name_len;
+                    for (k = 0; k < name_len; k++) {
+                        ctx[0x3C + k] = (UCHAR)found_name[k];
+                    }
+                    zpi[8] = (ULONG)ctx;
+                    if (is_ring0_ptr(zpi[4])) {
+                        ULONG *resume;
+
+                        resume = (ULONG *)zpi[4];
+                        resume[0] = (ULONG)ntmini_fsd_search;
+                        resume[1] = (ULONG)ntmini_fsd_slot15_search_fail;
+                        resume[2] = (ULONG)g_fsd_find_misc;
+                        dbg_mark('r');
+                        dbg_mark('[');
+                        ios_dbg_hex32(zpi[4]);
+                        ios_dbg_hex32(resume[0]);
+                        ios_dbg_hex32(resume[1]);
+                        ios_dbg_hex32(resume[2]);
+                        dbg_mark(']');
+                    }
+                    dbg_mark('h');
+                    dbg_mark('[');
+                    for (k = 0; k < 16; k++) {
+                        ios_dbg_hex32(((ULONG *)ctx)[k]);
+                    }
+                    dbg_mark(']');
+                }
+            }
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+            g_search_dir_offset = 0;
+            dbg_mark('W');
+            return 0;
+        }
+    }
+
+    dbg_mark('N');
+    if (is_ring0_ptr(pir)) {
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0x12;
+    }
+    return 0x12;
+
+    dbg_mark('E');
+    req = pir;
+    if (!is_ring0_ptr(req)) {
+        dbg_mark('!');
+        ios_dbg_hex32(pir);
+        ios_dbg_hex32(pir);
+        return 0x12;
+    }
+
+    pi = (ULONG *)req;
+    sub = *(USHORT *)((UCHAR *)req + 0x18);
+    dbg_mark('<');
+    ios_dbg_hex32(req);
+    ios_dbg_hex16(sub);
+    dbg_mark('>');
+    dbg_mark('[');
+    for (dump_i = 0; dump_i < 12; dump_i++) {
+        ios_dbg_hex32(pi[dump_i]);
+    }
+    dbg_mark(']');
+
+    if (g_search_dir_offset != 0) {
+        *(USHORT *)((UCHAR *)req + 0x1A) = 0x12;
+        g_search_active = 0;
+        g_search_dir_offset = 0;
+        dbg_mark('S');
+        dbg_mark('2');
+        return 0;
+    }
+
+    if (sub == 2) {
+        dbg_mark('S');
+        dbg_mark('T');
+    } else {
+        *(USHORT *)((UCHAR *)req + 0x1A) = 0x12;
+        g_search_active = 0;
+        g_search_dir_offset = 0;
+        dbg_mark('S');
+        dbg_mark('N');
+        return 0;
+    }
+
+    if (!g_search_active) {
+        g_search_dir_offset = 0;
+        g_search_active = 1;
+    }
+
+    if (is_ring0_ptr(pi[5])) {
+        UCHAR *ob;
+        ULONG z;
+        ULONG k;
+
+        ob = (UCHAR *)pi[5];
+        for (z = 0; z < 48; z++) {
+            ob[z] = 0;
+        }
+        ob[0] = 0x01;
+        ob[1] = 0x00;
+        ob[2] = 0x00;
+        ob[3] = 0x21;
+        ob[4] = 0x00;
+        ob[5] = 0x13;
+        ob[6] = 0x00;
+        ob[7] = 0x00;
+        ob[8] = 0x00;
+        for (k = 0; k < 10; k++) {
+            ob[9 + k] = (UCHAR)"README.TXT"[k];
+        }
+        ob[19] = 0;
+        dbg_mark('5');
+    }
+
+    if (0 && is_ring0_ptr(pi[4])) {
+        UCHAR *dta;
+        ULONG dta_ptr;
+        ULONG k2;
+
+        dta_ptr = *(ULONG *)((UCHAR *)pi[4] + 0x20);
+        dbg_mark('4');
+        ios_dbg_hex32(dta_ptr);
+        if (!is_ring0_ptr(dta_ptr)) {
+            dbg_mark('!');
+        } else {
+        dta = (UCHAR *)dta_ptr;
+        dta[21] = 0x01;
+        dta[22] = 0x00;
+        dta[23] = 0x00;
+        dta[24] = 0x21;
+        dta[25] = 0x00;
+        dta[26] = 0x13;
+        dta[27] = 0x00;
+        dta[28] = 0x00;
+        dta[29] = 0x00;
+        for (k2 = 0; k2 < 10; k2++) {
+            dta[30 + k2] = (UCHAR)"README.TXT"[k2];
+        }
+        dta[30 + k2] = 0;
+        dbg_mark('D');
+        }
+    }
+
+    *(USHORT *)((UCHAR *)req + 0x1A) = 0;
+    g_search_dir_offset++;
+    dbg_mark('z');
+    ios_dbg_hex32(0x00000019UL);
+    ios_dbg_hex32(0x00000013UL);
+
+    return 0;
+}
+
+void __cdecl ntmini_install_fsd_hook_timer(void)
+{
+    ULONG prev_hook;
+
+    g_fsd_hook_pending = 0;
+    if (g_fsd_hook_installed) {
+        return;
+    }
+
+    dbg_mark('L');
+    prev_hook = IFSMgr_InstallFSHook_Wrapper((ULONG)ntmini_ifs_hook);
+    g_fsd_prev_hook_ptr = prev_hook;
+    ios_dbg_hex32(prev_hook);
+    g_fsd_hook_installed = 1;
+    dbg_mark('l');
+}
+
+int __cdecl ntmini_ifs_hook(ULONG fsdFnAddr, int fn, int drive, int resType, int cpid, ULONG pir)
+{
+    (void)resType;
+    (void)cpid;
+
+    if (g_fsd_registered && g_ifs_hook_all_log_count < 96) {
+        dbg_mark('J');
+        dbg_mark('<');
+        ios_dbg_hex32(fsdFnAddr);
+        ios_dbg_hex32((ULONG)fn);
+        ios_dbg_hex8((UCHAR)drive);
+        ios_dbg_hex32(pir);
+        dbg_mark('>');
+        g_ifs_hook_all_log_count++;
+    }
+
+    if (drive == 4 && g_fsd_registered) {
+        if (g_fsd_log_count < 64) {
+            dbg_mark('I');
+            dbg_mark('<');
+            ios_dbg_hex32(fsdFnAddr);
+            ios_dbg_hex32((ULONG)fn);
+            ios_dbg_hex32(pir);
+            dbg_mark('>');
+            if (is_ring0_ptr(pir) && g_fsd_log_count < 8) {
+                ULONG *hp;
+                int hi;
+
+                hp = (ULONG *)pir;
+                dbg_mark('[');
+                for (hi = 0; hi < 16; hi++) {
+                    ios_dbg_hex32(hp[hi]);
+                }
+                dbg_mark(']');
+            }
+            g_fsd_log_count++;
+        }
+
+        if (fn == IFSFN_READ ||
+            ((fn == IFSFN_CLOSE || fn == 0x0E) &&
+             is_ring0_ptr(pir) &&
+             ((ULONG *)pir)[0] != 0 &&
+             is_ring0_ptr(((ULONG *)pir)[5]))) {
+            ULONG *pi;
+            ULONG count;
+            ULONG buf_ptr;
+            ULONG handle;
+            int slot;
+            int bytes;
+            int use_bounce;
+            UCHAR *read_buf;
+            ULONG copy_result;
+
+            if (!is_ring0_ptr(pir)) {
+                return -1;
+            }
+            pi = (ULONG *)pir;
+            count = pi[0];
+            buf_ptr = pi[5];
+            slot = g_last_opened_slot;
+            handle = pi[4];
+            if (slot < 0 || slot >= MAX_ISO_FILES ||
+                !g_iso_files[slot].in_use ||
+                !(is_ring0_ptr(buf_ptr) ||
+                  (buf_ptr >= 0x00010000UL && buf_ptr < 0x80000000UL))) {
+                dbg_mark('i');
+                ios_dbg_hex32(handle);
+                ios_dbg_hex32(buf_ptr);
+                return -1;
+            }
+            use_bounce = 0;
+            read_buf = (UCHAR *)buf_ptr;
+            copy_result = 0;
+            if (!is_ring0_ptr(buf_ptr)) {
+                use_bounce = 1;
+                read_buf = g_iso_read_bounce;
+                dbg_mark('j');
+                ios_dbg_hex32(buf_ptr);
+            }
+
+            if (g_iso_files[slot].file_lba == 0x19UL) {
+                static const UCHAR readme_data[19] = {
+                    'N','T','M','I','N','I',' ','C','D','-','R','O','M',' ',
+                    'T','E','S','T','\n'
+                };
+                ULONG available;
+                ULONG todo;
+                ULONG bi;
+
+                available = g_iso_files[slot].file_size - g_iso_files[slot].file_pos;
+                todo = count;
+                if (todo > available) {
+                    todo = available;
+                }
+                if (todo > 2048UL - g_iso_files[slot].file_pos) {
+                    todo = 2048UL - g_iso_files[slot].file_pos;
+                }
+                for (bi = 0; bi < todo; bi++) {
+                    read_buf[bi] = readme_data[g_iso_files[slot].file_pos + bi];
+                }
+                bytes = (int)todo;
+                dbg_mark('C');
+            } else {
+                bytes = iso9660_read_file(g_iso_files[slot].file_lba,
+                                          g_iso_files[slot].file_size,
+                                          g_iso_files[slot].file_pos,
+                                          read_buf, count);
+            }
+            if (bytes < 0) {
+                dbg_mark('i');
+                return -1;
+            }
+            if (use_bounce && bytes > 0) {
+                copy_result = VWIN32_CopyMem_Wrapper((ULONG)g_iso_read_bounce, buf_ptr,
+                                                     (ULONG)bytes);
+                dbg_mark('J');
+                ios_dbg_hex32(copy_result);
+            }
+
+            if (bytes == 0 && fn == IFSFN_CLOSE) {
+                if (g_last_opened_slot >= 0 && g_last_opened_slot < MAX_ISO_FILES) {
+                    g_iso_files[g_last_opened_slot].in_use = 0;
+                }
+                g_last_opened_slot = -1;
+                pi[0] = 0;
+                *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+                dbg_mark('q');
+                return 0;
+            }
+
+            if (fn != 0x0E) {
+                g_iso_files[slot].file_pos += (ULONG)bytes;
+            }
+            pi[0] = (ULONG)bytes;
+            *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+            dbg_mark('R');
+            ios_dbg_hex32((ULONG)bytes);
+            return 0;
+        }
+
+        if (fn == IFSFN_CLOSE) {
+            if (g_last_opened_slot >= 0 && g_last_opened_slot < MAX_ISO_FILES) {
+                g_iso_files[g_last_opened_slot].in_use = 0;
+            }
+            g_last_opened_slot = -1;
+            dbg_mark('Q');
+            return 0;
+        }
+
+        dbg_mark('N');
+        ios_dbg_hex32((ULONG)fn);
+        if (fn == 0x28) {
+            return 0;
+        }
+        if (fn == 10) {
+            return -1;
+        }
+        if (g_fsd_prev_hook_ptr) {
+            int prev_result;
+
+            dbg_mark('P');
+            prev_result = IFSMgr_CallPrevFSHook(g_fsd_prev_hook_ptr, fsdFnAddr,
+                                                fn, drive, resType, cpid, pir);
+            dbg_mark('p');
+            ios_dbg_hex32((ULONG)prev_result);
+            return prev_result;
+        }
+        return -1;
+    }
+
+    dbg_mark('n');
+    ios_dbg_hex32((ULONG)fn);
+    ios_dbg_hex32((ULONG)drive);
+    ios_dbg_hex32(pir);
+    if (is_ring0_ptr(pir) && g_fsd_log_count < 8) {
+        ULONG *hp;
+        int hi;
+
+        hp = (ULONG *)pir;
+        dbg_mark('[');
+        for (hi = 0; hi < 16; hi++) {
+            ios_dbg_hex32(hp[hi]);
+        }
+        dbg_mark(']');
+    }
+    if (g_fsd_prev_hook_ptr) {
+        int prev_result;
+
+        dbg_mark('P');
+        prev_result = IFSMgr_CallPrevFSHook(g_fsd_prev_hook_ptr, fsdFnAddr,
+                                            fn, drive, resType, cpid, pir);
+        dbg_mark('p');
+        ios_dbg_hex32((ULONG)prev_result);
+        return prev_result;
+    }
+    return -1;
+}
+
+static void init_fsd_probe_table(void)
+{
+    if (g_fsd_table_inited) {
+        return;
+    }
+
+    g_fsd_find_misc[0] = 0x0810030AUL;
+    g_fsd_find_misc[1] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[2] = (ULONG)ntmini_fsd_findclose;
+    g_fsd_find_misc[3] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[4] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[5] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[6] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[7] = (ULONG)ntmini_fsd_handle_fail;
+    g_fsd_find_misc[8] = (ULONG)ntmini_fsd_handle_fail;
+
+    g_fsd_table[0] = 0x0F10030AUL;
+    g_fsd_table[1] = (ULONG)ntmini_fsd_stub_1;
+    g_fsd_table[2] = (ULONG)ntmini_fsd_stub_2;
+    g_fsd_table[3] = (ULONG)ntmini_fsd_file_attributes;
+    g_fsd_table[4] = (ULONG)ntmini_fsd_fileinfo_diag;
+    g_fsd_table[5] = (ULONG)ntmini_fsd_stub_5;
+    g_fsd_table[6] = (ULONG)ntmini_fsd_open;
+    g_fsd_table[7] = (ULONG)ntmini_fsd_open;
+    g_fsd_table[8] = (ULONG)ntmini_fsd_stub_8;
+    g_fsd_table[9] = (ULONG)ntmini_fsd_search;
+    g_fsd_table[10] = (ULONG)ntmini_fsd_shutdown;
+    g_fsd_table[11] = (ULONG)ntmini_fsd_open_onearg;
+    g_fsd_table[12] = (ULONG)ntmini_fsd_extra12_onearg;
+    g_fsd_table[13] = (ULONG)ntmini_fsd_open_onearg;
+    g_fsd_table[14] = (ULONG)ntmini_fsd_search;
+    g_fsd_table[15] = (ULONG)ntmini_fsd_slot15_search_fail;
+    g_fsd_table[16] = 0;
+    dbg_mark('T');
+    ios_dbg_hex32((ULONG)g_fsd_table);
+    ios_dbg_hex32(g_fsd_table[1]);
+    ios_dbg_hex32(g_fsd_table[2]);
+    ios_dbg_hex32(g_fsd_table[9]);
+    ios_dbg_hex32(g_fsd_table[10]);
+    ios_dbg_hex32((ULONG)ntmini_fsd_mount_probe);
+    g_fsd_table_inited = 1;
+}
+
+static int __cdecl ntmini_fsd_mount_probe(ULONG pir)
+{
+    ULONG *pi;
+    UCHAR drive_byte;
+    UCHAR func_byte;
+
+    dbg_mark('M');
+    if (!is_ring0_ptr(pir)) {
+        dbg_mark('!');
+        return -1;
+    }
+
+    pi = (ULONG *)pir;
+    drive_byte = (UCHAR)(pi[10] & 0xFF);
+    func_byte = (UCHAR)(pi[1] & 0xFF);
+    dbg_mark('{');
+    ios_dbg_hex8(func_byte);
+    ios_dbg_hex8(drive_byte);
+    ios_dbg_hex32(pir);
+    dbg_mark('}');
+
+    if (drive_byte != 3 && func_byte == 0) {
+        dbg_mark('r');
+        return -1;
+    }
+
+    init_fsd_probe_table();
+    if (func_byte == 0) {
+        ULONG mi;
+
+        dbg_mark('[');
+        for (mi = 0; mi < 13; mi++) {
+            ios_dbg_hex32(pi[mi]);
+        }
+        dbg_mark(']');
+        g_fsd_volume_data[0] = g_fsd_provider_id;
+        g_fsd_volume_data[1] = (ULONG)g_fsd_table;
+        g_fsd_volume_data[2] = 3;
+        g_fsd_volume_data[3] = g_iso_root_lba;
+        g_fsd_volume_data[4] = g_iso_root_size;
+        pi[4] = (ULONG)g_fsd_table;
+        pi[7] = (ULONG)g_fsd_volume_data;
+        *(USHORT *)((UCHAR *)pir + 0x1A) = 0;
+        dbg_mark('m');
+        return 0;
+    }
+
+    if (func_byte == 2) {
+        pi[4] = 0;
+        dbg_mark('v');
+        return 0;
+    }
+
+    {
+        int table_index;
+        int result;
+        typedef int (__cdecl *FSD_FUNC)(int fn, int drive, int resType, int cpid, ULONG pir);
+
+        table_index = -1;
+        if (func_byte <= 10) {
+            table_index = (int)func_byte;
+        }
+        dbg_mark('J');
+        dbg_mark('<');
+        ios_dbg_hex8(func_byte);
+        ios_dbg_hex8(drive_byte);
+        ios_dbg_hex32((ULONG)table_index);
+        dbg_mark('>');
+        if (table_index >= 1 && table_index <= 10 && g_fsd_table[table_index]) {
+            FSD_FUNC handler;
+
+            handler = (FSD_FUNC)g_fsd_table[table_index];
+            result = handler((int)func_byte, (int)drive_byte, 0, 0, pir);
+            dbg_mark('j');
+            ios_dbg_hex32((ULONG)result);
+            return result;
+        }
+    }
+
+    dbg_mark('u');
+    return -1;
+}
+
+static void ios_dbg_hex8(UCHAR value)
+{
+    UCHAR hi;
+    UCHAR lo;
+
+    hi = (UCHAR)((value >> 4) & 0x0F);
+    lo = (UCHAR)(value & 0x0F);
+    dbg_mark((char)(hi < 10 ? ('0' + hi) : ('A' + hi - 10)));
+    dbg_mark((char)(lo < 10 ? ('0' + lo) : ('A' + lo - 10)));
+}
+
+static void ios_dbg_hex16(USHORT value)
+{
+    ios_dbg_hex8((UCHAR)((value >> 8) & 0xFF));
+    ios_dbg_hex8((UCHAR)(value & 0xFF));
+}
+
+static void ios_dbg_hex32(ULONG value)
+{
+    ios_dbg_hex16((USHORT)((value >> 16) & 0xFFFF));
+    ios_dbg_hex16((USHORT)(value & 0xFFFF));
+}
+
+int ntmini_device_init(void)
 {
     ULONG result;
+    ULONG pvd_root_lba;
+    ULONG pvd_root_size;
 
-    dbg_mark('C');  /* breadcrumb: entered C function */
-    DBGPRINT("NTMINI: ios_register_port_driver()\n");
+    if (g_nt5_init_done) {
+        dbg_mark('d');
+        return 0;
+    }
+
+    dbg_mark('C');
+    DBGPRINT("NTMINI: ntmini_device_init()\n");
 
     /* Initialize NT5 WDM driver stack (load W2K atapi.sys).
      * This must happen before IOS registration so the bridge
      * knows what devices exist when IOS sends AEP events. */
     dbg_mark('D');  /* breadcrumb: about to call nt5_init */
-    result = nt5_init(1);  /* 1 = primary IDE channel */
+    result = nt5_init(0);  /* 0 = secondary IDE channel, where QEMU -cdrom lives */
     dbg_mark('E');  /* breadcrumb: returned from nt5_init */
     if (result != 0) {
         DBGPRINT("NTMINI: NT5 init failed (%d), continuing with IOS anyway\n",
                  (int)result);
         /* Don't abort - IOS registration still needed for the NT4 fallback */
+    } else {
+        dbg_mark('C');
+        dbg_mark('S');
+        if (nt5_get_iso_pvd_info(&pvd_root_lba, &pvd_root_size) == 0) {
+            g_iso_root_lba = pvd_root_lba;
+            g_iso_root_size = pvd_root_size;
+            g_iso_pvd_valid = 1;
+            g_iso_root_cached = 0;
+            dbg_mark('V');
+            ios_dbg_hex32(g_iso_root_lba);
+            dbg_mark('v');
+            ios_dbg_hex32(g_iso_root_size);
+            if (nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
+                                       &pvd_root_lba, &pvd_root_size) == 0) {
+                g_iso_root_lba = pvd_root_lba;
+                g_iso_root_size = pvd_root_size;
+                g_iso_root_cached = 1;
+                dbg_mark('W');
+            }
+        } else {
+            dbg_mark('V');
+            dbg_mark('!');
+        }
     }
+
+    g_nt5_init_done = 1;
+    dbg_mark('i');
+    return 0;
+}
+
+int ios_register_port_driver(void)
+{
+    ULONG result;
+
+    if (g_ios_registered) {
+        dbg_mark('d');
+        return 0;
+    }
+
+    if (!g_nt5_init_done) {
+        result = (ULONG)ntmini_device_init();
+        if (result != 0) {
+            return (int)result;
+        }
+    }
+
+    dbg_mark('C');  /* breadcrumb: entered C function */
+    DBGPRINT("NTMINI: ios_register_port_driver()\n");
 
     /* Zero out bridge state */
     zero_mem(&g_bridge, sizeof(g_bridge));
 
-    /* Fill in our Device Descriptor Block.
-     * This tells IOS:
-     *   - We are a port driver (DDB_CLASS_PORT)
-     *   - Our name is "NTMINI" (visible in device manager)
-     *   - Our AEP handler function pointer
-     *   - Our merit (priority in the driver stack) */
-    g_bridge.ddb.DDB_size  = sizeof(DDB);
-    g_bridge.ddb.DDB_class = DDB_CLASS_PORT;
-    g_bridge.ddb.DDB_flags = 0;
-    g_bridge.ddb.DDB_merit = DDB_MERIT_PORT_NORMAL;
+    /* Build the real IOS Driver Registration Packet.
+     * IOS_Register expects a packed DRP. */
+    g_bridge.drp.eyecatch[0] = 'X';
+    g_bridge.drp.eyecatch[1] = 'X';
+    g_bridge.drp.eyecatch[2] = 'X';
+    g_bridge.drp.eyecatch[3] = 'X';
+    g_bridge.drp.eyecatch[4] = 'X';
+    g_bridge.drp.eyecatch[5] = 'X';
+    g_bridge.drp.eyecatch[6] = 'X';
+    g_bridge.drp.eyecatch[7] = 'X';
+    g_bridge.drp.lgn = (1UL << 0x16);      /* DRP_ESDI_PD */
+    g_bridge.drp.aer = (ULONG)aep_handler;
+    g_bridge.drp.ilb = 0;
+    g_bridge.drp.ascii_name[0] = 'N';
+    g_bridge.drp.ascii_name[1] = 'T';
+    g_bridge.drp.ascii_name[2] = 'M';
+    g_bridge.drp.ascii_name[3] = 'I';
+    g_bridge.drp.ascii_name[4] = 'N';
+    g_bridge.drp.ascii_name[5] = 'I';
+    g_bridge.drp.ascii_name[6] = '\0';
+    g_bridge.drp.revision = 1;
+    g_bridge.drp.feature_code = 0x00080040; /* ESDI_506 pattern */
+    g_bridge.drp.if_requirements = 0x00FF; /* DRP_IF_STD */
+    g_bridge.drp.bus_type = 0x00;          /* DRP_BT_ESDI */
+    g_bridge.drp.reg_result = 0;
+    g_bridge.drp.reference_data = 0;
+    g_bridge.drp.reserved1[0] = 0;
+    g_bridge.drp.reserved1[1] = 0;
+    g_bridge.drp.reserved2 = 0;
+    g_bridge.ios_ddb = (ULONG)&NTMINI_DDB;
 
-    /* Driver name: padded to 16 chars, null-terminated */
-    g_bridge.ddb.DDB_name[0]  = 'N';
-    g_bridge.ddb.DDB_name[1]  = 'T';
-    g_bridge.ddb.DDB_name[2]  = 'M';
-    g_bridge.ddb.DDB_name[3]  = 'I';
-    g_bridge.ddb.DDB_name[4]  = 'N';
-    g_bridge.ddb.DDB_name[5]  = 'I';
-    g_bridge.ddb.DDB_name[6]  = '\0';
-
-    /* The AEP handler: IOS calls this for all events */
-    g_bridge.ddb.DDB_aep_handler = (PVOID)aep_handler;
-    g_bridge.ddb.DDB_lgn         = 0;
-    g_bridge.ddb.DDB_expansion   = NULL;
-
-    /* Register with IOS. This call is synchronous. On return, IOS
-     * has recorded our DDB and will begin sending us AEP events.
-     * The first event will be AEP_INITIALIZE. */
-    result = IOS_Register(&g_bridge.ddb);
+    dbg_mark('R');
+    result = 0; /* control: skip real IOS_Register */
+    dbg_mark('r');
 
     if (result != 0) {
+        dbg_mark('f');
         DBGPRINT("NTMINI: IOS_Register FAILED (result=%lx)\n", result);
         return -1;
     }
 
-    DBGPRINT("NTMINI: IOS_Register succeeded\n");
+    dbg_mark('s');
+    DBGPRINT("NTMINI: IOS_Register skipped\n");
+    dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
+    dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
+    dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
+    if (ios_late_create_device() != 0) {
+        dbg_mark('w');
+        return -1;
+    }
+    g_ios_registered = 1;
+    dbg_mark('g');
     return 0;
+
+    {
+        extern ULONG CM_Locate_DevNode_Wrapper(ULONG *pdevnode, char *device_id, ULONG flags);
+        extern ULONG CM_Create_DevNode_Wrapper(ULONG *pdevnode, char *device_id, ULONG parent, ULONG flags);
+        extern ULONG CM_Register_Device_Driver_Wrapper(ULONG devnode, PVOID handler, ULONG refdata, ULONG flags);
+        extern ULONG CM_Setup_DevNode_Wrapper(ULONG devnode, ULONG flags);
+        ULONG devnode = 0;
+        ULONG parent = 0;
+        ULONG cr;
+        char dev_id[] = "Root\\SCSIAdapter\\0000";
+
+        dbg_mark('M');
+        cr = CM_Locate_DevNode_Wrapper(&devnode, dev_id, 0);
+        if (cr == 0 && devnode != 0) {
+            dbg_mark('N');
+            cr = CM_Register_Device_Driver_Wrapper(devnode, (PVOID)0, 0, 0);
+            if (cr == 0) {
+                dbg_mark('O');
+            }
+            cr = CM_Setup_DevNode_Wrapper(devnode, 0);
+            if (cr == 0) {
+                dbg_mark('P');
+            }
+        } else {
+            dbg_mark('Q');
+            cr = CM_Locate_DevNode_Wrapper(&parent, (char *)0, 0);
+            if (cr == 0 && parent != 0) {
+                dbg_mark('G');
+                cr = CM_Create_DevNode_Wrapper(&devnode, dev_id, parent, 0);
+                if ((cr == 0 || cr == 0x10) && devnode != 0) {
+                    dbg_mark('C');
+                } else if (cr == 0x10) {
+                    cr = CM_Locate_DevNode_Wrapper(&devnode, dev_id, 0);
+                }
+                if (devnode != 0) {
+                    cr = CM_Register_Device_Driver_Wrapper(devnode, (PVOID)0, 0, 0);
+                    if (cr == 0) {
+                        dbg_mark('O');
+                    }
+                    cr = CM_Setup_DevNode_Wrapper(devnode, 0);
+                    if (cr == 0) {
+                        dbg_mark('P');
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int is_ring0_ptr(ULONG ptr)
+{
+    return ptr >= 0xC0000000UL && ptr < 0xD0000000UL;
+}
+
+static PIOS_ILB validate_ilb(ULONG ptr)
+{
+    PIOS_ILB ilb;
+
+    if (!is_ring0_ptr(ptr)) {
+        return (PIOS_ILB)0;
+    }
+
+    ilb = (PIOS_ILB)ptr;
+    if (!is_ring0_ptr(ilb->service_rtn)) {
+        return (PIOS_ILB)0;
+    }
+
+    return ilb;
+}
+
+static int is_drp_eyecatcher(UCHAR *ptr)
+{
+    return ptr[0] == 'X' && ptr[1] == 'X' && ptr[2] == 'X' && ptr[3] == 'X' &&
+           ptr[4] == 'X' && ptr[5] == 'X' && ptr[6] == 'X' && ptr[7] == 'X';
+}
+
+static PIOS_ILB find_existing_ilb(void)
+{
+    ULONG ios_ddb;
+    UCHAR *walk_ddb;
+    ULONG start_ddb;
+    int ddb_count;
+
+    dbg_mark('M');
+
+    ios_ddb = VMM_Get_DDB_Wrapper(0x0010);
+    if (!is_ring0_ptr(ios_ddb)) {
+        return (PIOS_ILB)0;
+    }
+
+    walk_ddb = (UCHAR *)ios_ddb;
+    start_ddb = ios_ddb;
+    for (ddb_count = 0; ddb_count < 80; ddb_count++) {
+        ULONG next_ddb = *(ULONG *)walk_ddb;
+        ULONG ctrl = *(ULONG *)(walk_ddb + 0x18);
+        ULONG ref = *(ULONG *)(walk_ddb + 0x2C);
+
+        if (is_ring0_ptr(ref)) {
+            UCHAR *drp = (UCHAR *)ref;
+            if (is_drp_eyecatcher(drp)) {
+                PIOS_ILB ilb = validate_ilb(*(ULONG *)(drp + 0x10));
+                if (ilb) {
+                    dbg_mark('V');
+                    return ilb;
+                }
+            }
+        }
+
+        if (is_ring0_ptr(ctrl) && ref != (ULONG)&g_bridge.drp) {
+            ULONG off;
+            UCHAR *base = (UCHAR *)(ctrl & 0xFFFFF000UL);
+            for (off = 0; off < 0x2000; off += 4) {
+                UCHAR *drp = base + off;
+                if (drp != (UCHAR *)&g_bridge.drp && is_drp_eyecatcher(drp)) {
+                    PIOS_ILB ilb = validate_ilb(*(ULONG *)(drp + 0x10));
+                    if (ilb) {
+                        dbg_mark('V');
+                        return ilb;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!is_ring0_ptr(next_ddb) || next_ddb == start_ddb) {
+            break;
+        }
+        walk_ddb = (UCHAR *)next_ddb;
+    }
+
+    return (PIOS_ILB)0;
+}
+
+static int ios_late_create_device(void)
+{
+    PIOS_ILB ilb;
+    ISP_CREATE_DCB_PKT isp_dcb;
+    ISP_INSERT_CD_PKT isp_cd;
+    ISP_BCAST_AEP_PKT isp_bcast;
+    ISP_ASSOC_DCB_PKT isp_assoc;
+    ISP_GET_DCB_PKT isp_get;
+    ISP_QUERY_MATCH_PKT isp_match;
+    ISP_PICK_DRIVE_LETTER_PKT isp_pick;
+    ISP_DEV_ARRIVED_PKT isp_arrived;
+    UCHAR aep_buf[20];
+    PDCB dcb;
+    UCHAR *raw;
+
+    ilb = validate_ilb(g_bridge.drp.ilb);
+    if (!ilb) {
+        ilb = find_existing_ilb();
+        if (ilb) {
+            g_bridge.drp.ilb = (ULONG)ilb;
+        }
+    }
+    if (!ilb) {
+        dbg_mark('e');
+        return -1;
+    }
+
+    zero_mem(&isp_dcb, sizeof(isp_dcb));
+    isp_dcb.func = 1;          /* ISP_CREATE_DCB */
+    isp_dcb.dcb_size = 256;
+    Call_ILB_Service(ilb->service_rtn, &isp_dcb);
+    if (isp_dcb.result != 0 || !is_ring0_ptr(isp_dcb.dcb_ptr)) {
+        dbg_mark('d');
+        return -1;
+    }
+
+    dbg_mark('D');
+    dcb = (PDCB)isp_dcb.dcb_ptr;
+    raw = (UCHAR *)dcb;
+    *(ULONG *)(raw + 0x40) = 0x01009005UL;
+    *(ULONG *)(raw + 0x44) = 0x00000002UL;
+    *(ULONG *)(raw + 0x4C) = 11UL;
+    *(ULONG *)(raw + 0x50) = 2048UL;
+    g_late_dcb_ptr = isp_dcb.dcb_ptr;
+    g_late_dcb_destroyed = 0;
+    /* IOS-created physical DCBs use the real DDK layout. */
+    dbg_mark('p');
+    /* Isolation: leave DCB geometry and strings as IOS created them. */
+
+    zero_mem(&isp_cd, sizeof(isp_cd));
+    isp_cd.func = 5;          /* ISP_INSERT_CALLDOWN */
+    isp_cd.dcb = isp_dcb.dcb_ptr;
+    isp_cd.req = (ULONG)ios_wdm_ior_entry;
+    isp_cd.ddb = g_bridge.ios_ddb;
+    isp_cd.flags = 0x00000109UL; /* SRB CDB, physical, not-512 */
+    isp_cd.lgn = 0x16;        /* DRP_ESDI_PD_BIT */
+    Call_ILB_Service(ilb->service_rtn, &isp_cd);
+    if (isp_cd.result != 0) {
+        dbg_mark('q');
+        return -1;
+    }
+    dbg_mark('q');
+
+    dbg_mark('P');
+    dbg_mark('A');
+    dbg_mark('a');
+    dbg_mark('B');
+    zero_mem(&isp_bcast, sizeof(isp_bcast));
+    zero_mem(aep_buf, sizeof(aep_buf));
+    *(USHORT *)(aep_buf + 0x00) = AEP_CONFIG_DCB;
+    *(USHORT *)(aep_buf + 0x02) = 0;
+    *(ULONG *)(aep_buf + 0x04) = g_bridge.ios_ddb;
+    *(ULONG *)(aep_buf + 0x08) = 0x16UL;
+    *(ULONG *)(aep_buf + 0x0C) = isp_dcb.dcb_ptr;
+    isp_bcast.func = 20;       /* ISP_BROADCAST_AEP */
+    isp_bcast.paep = (ULONG)aep_buf;
+    Call_ILB_Service(ilb->service_rtn, &isp_bcast);
+    if (isp_bcast.result != 0) {
+        dbg_mark('h');
+        return -1;
+    }
+    dbg_mark('b');
+
+    zero_mem(&isp_get, sizeof(isp_get));
+    isp_get.func = 7;          /* ISP_GET_DCB */
+    isp_get.drive = 3;         /* D: */
+    Call_ILB_Service(ilb->service_rtn, &isp_get);
+    DBGPRINT("NTMINI: ISP_GET_DCB D: result=%04x dcb=%08lx ours=%08lx\n",
+             isp_get.result, isp_get.dcb, isp_dcb.dcb_ptr);
+    dbg_mark('[');
+    ios_dbg_hex16(isp_get.result);
+    ios_dbg_hex32(isp_get.dcb);
+    ios_dbg_hex32(isp_dcb.dcb_ptr);
+    dbg_mark(']');
+    dbg_mark((isp_get.result == 0 && isp_get.dcb == isp_dcb.dcb_ptr) ? 'Y' : 'y');
+
+    zero_mem(&isp_match, sizeof(isp_match));
+    isp_match.func = 11;       /* ISP_QUERY_MATCHING_DCBS */
+    isp_match.dcb = isp_dcb.dcb_ptr;
+    Call_ILB_Service(ilb->service_rtn, &isp_match);
+    DBGPRINT("NTMINI: ISP_QUERY_MATCHING_DCBS result=%04x drives=%08lx\n",
+             isp_match.result, isp_match.drives);
+    dbg_mark('(');
+    ios_dbg_hex16(isp_match.result);
+    ios_dbg_hex32(isp_match.drives);
+    dbg_mark(')');
+    dbg_mark((isp_match.result == 0 && (isp_match.drives & (1UL << 3))) ? 'Z' : 'z');
+
+    dbg_mark('S');
+    dbg_mark('s');
+
+    {
+        ULONG cd;
+        ULONG depth;
+        ULONG found_stub;
+
+        cd = *(ULONG *)(raw + 0x08);
+        depth = 0;
+        found_stub = 0;
+        while (is_ring0_ptr(cd) && depth < 8) {
+            ULONG node_ddb;
+            UCHAR *ddb_name;
+
+            node_ddb = *(ULONG *)(cd + 0x08);
+            dbg_mark('#');
+            dbg_mark((char)('0' + (char)depth));
+            dbg_mark('{');
+            ios_dbg_hex32(*(ULONG *)cd);
+            ios_dbg_hex32(*(ULONG *)(cd + 0x04));
+            ios_dbg_hex32(node_ddb);
+            dbg_mark('}');
+            if (is_ring0_ptr(node_ddb)) {
+                ddb_name = (UCHAR *)(node_ddb + 0x0C);
+                dbg_mark((char)(ddb_name[0] >= 0x20 && ddb_name[0] < 0x7F ? ddb_name[0] : '.'));
+                dbg_mark((char)(ddb_name[1] >= 0x20 && ddb_name[1] < 0x7F ? ddb_name[1] : '.'));
+                dbg_mark((char)(ddb_name[2] >= 0x20 && ddb_name[2] < 0x7F ? ddb_name[2] : '.'));
+                dbg_mark((char)(ddb_name[3] >= 0x20 && ddb_name[3] < 0x7F ? ddb_name[3] : '.'));
+            }
+            if (*(ULONG *)cd == (ULONG)ios_wdm_ior_entry ||
+            *(ULONG *)cd == (ULONG)ios_wdm_passthru_stub ||
+            *(ULONG *)cd == (ULONG)ios_wdm_preserve_stub) {
+                found_stub = 1;
+            }
+            cd = *(ULONG *)(cd + 0x0C);
+            depth++;
+        }
+        dbg_mark((char)('0' + (char)depth));
+        dbg_mark(found_stub ? 'F' : 'f');
+    }
+
+    /* Leave the direct-ILB DCB live for the next isolation step. */
+    if (!g_fsd_registered) {
+        dbg_mark('Y');
+        g_fsd_provider_id = IFSMgr_RegisterMount_Wrapper((ULONG)ntmini_fsd_mount_probe,
+                                                         0x22, 0);
+        dbg_mark('y');
+        DBGPRINT("NTMINI: IFSMgr_RegisterMount provider=%08lx\n",
+                 g_fsd_provider_id);
+        dbg_mark('{');
+        ios_dbg_hex32(g_fsd_provider_id);
+        dbg_mark('}');
+        if (g_fsd_provider_id != 0xFFFFFFFFUL) {
+            g_fsd_registered = 1;
+            dbg_mark('P');
+            if (!g_fsd_hook_installed) {
+                dbg_mark('h');
+            }
+            dbg_mark('V');
+            IFSMgr_NotifyVolumeArrival_Wrapper(3);
+            dbg_mark('N');
+            dbg_mark('v');
+        } else {
+            dbg_mark('p');
+        }
+    }
+    return 0;
+}
+
+int ios_late_destroy_device(void)
+{
+    PIOS_ILB ilb;
+    ISP_DCB_DESTROY_PKT isp_destroy;
+
+    if (!g_late_dcb_ptr || g_late_dcb_destroyed) {
+        dbg_mark('o');
+        return 0;
+    }
+
+    ilb = validate_ilb(g_bridge.drp.ilb);
+    if (!ilb) {
+        ilb = find_existing_ilb();
+        if (ilb) {
+            g_bridge.drp.ilb = (ULONG)ilb;
+        }
+    }
+    if (!ilb) {
+        dbg_mark('j');
+        return -1;
+    }
+
+    dbg_mark('j');
+    zero_mem(&isp_destroy, sizeof(isp_destroy));
+    isp_destroy.func = 10;       /* ISP_DESTROY_DCB */
+    isp_destroy.dcb = g_late_dcb_ptr;
+    Call_ILB_Service(ilb->service_rtn, &isp_destroy);
+    if (isp_destroy.result != 0) {
+        dbg_mark('w');
+        return -1;
+    }
+
+    g_late_dcb_destroyed = 1;
+    g_late_dcb_ptr = 0;
+    dbg_mark('x');
+    return 0;
+}
+
+void __cdecl ios_late_cdrom_attach_probe(void)
+{
+    ULONG vrp;
+    ULONG attach_result;
+
+    if (g_late_attach_done || !g_fsd_registered) {
+        dbg_mark('n');
+        return;
+    }
+
+    g_late_attach_done = 1;
+    vrp = 0;
+    dbg_mark('T');
+    attach_result = IFSMgr_CDROM_Attach_Wrapper(3, &vrp);
+    dbg_mark('t');
+    ios_dbg_hex32(attach_result);
+    ios_dbg_hex32(vrp);
+}
+
+static void __cdecl ios_late_cdrom_attach_timer(PVOID refdata)
+{
+    (void)refdata;
+    dbg_mark('Z');
+    ios_late_cdrom_attach_probe();
+}
+
+void __cdecl ios_schedule_late_cdrom_attach_probe(void)
+{
+    ULONG handle;
+
+    if (g_late_attach_done || g_late_attach_scheduled || !g_fsd_registered) {
+        dbg_mark('n');
+        return;
+    }
+
+    g_late_attach_scheduled = 1;
+    dbg_mark('Q');
+    handle = VxD_SetTimer(1000, (PVOID)ios_late_cdrom_attach_timer, (PVOID)0);
+    ios_dbg_hex32(handle);
+    if (handle == 0) {
+        g_late_attach_scheduled = 0;
+        dbg_mark('q');
+    }
 }
 
 
@@ -394,21 +2904,25 @@ int ios_register_port_driver(void)
 
 void __cdecl aep_handler(PAEP aep)
 {
+    dbg_mark('H');
     switch (aep->AEP_func) {
 
     case AEP_INITIALIZE:
+        dbg_mark('I');
         /* IOS is initializing us. Save context, report capabilities.
          * This is the first AEP we receive after IOS_Register. */
         aep_initialize(aep);
         break;
 
     case AEP_BOOT_COMPLETE:
+        dbg_mark('O');
         /* System boot sequence is finished. All devices detected,
          * file systems mounted. Safe to do deferred initialization. */
         aep_boot_complete(aep);
         break;
 
     case AEP_CONFIG_DCB:
+        dbg_mark('G');
         /* IOS is telling us about a device. For a port driver, this
          * is where we claim devices we can handle. We insert our
          * calldown handler into the DCB's calldown chain. */
@@ -416,63 +2930,103 @@ void __cdecl aep_handler(PAEP aep)
         break;
 
     case AEP_UNCONFIG_DCB:
+        dbg_mark('U');
         /* A device is being removed. Clean up our state for it. */
         aep_unconfig_dcb(aep);
         break;
 
-    case AEP_IOR:
-        /* An I/O request has arrived for one of our devices.
-         * This is the hot path: translate IOR to SRB and dispatch. */
-        aep_process_ior(aep);
+    case AEP_PEND_UNCONFIG_DCB:
+        dbg_mark('Z');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
+    case AEP_IOP_TIMEOUT:
+        dbg_mark('Q');
+        /* Conservative isolation: do not claim timer handling while
+         * IOS registration is still crashing during boot. */
+        aep->AEP_result = AEP_FAILURE;
         break;
 
     case AEP_SYSTEM_SHUTDOWN:
-        /* System is shutting down gracefully. Flush caches, etc. */
-        aep_system_shutdown(aep);
+        dbg_mark('T');
+        /* Conservative isolation: do not mutate queue state for a
+         * shutdown event observed immediately after IOS_Register. */
+        aep->AEP_result = AEP_SUCCESS;
         break;
 
     case AEP_SYSTEM_CRIT_SHUTDOWN:
+        dbg_mark('K');
         /* Power failure or critical shutdown. No time for cleanup. */
         aep->AEP_result = AEP_SUCCESS;
         break;
 
     case AEP_UNINITIALIZE:
+        dbg_mark('N');
         /* Driver is being unloaded. Free all resources. */
         aep_uninitialize(aep);
         break;
 
     case AEP_ASSOCIATE_DCB:
+        dbg_mark('A');
         /* IOS is associating a DCB with us. Accept it. */
         aep->AEP_result = AEP_SUCCESS;
         break;
 
-    case AEP_DISASSOCIATE_DCB:
-        /* IOS is removing our association with a DCB. Accept it. */
-        aep->AEP_result = AEP_SUCCESS;
-        break;
-
     case AEP_REAL_MODE_HANDOFF:
+        dbg_mark('M');
         /* Transitioning from real-mode to protected-mode driver.
          * We don't have a real-mode component, so nothing to do. */
         aep->AEP_result = AEP_SUCCESS;
         break;
 
     case AEP_DCB_LOCK:
+        dbg_mark('L');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
     case AEP_MOUNT_NOTIFY:
+        dbg_mark('W');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
     case AEP_CREATE_VRP:
+        dbg_mark('V');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
     case AEP_DESTROY_VRP:
+        dbg_mark('Y');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
     case AEP_REFRESH_DRIVE:
+        dbg_mark('P');
         /* These events are handled by upper layers (VTD, TSD).
          * Port drivers can ignore them. */
         aep->AEP_result = AEP_SUCCESS;
         break;
 
+    case 27:  /* AEP_QUERY_CD_SPINDOWN */
+        dbg_mark('B');
+        aep->AEP_result = AEP_SUCCESS;
+        break;
+
     default:
-        /* Unknown AEP function code. Return "not supported" so IOS
-         * knows we didn't handle it and can try the next driver. */
-        aep->AEP_result = AEP_NO_SUPPORT;
+    {
+        UCHAR hi;
+        UCHAR lo;
+        dbg_mark('?');
+        hi = (UCHAR)((aep->AEP_func >> 4) & 0x0F);
+        lo = (UCHAR)(aep->AEP_func & 0x0F);
+        dbg_mark((char)(hi < 10 ? ('0' + hi) : ('A' + hi - 10)));
+        dbg_mark((char)(lo < 10 ? ('0' + lo) : ('A' + lo - 10)));
+        /* Unknown AEP function code. Fail conservatively until the IOS
+         * registration path is stable. */
+        aep->AEP_result = AEP_FAILURE;
         break;
     }
+    }
+
 }
 
 
@@ -497,6 +3051,7 @@ static void aep_initialize(PAEP aep)
 
     /* Save IOS reference data. This is used in future IOS calls. */
     g_bridge.ios_ref = aep->AEP_BI_REFERENCE;
+    g_bridge.ios_ddb = aep->AEP_ddb;
 
     /* Mark ourselves as initialized */
     g_bridge.initialized = TRUE;
@@ -553,6 +3108,11 @@ static void aep_config_dcb(PAEP aep)
         aep->AEP_result = AEP_FAILURE;
         return;
     }
+    if ((ULONG)dcb == g_late_dcb_ptr) {
+        dbg_mark('c');
+        aep->AEP_result = AEP_SUCCESS;
+        return;
+    }
 
     DBGPRINT("NTMINI: AEP_CONFIG_DCB type=%d target=%d\n",
              dcb->DCB_device_type, dcb->DCB_target_id);
@@ -575,7 +3135,7 @@ static void aep_config_dcb(PAEP aep)
     if (dcb->DCB_device_type != DCB_TYPE_CDROM &&
         !(dcb->DCB_dmd_flags & DCB_DEV_ATAPI)) {
         /* Not our device. Let another port driver handle it. */
-        aep->AEP_result = AEP_NO_SUPPORT;
+        aep->AEP_result = AEP_FAILURE;
         return;
     }
 
@@ -624,12 +3184,17 @@ static void aep_config_dcb(PAEP aep)
     /* Insert our calldown handler into the DCB's calldown chain.
      * This tells IOS "send I/O for this device to my handler."
      * We insert at the bottom because we ARE the port driver. */
+    if (!g_bridge.ios_ddb) {
+        aep->AEP_result = AEP_FAILURE;
+        return;
+    }
+
     g_bridge.calldown.CD_func  = (CALLDOWN_FUNC)ior_handler;
-    g_bridge.calldown.CD_ddb   = &g_bridge.ddb;
+    g_bridge.calldown.CD_ddb   = g_bridge.ios_ddb;
     g_bridge.calldown.CD_next  = NULL;
     g_bridge.calldown.CD_flags = 0;
 
-    ISP_INSERT_CALLDOWN(dcb, &g_bridge.calldown, &g_bridge.ddb,
+    ISP_INSERT_CALLDOWN(dcb, &g_bridge.calldown, g_bridge.ios_ddb,
                          ISPCDF_BOTTOM | ISPCDF_PORT_DRIVER);
 
     g_bridge.num_devices++;
@@ -781,6 +3346,127 @@ static void aep_uninitialize(PAEP aep)
  *   CDB[7-8] = block count (big-endian 16-bit)
  *   CDB[9] = 0 (control)
  * ================================================================ */
+
+static void __cdecl ios_ior_entry(PVOID iop_ptr)
+{
+    PUCHAR iop;
+    PIOR ior;
+
+    dbg_mark('X');
+    if (!iop_ptr || !is_ring0_ptr((ULONG)iop_ptr)) {
+        dbg_mark('x');
+        return;
+    }
+
+    iop = (PUCHAR)iop_ptr;
+    ior = (PIOR)(iop + 0x64);
+    if (!is_ring0_ptr((ULONG)ior)) {
+        dbg_mark('x');
+        return;
+    }
+
+    /* IOS calldown passes an IOP pointer; the public IOR starts at IOP+0x64.
+     * Internal requests are completed by the chain executor after we return. */
+    ior->IOR_status = IORS_NOT_SUPPORTED;
+    if (iop[0x6D] & 0x04) {
+        dbg_mark('j');
+        return;
+    }
+
+    complete_ior(ior, IORS_NOT_SUPPORTED);
+}
+
+void __cdecl ios_wdm_log_iop(PVOID iop_ptr)
+{
+    UCHAR *raw;
+    USHORT fn;
+    ULONG flags;
+    ULONG seq;
+
+    dbg_mark('W');
+    if (!is_ring0_ptr((ULONG)iop_ptr)) {
+        dbg_mark('!');
+        return;
+    }
+
+    dbg_mark('<');
+    ios_dbg_hex32((ULONG)iop_ptr);
+    dbg_mark('>');
+
+    if (g_wdm_iop_dump_count < 8) {
+        raw = (UCHAR *)iop_ptr;
+        fn = *(USHORT *)(raw + 0x68);
+        flags = *(ULONG *)(raw + 0x6C);
+        seq = *(ULONG *)(raw + 0x70);
+        dbg_mark('{');
+        ios_dbg_hex16(fn);
+        ios_dbg_hex32(flags);
+        ios_dbg_hex32(seq);
+        dbg_mark('}');
+        g_wdm_iop_dump_count++;
+    }
+
+    dbg_mark('w');
+}
+
+void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
+{
+    UCHAR *ior_raw;
+
+    /* Diagnostic-only probe: verify IOS actually routes a D: request into
+     * our late calldown before decoding the IOP/IOR.  The real IOR offset
+     * must come from ISP_CREATE_IOP's delta_to_ior, not the old hard-coded
+     * iop+0x64 guess. */
+    dbg_mark('W');
+    if (!iop_ptr || !is_ring0_ptr((ULONG)iop_ptr)) {
+        dbg_mark('w');
+        return;
+    }
+
+    dbg_mark('<');
+    ios_dbg_hex32((ULONG)iop_ptr);
+    dbg_mark('>');
+    if (g_wdm_iop_dump_count < 1) {
+        ULONG off;
+        UCHAR *dump_ptr;
+
+        dump_ptr = (UCHAR *)iop_ptr - 0x60;
+        dbg_mark('D');
+        for (off = 0; off < 256; off++) {
+            ios_dbg_hex8(dump_ptr[off]);
+        }
+        dbg_mark('d');
+        g_wdm_iop_dump_count++;
+    }
+    dbg_mark('R');
+    ios_dbg_hex16(*(USHORT *)((UCHAR *)iop_ptr + 0x68));
+    ios_dbg_hex16(*(USHORT *)((UCHAR *)iop_ptr + 0x6A));
+    ios_dbg_hex32(*(ULONG *)((UCHAR *)iop_ptr + 0x6C));
+    ios_dbg_hex32(*(ULONG *)((UCHAR *)iop_ptr + 0x70));
+    dbg_mark('r');
+    ior_raw = (UCHAR *)iop_ptr + 0x64;
+    if (!is_ring0_ptr((ULONG)ior_raw)) {
+        dbg_mark('w');
+        return;
+    }
+
+    if (*(USHORT *)((UCHAR *)iop_ptr + 0x68) == 0x0026) {
+        *(USHORT *)(ior_raw + 0x06) = 0;
+        dbg_mark('S');
+        IOS_BD_Complete_IOP(iop_ptr);
+        dbg_mark('C');
+        return;
+    }
+    *(USHORT *)(ior_raw + 0x06) = 0;
+    dbg_mark('0');
+    if (*((UCHAR *)iop_ptr + 0x6D) & 0x04) {
+        dbg_mark('Q');
+        return;
+    }
+    IOS_BD_Complete_IOP(iop_ptr);
+    dbg_mark('C');
+    return;
+}
 
 static void ior_handler(PIOR ior, PDCB dcb)
 {
@@ -1586,7 +4272,7 @@ PDCB bridge_create_dcb(
     dcb->DCB_cmn_size       = sizeof(DCB);
     dcb->DCB_next           = NULL;
     dcb->DCB_next_logical   = NULL;
-    dcb->DCB_ddb            = &g_bridge.ddb;
+    dcb->DCB_ddb            = g_bridge.ios_ddb;
 
     dcb->DCB_device_type    = device_type;
     dcb->DCB_bus_type       = DCB_BUS_ESDI; /* IDE is ESDI-class in Win9x */

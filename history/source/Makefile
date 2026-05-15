@@ -6,6 +6,7 @@
 WCC = wcc386
 WLINK = wlink
 NASM_CMD = nasm
+WASM = wasm
 
 # Watcom C flags
 # -bt=windows  : target Windows (VxD ring-0)
@@ -24,6 +25,7 @@ NASMFLAGS = -f obj
 # Output
 NT5_VXD = NT5RAW.VXD
 NT4_VXD = V5RAW.VXD
+V5SMALL_VXD = V5SMALL.VXD
 
 # ============================================================
 # NT5 PATH (WDM compatibility layer for W2K atapi.sys)
@@ -53,26 +55,70 @@ NT5_C_OBJS = $(NT5_C_SRCS:.C=.obj)
 NT5_LNK = link_nt5.lnk
 
 # ============================================================
+# V5 PATH (static VxD path used by LE fixer + SYSTEM.INI boot)
+# ============================================================
+
+V5_ASM_SRC = VXDWRAP.ASM
+V5_ASM_OBJ = V5R_wrap.obj
+V5_C_MAIN_SRC = NTMINI_V5.C
+V5_C_MAIN_OBJ = V5R_c.obj
+V5_C_PE_SRC = PELOAD.C
+V5_C_PE_OBJ = V5R_pe.obj
+V5_LNK = link_v5.lnk
+
+V5S_ASM_OBJ = V5S_wrap.obj
+V5S_C_MAIN_OBJ = V5S_c.obj
+V5S_C_PE_OBJ = V5S_pe.obj
+V5SMALL_LNK = v5small_1obj.lnk
+
+# ============================================================
 # Targets
 # ============================================================
 
-.PHONY: all nt5 clean
+.PHONY: all nt5 v5 v5small clean
 
 all: nt5
 
 nt5: $(NT5_VXD)
+v5: $(NT4_VXD)
+v5small: $(V5SMALL_VXD)
 
 # Assemble VXDWRAP
 $(NT5_ASM_OBJ): $(NT5_ASM_SRC)
 	$(NASM_CMD) $(NASMFLAGS) -o $@ $<
 
+$(V5_ASM_OBJ): $(V5_ASM_SRC)
+	$(WASM) -fo=$@ $<
+
+$(V5S_ASM_OBJ): $(V5_ASM_SRC)
+	$(WASM) -fo=$@ $<
+
 # Generic rule: compile .C to .obj
 %.obj: %.C
+	$(WCC) $(CFLAGS) -fo=$@ $<
+
+$(V5_C_MAIN_OBJ): $(V5_C_MAIN_SRC)
+	$(WCC) $(CFLAGS) -fo=$@ $<
+
+$(V5_C_PE_OBJ): $(V5_C_PE_SRC)
+	$(WCC) $(CFLAGS) -fo=$@ $<
+
+$(V5S_C_MAIN_OBJ): $(V5_C_MAIN_SRC)
+	$(WCC) $(CFLAGS) -fo=$@ $<
+
+$(V5S_C_PE_OBJ): $(V5_C_PE_SRC)
 	$(WCC) $(CFLAGS) -fo=$@ $<
 
 # Link the VxD
 $(NT5_VXD): $(NT5_ASM_OBJ) $(NT5_C_OBJS) $(NT5_LNK)
 	$(WLINK) @$(NT5_LNK)
+
+$(NT4_VXD): $(V5_ASM_OBJ) $(V5_C_MAIN_OBJ) $(V5_C_PE_OBJ) $(V5_LNK)
+	$(WLINK) @$(V5_LNK)
+
+$(V5SMALL_VXD): $(V5S_ASM_OBJ) $(V5S_C_MAIN_OBJ) $(V5S_C_PE_OBJ) $(V5SMALL_LNK)
+	$(WLINK) @$(V5SMALL_LNK)
+	cp V5SMALL_1OBJ.VXD $(V5SMALL_VXD)
 
 # ============================================================
 # Convenience: compile individual files for debugging
@@ -98,4 +144,4 @@ asm:        $(NT5_ASM_OBJ)
 # ============================================================
 
 clean:
-	rm -f *.obj *.OBJ $(NT5_VXD) *.err *.map
+	rm -f *.obj *.OBJ $(NT5_VXD) $(NT4_VXD) $(V5SMALL_VXD) V5SMALL_1OBJ.VXD *.err *.map

@@ -51,6 +51,8 @@ extern void  VxD_HeapFree(PVOID addr);
 
 /* Debug output */
 extern void  VxD_Debug_Printf(const char *fmt, ...);
+extern void  dbg_mark(char c);
+extern int   g_nt5_trace_ports;
 
 /* Registry: wraps VMM RegOpenKey, RegQueryValueEx, etc. */
 extern LONG  VxD_RegOpenKey(ULONG hkey, const char *subkey, PULONG phkResult);
@@ -73,6 +75,53 @@ extern ULONG VxD_SaveFlags(void);
 extern void  VxD_RestoreFlags(ULONG flags);
 
 #define DBGPRINT VxD_Debug_Printf
+
+static void ntk_dbg_hex8(UCHAR value)
+{
+    UCHAR hi;
+    UCHAR lo;
+
+    hi = (UCHAR)((value >> 4) & 0x0F);
+    lo = (UCHAR)(value & 0x0F);
+    dbg_mark((char)(hi < 10 ? ('0' + hi) : ('A' + hi - 10)));
+    dbg_mark((char)(lo < 10 ? ('0' + lo) : ('A' + lo - 10)));
+}
+
+static void ntk_dbg_hex16(USHORT value)
+{
+    ntk_dbg_hex8((UCHAR)((value >> 8) & 0xFF));
+    ntk_dbg_hex8((UCHAR)(value & 0xFF));
+}
+
+static void ntk_trace_port(char op, USHORT port, UCHAR value)
+{
+    static ULONG trace_count = 0;
+    static int trace_mode = 0;
+
+    if (!g_nt5_trace_ports) {
+        trace_mode = 0;
+        return;
+    }
+
+    if (trace_mode != g_nt5_trace_ports) {
+        trace_mode = g_nt5_trace_ports;
+        trace_count = 0;
+        dbg_mark('@');
+        dbg_mark((char)('0' + (g_nt5_trace_ports & 0x0F)));
+    }
+
+    if (trace_count >= 96) {
+        return;
+    }
+
+    dbg_mark(op);
+    ntk_dbg_hex16(port);
+    ntk_dbg_hex8(value);
+    trace_count++;
+    if (trace_count == 96) {
+        dbg_mark('$');
+    }
+}
 
 /* Win9x registry roots */
 #define HKEY_LOCAL_MACHINE  0x80000002UL
@@ -1057,9 +1106,18 @@ NTSTATUS NTAPI KeWaitForSingleObject(
 
     if (!event) return STATUS_INVALID_PARAMETER;
 
+    dbg_mark('!');
+    dbg_mark(Timeout == NULL ? 'T' : 't');
+    dbg_mark(event->Header.SignalState ? 'S' : 's');
+    VxD_Debug_Printf("NTKDBG: KeWaitForSingleObject object=%lx timeout=%lx signal=%ld type=%ld\n",
+                     (ULONG)Object, (ULONG)Timeout,
+                     (ULONG)event->Header.SignalState,
+                     (ULONG)event->Header.Type);
+
     /* Compute max spins from timeout (NULL = infinite) */
     if (Timeout == NULL) {
-        maxSpins = 0xFFFFFFFF; /* Effectively infinite */
+        maxSpins = 200000UL;
+        dbg_mark('B');
     } else if (Timeout->QuadPart == 0) {
         /* Non-blocking check */
         if (event->Header.SignalState) {
@@ -1085,8 +1143,10 @@ NTSTATUS NTAPI KeWaitForSingleObject(
         /* Small delay to avoid hammering the bus */
         PORT_STALL_ONE();
         spinCount++;
-        if (spinCount >= maxSpins)
+        if (spinCount >= maxSpins) {
+            dbg_mark('O');
             return STATUS_TIMEOUT;
+        }
     }
 
     /* Auto-reset for SynchronizationEvent */
@@ -1655,6 +1715,11 @@ VOID NTAPI IoStartPacket(
     if (!DeviceObject || !Irp) return;
 
     drv = DeviceObject->DriverObject;
+    if (g_nt5_trace_ports) {
+        dbg_mark('I');
+        dbg_mark(DeviceObject->DeviceQueue.Busy ? 'B' : 'b');
+        dbg_mark((drv && drv->DriverStartIo) ? 'S' : '0');
+    }
 
     if (!DeviceObject->DeviceQueue.Busy) {
         /* Device is idle, start immediately */
@@ -1662,12 +1727,21 @@ VOID NTAPI IoStartPacket(
         DeviceObject->CurrentIrp = Irp;
 
         if (drv && drv->DriverStartIo) {
+            if (g_nt5_trace_ports) {
+                dbg_mark('[');
+            }
             drv->DriverStartIo(DeviceObject, Irp);
+            if (g_nt5_trace_ports) {
+                dbg_mark(']');
+            }
         }
     } else {
         /* Device busy, queue the IRP */
         KDEVICE_QUEUE_ENTRY *entry = &Irp->Tail.Overlay.DeviceQueueEntry;
         ULONG sortKey = Key ? *Key : 0;
+        if (g_nt5_trace_ports) {
+            dbg_mark('Q');
+        }
         KeInsertByKeyDeviceQueue(&DeviceObject->DeviceQueue, entry, sortKey);
     }
 }
@@ -2032,19 +2106,25 @@ NTSTATUS NTAPI IoAllocateDriverObjectExtension(
     ULONG DriverObjectExtensionSize,
     PVOID *DriverObjectExtension)
 {
+    extern void dbg_mark(char c);
     PVOID ext;
+
+    dbg_mark('U');
 
     if (!DriverObject || !DriverObjectExtension)
         return STATUS_INVALID_PARAMETER;
+    dbg_mark('V');
 
     /* Check if already allocated */
     if (DriverObject->DriverExtension &&
         DriverObject->DriverExtension->ClientDriverExtension) {
+        dbg_mark('W');
         return STATUS_OBJECT_NAME_NOT_FOUND; /* Already exists, use different code? */
     }
 
     ext = ExAllocatePoolWithTag(NonPagedPool, DriverObjectExtensionSize, 'txeD');
     if (!ext) return STATUS_INSUFFICIENT_RESOURCES;
+    dbg_mark('X');
 
     if (!DriverObject->DriverExtension) {
         DriverObject->DriverExtension = (PDRIVER_EXTENSION)ExAllocatePoolWithTag(
@@ -2061,6 +2141,7 @@ NTSTATUS NTAPI IoAllocateDriverObjectExtension(
     DriverObject->DriverExtension->ClientIdentifier = ClientIdentificationAddress;
 
     *DriverObjectExtension = ext;
+    dbg_mark('Z');
     return STATUS_SUCCESS;
 }
 
@@ -2305,6 +2386,8 @@ VOID NTAPI IoInvalidateDeviceRelations(
 {
     DBGPRINT("NTKRNL: IoInvalidateDeviceRelations(%p, type=%d) [stub]\n",
              DeviceObject, Type);
+    dbg_mark('G');
+    dbg_mark((char)('0' + (Type & 0x0F)));
 }
 
 /*
@@ -2328,6 +2411,8 @@ NTSTATUS NTAPI IoReportDetectedDevice(
 
     DBGPRINT("NTKRNL: IoReportDetectedDevice: bus=%d busnum=%lu slot=%lu\n",
              LegacyBusType, BusNumber, SlotNumber);
+    dbg_mark('H');
+    dbg_mark(ResourceAssigned ? 'R' : 'r');
 
     /* Create a PDO (Physical Device Object) for this device */
     status = IoCreateDevice(DriverObject, 0, NULL,
@@ -2337,6 +2422,7 @@ NTSTATUS NTAPI IoReportDetectedDevice(
     pdo->Flags &= ~DO_DEVICE_INITIALIZING;
 
     if (DeviceObject) *DeviceObject = pdo;
+    dbg_mark('h');
 
     return STATUS_SUCCESS;
 }
@@ -2355,6 +2441,10 @@ NTSTATUS NTAPI IoReportResourceForDetection(
     ULONG DeviceListSize,
     PBOOLEAN ConflictDetected)
 {
+    DBGPRINT("NTKRNL: IoReportResourceForDetection driver=%lx device=%lx driverList=%lx deviceList=%lx\n",
+             (ULONG)DriverObject, (ULONG)DeviceObject,
+             (ULONG)DriverList, (ULONG)DeviceList);
+    dbg_mark('E');
     if (ConflictDetected) *ConflictDetected = FALSE;
     return STATUS_SUCCESS;
 }
@@ -2512,6 +2602,16 @@ NTSTATUS NTAPI RtlQueryRegistryValues(
                     RtlCopyMemory(entry->EntryContext,
                                   entry->DefaultData, entry->DefaultLength);
                 }
+            } else if (entry->QueryRoutine &&
+                       entry->DefaultData &&
+                       entry->DefaultLength > 0) {
+                dbg_mark('q');
+                entry->QueryRoutine(entry->Name,
+                                    entry->DefaultType,
+                                    entry->DefaultData,
+                                    entry->DefaultLength,
+                                    Context,
+                                    entry->EntryContext);
             }
         }
         return STATUS_SUCCESS;
@@ -2578,6 +2678,16 @@ NTSTATUS NTAPI RtlQueryRegistryValues(
                 } else if (entry->Flags & RTL_QUERY_REGISTRY_REQUIRED) {
                     VxD_RegCloseKey(hkey);
                     return STATUS_OBJECT_NAME_NOT_FOUND;
+                } else if (entry->QueryRoutine &&
+                           entry->DefaultData &&
+                           entry->DefaultLength > 0) {
+                    dbg_mark('q');
+                    entry->QueryRoutine(entry->Name,
+                                        entry->DefaultType,
+                                        entry->DefaultData,
+                                        entry->DefaultLength,
+                                        Context,
+                                        entry->EntryContext);
                 }
             }
         }
@@ -3000,7 +3110,13 @@ NTSTATUS NTAPI WmiCompleteRequest(
  */
 UCHAR NTAPI READ_PORT_UCHAR(PUCHAR Port)
 {
-    return PORT_IN_BYTE((USHORT)(ULONG)Port);
+    USHORT port;
+    UCHAR value;
+
+    port = (USHORT)(ULONG)Port;
+    value = PORT_IN_BYTE(port);
+    ntk_trace_port('R', port, value);
+    return value;
 }
 
 /*
@@ -3008,7 +3124,13 @@ UCHAR NTAPI READ_PORT_UCHAR(PUCHAR Port)
  */
 USHORT NTAPI READ_PORT_USHORT(PUSHORT Port)
 {
-    return PORT_IN_WORD((USHORT)(ULONG)Port);
+    USHORT port;
+    USHORT value;
+
+    port = (USHORT)(ULONG)Port;
+    value = PORT_IN_WORD(port);
+    ntk_trace_port('r', port, (UCHAR)(value & 0xFF));
+    return value;
 }
 
 /*
@@ -3016,6 +3138,7 @@ USHORT NTAPI READ_PORT_USHORT(PUSHORT Port)
  */
 VOID NTAPI READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count)
 {
+    ntk_trace_port('D', (USHORT)(ULONG)Port, (UCHAR)(Count & 0xFF));
     PORT_READ_BUFFER_USHORT((USHORT)(ULONG)Port, Buffer, Count);
 }
 
@@ -3024,6 +3147,7 @@ VOID NTAPI READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count)
  */
 VOID NTAPI WRITE_PORT_UCHAR(PUCHAR Port, UCHAR Value)
 {
+    ntk_trace_port('W', (USHORT)(ULONG)Port, Value);
     PORT_OUT_BYTE((USHORT)(ULONG)Port, Value);
 }
 
@@ -3032,6 +3156,7 @@ VOID NTAPI WRITE_PORT_UCHAR(PUCHAR Port, UCHAR Value)
  */
 VOID NTAPI WRITE_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count)
 {
+    ntk_trace_port('P', (USHORT)(ULONG)Port, (UCHAR)(Count & 0xFF));
     PORT_WRITE_BUFFER_USHORT((USHORT)(ULONG)Port, Buffer, Count);
 }
 

@@ -105,6 +105,20 @@ typedef struct _PORT_CONFIGURATION_INFORMATION {
     ULONG DeviceExtensionSize; ULONG SpecificLuExtensionSize; ULONG SrbExtensionSize;
 } PORT_CONFIGURATION_INFORMATION, *PPORT_CONFIGURATION_INFORMATION;
 
+enum {
+    NTMINI_PORTCFG_ACCESS_RANGES_OFFSET =
+        (int)(&((PPORT_CONFIGURATION_INFORMATION)0)->AccessRanges),
+    NTMINI_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET =
+        (int)(&((PPORT_CONFIGURATION_INFORMATION)0)->DeviceExtensionSize),
+    NTMINI_PORTCFG_SIZE = sizeof(PORT_CONFIGURATION_INFORMATION)
+};
+typedef char NTMINI_ASSERT_PORTCFG_ACCESS_RANGES_OFFSET_IS_0x38[
+    (NTMINI_PORTCFG_ACCESS_RANGES_OFFSET == 0x38) ? 1 : -1];
+typedef char NTMINI_ASSERT_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET_IS_0x80[
+    (NTMINI_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET == 0x80) ? 1 : -1];
+typedef char NTMINI_ASSERT_PORTCFG_SIZE_IS_0x8C[
+    (NTMINI_PORTCFG_SIZE == 0x8C) ? 1 : -1];
+
 /* SRB (simplified) */
 typedef struct _SCSI_REQUEST_BLOCK {
     USHORT Length; UCHAR Function; UCHAR SrbStatus;
@@ -115,6 +129,19 @@ typedef struct _SCSI_REQUEST_BLOCK {
     struct _SCSI_REQUEST_BLOCK *NextSrb; PVOID OriginalRequest;
     PVOID SrbExtension; ULONG InternalStatus; UCHAR Cdb[16];
 } SCSI_REQUEST_BLOCK, *PSCSI_REQUEST_BLOCK;
+
+/*
+ * Hard layout guard: NT miniports consume SRBs by fixed offsets. If this
+ * struct drifts, CDB bytes move and the on-wire command is silently corrupted.
+ */
+enum {
+    NTMINI_SRB_CDB_OFFSET = (int)(&((PSCSI_REQUEST_BLOCK)0)->Cdb),
+    NTMINI_SRB_SIZE = sizeof(SCSI_REQUEST_BLOCK)
+};
+typedef char NTMINI_ASSERT_SRB_CDB_OFFSET_IS_0x30[
+    (NTMINI_SRB_CDB_OFFSET == 0x30) ? 1 : -1];
+typedef char NTMINI_ASSERT_SRB_SIZE_IS_0x40[
+    (NTMINI_SRB_SIZE == 0x40) ? 1 : -1];
 
 /* HW_INITIALIZATION_DATA */
 typedef struct _HW_INITIALIZATION_DATA {
@@ -133,6 +160,20 @@ typedef struct _HW_INITIALIZATION_DATA {
     USHORT VendorIdLength; PVOID VendorId;
     USHORT DeviceIdLength; PVOID DeviceId; PVOID HwAdapterControl;
 } HW_INITIALIZATION_DATA, *PHW_INITIALIZATION_DATA;
+
+enum {
+    NTMINI_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET =
+        (int)(&((PHW_INITIALIZATION_DATA)0)->DeviceExtensionSize),
+    NTMINI_HWINIT_MAP_BUFFERS_OFFSET =
+        (int)(&((PHW_INITIALIZATION_DATA)0)->MapBuffers),
+    NTMINI_HWINIT_SIZE = sizeof(HW_INITIALIZATION_DATA)
+};
+typedef char NTMINI_ASSERT_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET_IS_0x24[
+    (NTMINI_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET == 0x24) ? 1 : -1];
+typedef char NTMINI_ASSERT_HWINIT_MAP_BUFFERS_OFFSET_IS_0x38[
+    (NTMINI_HWINIT_MAP_BUFFERS_OFFSET == 0x38) ? 1 : -1];
+typedef char NTMINI_ASSERT_HWINIT_SIZE_IS_0x50[
+    (NTMINI_HWINIT_SIZE == 0x50) ? 1 : -1];
 
 typedef struct { const char *name; PVOID func; } IMPORT_FUNC_ENTRY;
 

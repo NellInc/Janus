@@ -15,7 +15,21 @@
  */
 
 #include "NTKSHIM.H"
+#include "IRPMGR.H"
 #include "PORTIO.H"
+
+#ifndef IRP_SYNCHRONOUS_API
+#define IRP_SYNCHRONOUS_API     0x00000004
+#endif
+#ifndef IRP_BUFFERED_IO
+#define IRP_BUFFERED_IO         0x00000010
+#endif
+#ifndef IRP_READ_OPERATION
+#define IRP_READ_OPERATION      0x00000100
+#endif
+#ifndef IRP_WRITE_OPERATION
+#define IRP_WRITE_OPERATION     0x00000080
+#endif
 
 /* ================================================================
  * VxD WRAPPER EXTERNALS
@@ -31,10 +45,63 @@ extern ULONG __cdecl VxD_SetTimer(ULONG milliseconds, PVOID callback,
 extern void  __cdecl VxD_CancelTimer(ULONG handle);
 extern ULONG __cdecl VxD_GetSystemTime(void);   /* VMM Get_System_Time, ms */
 extern void  __cdecl VxD_TimesliceSleep(void);   /* VMM Time_Slice_Sleep */
+extern void  __cdecl dbg_mark(char c);
+extern int   g_nt5_trace_ports;
+
+static VOID ntk_mark_hex8(UCHAR value)
+{
+    static const CHAR hex[] = "0123456789ABCDEF";
+    dbg_mark(hex[(value >> 4) & 0x0F]);
+    dbg_mark(hex[value & 0x0F]);
+}
+
+static VOID ntk_mark_hex32(ULONG value)
+{
+    ntk_mark_hex8((UCHAR)((value >> 24) & 0xFF));
+    ntk_mark_hex8((UCHAR)((value >> 16) & 0xFF));
+    ntk_mark_hex8((UCHAR)((value >> 8) & 0xFF));
+    ntk_mark_hex8((UCHAR)(value & 0xFF));
+}
+
+static ULONG g_ntk_port_trace_count = 0;
+
+static VOID ntk_trace_port(char op, ULONG port, ULONG value)
+{
+    if (g_nt5_trace_ports != 2 || g_ntk_port_trace_count >= 220) {
+        return;
+    }
+
+    dbg_mark('~');
+    dbg_mark(op);
+    ntk_mark_hex32(port);
+    ntk_mark_hex8((UCHAR)(value & 0xFF));
+    g_ntk_port_trace_count++;
+}
+
+static VOID ntk_DebugPrintWstr(PCWSTR s)
+{
+    CHAR buf[64];
+    ULONG i;
+
+    if (!s) {
+        VxD_Debug_Printf("(null)");
+        return;
+    }
+
+    i = 0;
+    while (s[i] && i < sizeof(buf) - 1) {
+        WCHAR c;
+
+        c = s[i];
+        buf[i] = (c >= 0x20 && c < 0x7F) ? (CHAR)c : '?';
+        i++;
+    }
+    buf[i] = 0;
+    VxD_Debug_Printf(buf);
+}
 
 /* VPICD services for interrupt management */
-extern ULONG __cdecl VxD_VPICD_VirtualizeIrq(ULONG irq, PVOID handler,
-                                               PVOID refdata);
+extern ULONG __cdecl VxD_VPICD_Virtualize_IRQ(PVOID desc);
 extern void  __cdecl VxD_VPICD_ForceDefaultBehavior(ULONG handle);
 extern void  __cdecl VxD_VPICD_PhysicalEOI(ULONG handle);
 
@@ -51,6 +118,7 @@ extern PVOID __cdecl VxD_MapPhysToLinear(ULONG physAddr, ULONG size,
 
 /* Current (notional) IRQL. Real synchronisation is cli/sti. */
 static KIRQL g_CurrentIrql = PASSIVE_LEVEL;
+static volatile int g_ntk_force_device_queue_start = 1;
 
 /* DPC queue: simple fixed-size array */
 static PKDPC g_DpcQueue[NTK_MAX_PENDING_DPCS];
@@ -73,6 +141,160 @@ static BOOLEAN g_ConfigInfoInit = FALSE;
 static PVOID g_DriverObjExt = NULL;
 static PVOID g_DriverObjExtId = NULL;
 static ULONG g_DriverObjExtSize = 0;
+
+static DRIVER_OBJECT    g_ntk_legacy_pdo_driver;
+static DRIVER_EXTENSION g_ntk_legacy_pdo_driver_ext;
+static BOOLEAN          g_ntk_legacy_pdo_driver_init = FALSE;
+
+static NTSTATUS NTAPI ntk_legacy_pdo_dispatch(PDEVICE_OBJECT DeviceObject,
+                                                PIRP Irp)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    PUCHAR irp_sp;
+    UCHAR major;
+    UCHAR minor;
+    PUCHAR caps;
+    NTSTATUS status;
+
+    (void)DeviceObject;
+
+    dbg_mark('V');
+    if (!Irp) {
+        return 0xC000000DUL;
+    }
+
+    status = 0xC00000BBUL;
+    irp_sp = (PUCHAR)Irp->Tail.Overlay.CurrentStackLocation;
+    major = 0xFF;
+    minor = 0xFF;
+    if (irp_sp) {
+        major = irp_sp[0];
+        minor = irp_sp[1];
+        dbg_mark('p');
+        dbg_mark(hex[(major >> 4) & 0x0F]);
+        dbg_mark(hex[major & 0x0F]);
+        dbg_mark(hex[(minor >> 4) & 0x0F]);
+        dbg_mark(hex[minor & 0x0F]);
+    }
+
+    if (major == IRP_MJ_POWER) {
+        status = STATUS_SUCCESS;
+    } else if (major == IRP_MJ_PNP) {
+        if (minor == 0x00) {
+            status = STATUS_SUCCESS;
+        } else if (minor == 0x09) {
+            caps = *(PUCHAR *)(irp_sp + 0x04);
+            if (caps) {
+                caps[0] = 0x40;
+                caps[1] = 0x00;
+                caps[2] = 0x01;
+                caps[3] = 0x00;
+                *(ULONG *)(caps + 0x08) = 0xFFFFFFFFUL;
+                *(ULONG *)(caps + 0x0C) = 0xFFFFFFFFUL;
+                status = STATUS_SUCCESS;
+            } else {
+                status = 0xC000000DUL;
+            }
+        } else if (minor == 0x13) {
+            status = 0xC00000BBUL;
+        }
+    }
+
+    if (status == STATUS_SUCCESS) {
+        Irp->IoStatus.Information = 0;
+    }
+    Irp->IoStatus.Status = status;
+    if (Irp->UserIosb) {
+        Irp->UserIosb->Status = status;
+        Irp->UserIosb->Information = Irp->IoStatus.Information;
+    }
+    if (Irp->UserEvent) {
+        KeSetEvent(Irp->UserEvent, 0, FALSE);
+    }
+    return status;
+}
+
+static void ntk_init_legacy_pdo_driver(void)
+{
+    ULONG i;
+
+    if (g_ntk_legacy_pdo_driver_init) {
+        return;
+    }
+
+    RtlZeroMemory(&g_ntk_legacy_pdo_driver, sizeof(g_ntk_legacy_pdo_driver));
+    RtlZeroMemory(&g_ntk_legacy_pdo_driver_ext,
+                  sizeof(g_ntk_legacy_pdo_driver_ext));
+    g_ntk_legacy_pdo_driver.Type = 4;
+    g_ntk_legacy_pdo_driver.Size = sizeof(DRIVER_OBJECT);
+    g_ntk_legacy_pdo_driver.DriverExtension = &g_ntk_legacy_pdo_driver_ext;
+    g_ntk_legacy_pdo_driver_ext.DriverObject = &g_ntk_legacy_pdo_driver;
+    for (i = 0; i < IRP_MJ_MAXIMUM; i++) {
+        g_ntk_legacy_pdo_driver.MajorFunction[i] = ntk_legacy_pdo_dispatch;
+    }
+    g_ntk_legacy_pdo_driver_init = TRUE;
+}
+
+PIRP NTAPI ntk_IoAllocateIrp(CHAR StackSize, BOOLEAN ChargeQuota)
+{
+    dbg_mark('n');
+    return IrpMgr_IoAllocateIrp(StackSize, ChargeQuota);
+}
+
+VOID NTAPI ntk_IoFreeIrp(PIRP Irp)
+{
+    dbg_mark('x');
+    IrpMgr_IoFreeIrp(Irp);
+}
+
+NTSTATUS NTAPI ntk_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+{
+    return IrpMgr_IoCallDriver(DeviceObject, Irp);
+}
+
+VOID NTAPI ntk_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost)
+{
+    IrpMgr_IoCompleteRequest(Irp, PriorityBoost);
+}
+
+NTSTATUS NTAPI ntk_IoCreateDevice(PDRIVER_OBJECT DriverObject,
+                                   ULONG ExtensionSize,
+                                   PUNICODE_STRING DeviceName,
+                                   ULONG DeviceType,
+                                   ULONG Characteristics,
+                                   BOOLEAN Exclusive,
+                                   PDEVICE_OBJECT *DeviceObject)
+{
+    return IrpMgr_IoCreateDevice(DriverObject,
+                                 ExtensionSize,
+                                 DeviceName,
+                                 DeviceType,
+                                 Characteristics,
+                                 Exclusive,
+                                 DeviceObject);
+}
+
+VOID NTAPI ntk_IoDeleteDevice(PDEVICE_OBJECT DeviceObject)
+{
+    IrpMgr_IoDeleteDevice(DeviceObject);
+}
+
+PDEVICE_OBJECT NTAPI ntk_IoAttachDeviceToDeviceStack(
+    PDEVICE_OBJECT SourceDevice, PDEVICE_OBJECT TargetDevice)
+{
+    return IrpMgr_IoAttachDeviceToDeviceStack(SourceDevice, TargetDevice);
+}
+
+VOID NTAPI ntk_IoDetachDevice(PDEVICE_OBJECT TargetDevice)
+{
+    IrpMgr_IoDetachDevice(TargetDevice);
+}
+
+PDEVICE_OBJECT NTAPI ntk_IoGetAttachedDeviceReference(
+    PDEVICE_OBJECT DeviceObject)
+{
+    return IrpMgr_IoGetAttachedDeviceReference(DeviceObject);
+}
 
 
 /* ================================================================
@@ -233,6 +455,20 @@ VOID __cdecl ntk_DrainDpcQueue(void)
     g_CurrentIrql = oldIrql;
 }
 
+KIRQL __cdecl ntk_EnterManualIsrIrql(void)
+{
+    KIRQL oldIrql;
+
+    oldIrql = g_CurrentIrql;
+    g_CurrentIrql = DIRQL;
+    return oldIrql;
+}
+
+VOID __cdecl ntk_LeaveManualIsrIrql(KIRQL OldIrql)
+{
+    g_CurrentIrql = OldIrql;
+}
+
 
 /* ================================================================
  * TIMERS
@@ -387,6 +623,9 @@ typedef struct _NTK_IO_TIMER {
     BOOLEAN             Active;
 } NTK_IO_TIMER, *PNTK_IO_TIMER;
 
+/* Static storage for I/O timer (single device scenario) */
+static PNTK_IO_TIMER g_IoTimer = NULL;
+
 static void __cdecl ntk_IoTimerCallback(PVOID refdata)
 {
     PNTK_IO_TIMER iot = (PNTK_IO_TIMER)refdata;
@@ -439,10 +678,8 @@ VOID NTAPI ntk_IoInitializeTimer(PDEVICE_OBJECT DeviceObject,
     /* Store the timer pointer at a well-known location: we reuse
      * this via IoStartTimer. For now, store as a static. For
      * multi-device support this would need a lookup table. */
+    g_IoTimer = iot;
 }
-
-/* Static storage for I/O timer (single device scenario) */
-static PNTK_IO_TIMER g_IoTimer = NULL;
 
 VOID NTAPI ntk_IoStartTimer(PDEVICE_OBJECT DeviceObject)
 {
@@ -473,10 +710,17 @@ VOID NTAPI ntk_IoStartTimer(PDEVICE_OBJECT DeviceObject)
 
 VOID NTAPI KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State)
 {
+    dbg_mark('N');
     if (!Event) return;
 
     Event->Type = Type;
     Event->SignalState = State ? 1 : 0;
+    dbg_mark('n');
+}
+
+VOID __cdecl ntk_KeInitializeEvent_cdecl(PKEVENT Event, ULONG Type, ULONG State)
+{
+    KeInitializeEvent(Event, (EVENT_TYPE)Type, (BOOLEAN)State);
 }
 
 LONG NTAPI KeSetEvent(PKEVENT Event, LONG Increment, BOOLEAN Wait)
@@ -486,12 +730,19 @@ LONG NTAPI KeSetEvent(PKEVENT Event, LONG Increment, BOOLEAN Wait)
     (void)Increment;
     (void)Wait;
 
+    dbg_mark('T');
     if (!Event) return 0;
 
     previousState = Event->SignalState;
     Event->SignalState = 1;
 
+    dbg_mark('t');
     return previousState;
+}
+
+LONG __cdecl ntk_KeSetEvent_cdecl(PKEVENT Event, LONG Increment, ULONG Wait)
+{
+    return KeSetEvent(Event, Increment, (BOOLEAN)Wait);
 }
 
 VOID NTAPI KeResetEvent(PKEVENT Event)
@@ -514,7 +765,9 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
     (void)WaitMode;
     (void)Alertable;
 
+    dbg_mark('W');
     if (!Object) {
+        dbg_mark('w');
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -525,6 +778,7 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
         if (event->Type == SynchronizationEvent) {
             event->SignalState = 0;  /* auto-reset */
         }
+        dbg_mark('w');
         return STATUS_SUCCESS;
     }
 
@@ -533,6 +787,7 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
         timeout_ms = 0xFFFFFFFF; /* ~49 days, effectively forever */
     } else if (Timeout->QuadPart == 0) {
         /* Zero timeout = poll only */
+        dbg_mark('w');
         return STATUS_TIMEOUT;
     } else if (Timeout->QuadPart < 0) {
         /* Relative, 100ns units */
@@ -543,7 +798,10 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
         ULONG now = VxD_GetSystemTime();
         ULONG target = (ULONG)(Timeout->QuadPart / 10000);
         timeout_ms = (target > now) ? (target - now) : 0;
-        if (timeout_ms == 0) return STATUS_TIMEOUT;
+        if (timeout_ms == 0) {
+            dbg_mark('w');
+            return STATUS_TIMEOUT;
+        }
     }
 
     /*
@@ -558,6 +816,7 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
 
         elapsed = VxD_GetSystemTime() - start_ms;
         if (elapsed >= timeout_ms) {
+            dbg_mark('w');
             return STATUS_TIMEOUT;
         }
     }
@@ -567,7 +826,16 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
         event->SignalState = 0;
     }
 
+    dbg_mark('w');
     return STATUS_SUCCESS;
+}
+
+NTSTATUS __cdecl ntk_KeWaitForSingleObject_cdecl(PVOID Object, ULONG WaitReason,
+                                                 ULONG WaitMode, ULONG Alertable,
+                                                 PLARGE_INTEGER Timeout)
+{
+    return KeWaitForSingleObject(Object, WaitReason, WaitMode,
+                                 (BOOLEAN)Alertable, Timeout);
 }
 
 
@@ -586,6 +854,7 @@ PVOID NTAPI ExAllocatePoolWithTag(ULONG PoolType, SIZE_T Size, ULONG Tag)
     (void)PoolType;
     (void)Tag;
 
+    dbg_mark('E');
     if (Size == 0) return NULL;
 
     ptr = VxD_HeapAllocate(Size, HEAPF_ZEROINIT);
@@ -601,8 +870,21 @@ VOID NTAPI ExFreePoolWithTag(PVOID Ptr, ULONG Tag)
     (void)Tag;
 
     if (Ptr) {
+        dbg_mark('k');
         VxD_HeapFree(Ptr, 0);
     }
+}
+
+VOID __cdecl ntk_ExFreePool_cdecl(PVOID Ptr)
+{
+    dbg_mark('j');
+    ExFreePoolWithTag(Ptr, 0);
+    dbg_mark('J');
+}
+
+VOID NTAPI ExFreePool(PVOID Ptr)
+{
+    ntk_ExFreePool_cdecl(Ptr);
 }
 
 PVOID NTAPI ExAllocatePool(ULONG PoolType, SIZE_T Size)
@@ -674,6 +956,7 @@ NTSTATUS NTAPI ZwClose(PVOID Handle)
 {
     (void)Handle;
 
+    dbg_mark('Z');
     /* No-op: fake handles need no cleanup */
     return STATUS_SUCCESS;
 }
@@ -730,31 +1013,46 @@ NTSTATUS NTAPI ntk_ZwCreateDirectoryObject(PVOID DirHandle, ULONG Access,
 
 UCHAR NTAPI READ_PORT_UCHAR(PUCHAR Port)
 {
-    return PORT_IN_BYTE((unsigned long)Port);
+    UCHAR value;
+
+    value = PORT_IN_BYTE((unsigned long)Port);
+    ntk_trace_port('i', (ULONG)Port, value);
+    return value;
 }
 
 USHORT NTAPI READ_PORT_USHORT(PUSHORT Port)
 {
-    return PORT_IN_WORD((unsigned long)Port);
+    USHORT value;
+
+    value = PORT_IN_WORD((unsigned long)Port);
+    ntk_trace_port('I', (ULONG)Port, value);
+    return value;
 }
 
 ULONG NTAPI READ_PORT_ULONG(PULONG Port)
 {
-    return PORT_IN_DWORD((unsigned long)Port);
+    ULONG value;
+
+    value = PORT_IN_DWORD((unsigned long)Port);
+    ntk_trace_port('J', (ULONG)Port, value);
+    return value;
 }
 
 VOID NTAPI WRITE_PORT_UCHAR(PUCHAR Port, UCHAR Value)
 {
+    ntk_trace_port('o', (ULONG)Port, Value);
     PORT_OUT_BYTE((unsigned long)Port, Value);
 }
 
 VOID NTAPI WRITE_PORT_USHORT(PUSHORT Port, USHORT Value)
 {
+    ntk_trace_port('O', (ULONG)Port, Value);
     PORT_OUT_WORD((unsigned long)Port, Value);
 }
 
 VOID NTAPI WRITE_PORT_ULONG(PULONG Port, ULONG Value)
 {
+    ntk_trace_port('P', (ULONG)Port, Value);
     PORT_OUT_DWORD((unsigned long)Port, Value);
 }
 
@@ -773,6 +1071,8 @@ BOOLEAN NTAPI HalTranslateBusAddress(ULONG InterfaceType, ULONG BusNumber,
 {
     (void)InterfaceType;
     (void)BusNumber;
+
+    dbg_mark('L');
 
     /*
      * On x86 with ISA/PCI, bus addresses are the same as physical
@@ -1040,23 +1340,23 @@ VOID NTAPI ntk_IoFreeWorkItem(PIO_WORKITEM WorkItem)
 VOID NTAPI ntk_IoStartPacket(PDEVICE_OBJECT DeviceObject, PVOID Irp,
                                PULONG Key, PVOID CancelFunction)
 {
+    PDRIVER_STARTIO start_io;
+
     (void)Key;
     (void)CancelFunction;
 
     if (!DeviceObject || !Irp) return;
 
-    /*
-     * In the full build with access to DEVICE_OBJECT internals:
-     *   DeviceObject->CurrentIrp = (PIRP)Irp;
-     *   if (DeviceObject->DriverObject->DriverStartIo)
-     *       DeviceObject->DriverObject->DriverStartIo(DeviceObject, Irp);
-     *
-     * Here we just log it. The IRPMGR.C or NTKRNL.C layer that
-     * includes the full structure definitions implements the real
-     * IoStartPacket. This stub exists for link-time resolution.
-     */
-    VxD_Debug_Printf("NTK: IoStartPacket DevObj=0x%08lX Irp=0x%08lX\n",
-                     (ULONG)DeviceObject, (ULONG)Irp);
+    dbg_mark('P');
+    start_io = NULL;
+    if (DeviceObject->DriverObject) {
+        start_io = DeviceObject->DriverObject->DriverStartIo;
+    }
+    if (start_io) {
+        DeviceObject->CurrentIrp = (PIRP)Irp;
+        start_io(DeviceObject, (PIRP)Irp);
+        dbg_mark('o');
+    }
 }
 
 VOID NTAPI ntk_IoStartNextPacket(PDEVICE_OBJECT DeviceObject,
@@ -1066,8 +1366,9 @@ VOID NTAPI ntk_IoStartNextPacket(PDEVICE_OBJECT DeviceObject,
 
     if (!DeviceObject) return;
 
-    VxD_Debug_Printf("NTK: IoStartNextPacket DevObj=0x%08lX\n",
-                     (ULONG)DeviceObject);
+    dbg_mark('N');
+    DeviceObject->CurrentIrp = NULL;
+    DeviceObject->DeviceQueue.Busy = FALSE;
 }
 
 
@@ -1082,6 +1383,8 @@ VOID NTAPI ntk_KeInitializeDeviceQueue(PKDEVICE_QUEUE DeviceQueue)
 {
     if (!DeviceQueue) return;
 
+    DeviceQueue->Type = 4;
+    DeviceQueue->Size = sizeof(KDEVICE_QUEUE);
     DeviceQueue->DeviceListHead.Flink = &DeviceQueue->DeviceListHead;
     DeviceQueue->DeviceListHead.Blink = &DeviceQueue->DeviceListHead;
     DeviceQueue->Lock = 0;
@@ -1105,14 +1408,19 @@ BOOLEAN NTAPI ntk_KeInsertByKeyDeviceQueue(PKDEVICE_QUEUE DeviceQueue,
     Entry->SortKey = SortKey;
     Entry->Inserted = FALSE;
 
-    if (!DeviceQueue->Busy) {
+    dbg_mark('K');
+    dbg_mark(DeviceQueue->Busy ? 'B' : 'b');
+
+    listHead = &DeviceQueue->DeviceListHead;
+    if (g_ntk_force_device_queue_start ||
+        !DeviceQueue->Busy ||
+        (listHead->Flink == listHead && listHead->Blink == listHead)) {
         /* Device is idle: mark busy but don't queue */
         DeviceQueue->Busy = TRUE;
         return FALSE;
     }
 
     /* Device is busy: insert sorted */
-    listHead = &DeviceQueue->DeviceListHead;
     current = listHead->Flink;
 
     while (current != listHead) {
@@ -1232,6 +1540,7 @@ PVOID NTAPI ntk_MmMapIoSpace(PHYSICAL_ADDRESS PhysAddr, SIZE_T Length,
 
     (void)CacheType;
 
+    dbg_mark('m');
     if (Length == 0) return NULL;
 
     /*
@@ -1395,8 +1704,9 @@ NTSTATUS NTAPI ntk_ObReferenceObjectByHandle(PVOID Handle, ULONG Access,
     return STATUS_SUCCESS;
 }
 
-VOID NTAPI ntk_ObfDereferenceObject(PVOID Object)
+VOID FASTCALL ntk_ObfDereferenceObject(PVOID Object)
 {
+    dbg_mark('O');
     (void)Object;
     /* No-op: no refcount tracking in shim */
 }
@@ -1414,6 +1724,17 @@ VOID NTAPI ntk_ObfDereferenceObject(PVOID Object)
  * ISR trampoline: VPICD calls us; we call the NT driver's ISR.
  */
 static PKINTERRUPT g_ConnectedInterrupts[16]; /* max 16 IRQ lines */
+typedef struct _NTK_VPICD_IRQ_DESCRIPTOR {
+    USHORT  VID_IRQ_Number;
+    USHORT  VID_Options;
+    PVOID   VID_Hw_Int_Proc;
+    PVOID   VID_Virt_Int_Proc;
+    PVOID   VID_EOI_Proc;
+    PVOID   VID_Mask_Change_Proc;
+    PVOID   VID_IRET_Proc;
+    ULONG   VID_IRET_Time_Out;
+    PVOID   VID_Hw_Int_Ref;
+} NTK_VPICD_IRQ_DESCRIPTOR;
 
 static void __cdecl ntk_IsrTrampoline(ULONG irq)
 {
@@ -1436,6 +1757,15 @@ static void __cdecl ntk_IsrTrampoline(ULONG irq)
     }
 }
 
+UCHAR __cdecl ntk_InvokeManualInterrupt(ULONG irq)
+{
+    if (irq >= 16 || !g_ConnectedInterrupts[irq]) {
+        return 0;
+    }
+    ntk_IsrTrampoline(irq);
+    return 1;
+}
+
 NTSTATUS NTAPI ntk_IoConnectInterrupt(
     PKINTERRUPT *InterruptObject,
     PKSERVICE_ROUTINE ServiceRoutine,
@@ -1456,7 +1786,16 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
     (void)ProcessorMask;
     (void)FloatingSave;
 
+    dbg_mark('C');
+    dbg_mark('I');
+    ntk_mark_hex32((ULONG)InterruptObject);
+    ntk_mark_hex32((ULONG)ServiceRoutine);
+    ntk_mark_hex32((ULONG)ServiceContext);
+    ntk_mark_hex32(Vector);
+
     if (!InterruptObject || !ServiceRoutine) {
+        dbg_mark('C');
+        dbg_mark('0');
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -1466,6 +1805,8 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
      * For PCI, the mapping varies. We extract the low nibble.
      */
     irq = Vector & 0x0F;
+    dbg_mark('Q');
+    ntk_mark_hex8((UCHAR)irq);
 
     intObj = (PKINTERRUPT)VxD_HeapAllocate(sizeof(KINTERRUPT),
                                             HEAPF_ZEROINIT);
@@ -1495,10 +1836,18 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
         g_ConnectedInterrupts[irq] = intObj;
     }
 
-    /* Virtualize the IRQ via VPICD */
-    handle = VxD_VPICD_VirtualizeIrq(irq,
-                                      (PVOID)ntk_IsrTrampoline,
-                                      (PVOID)irq);
+    handle = 0;
+#if 0
+    {
+        NTK_VPICD_IRQ_DESCRIPTOR irqDesc;
+        RtlZeroMemory(&irqDesc, sizeof(irqDesc));
+        irqDesc.VID_IRQ_Number = (USHORT)irq;
+        irqDesc.VID_Options = ShareVector ? 0x0002 : 0;
+        irqDesc.VID_Hw_Int_Proc = (PVOID)ntk_IsrTrampoline;
+        irqDesc.VID_Hw_Int_Ref = (PVOID)irq;
+        handle = VxD_VPICD_Virtualize_IRQ(&irqDesc);
+    }
+#endif
     if (handle) {
         intObj->ShimIrqHandle = handle;
         intObj->ShimConnected = TRUE;
@@ -1511,6 +1860,10 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
     }
 
     *InterruptObject = intObj;
+    dbg_mark('C');
+    dbg_mark('1');
+    ntk_mark_hex32((ULONG)intObj);
+    ntk_mark_hex32((ULONG)*InterruptObject);
     return STATUS_SUCCESS;
 }
 
@@ -1541,7 +1894,10 @@ BOOLEAN NTAPI ntk_KeSynchronizeExecution(PKINTERRUPT Interrupt,
     BOOLEAN result;
     ULONG flags;
 
-    if (!Interrupt || !SyncRoutine) return FALSE;
+    if (!SyncRoutine) return FALSE;
+    if (!Interrupt) {
+        dbg_mark('!');
+    }
 
     /*
      * Acquire the interrupt's spinlock (cli + mark), call routine,
@@ -1849,13 +2205,49 @@ NTSTATUS NTAPI ntk_RtlQueryRegistryValues(ULONG RelativeTo, PCWSTR Path,
                                             PRTL_QUERY_REGISTRY_TABLE Table,
                                             PVOID Context, PVOID Environment)
 {
+    PRTL_QUERY_REGISTRY_TABLE entry;
+    BOOLEAN has_default;
+
     (void)RelativeTo;
     (void)Path;
-    (void)Table;
-    (void)Context;
     (void)Environment;
 
     VxD_Debug_Printf("NTK: RtlQueryRegistryValues stub\n");
+    if (!Table) {
+        return STATUS_SUCCESS;
+    }
+
+    for (entry = Table; entry->Name || entry->Flags; entry++) {
+        has_default = (entry->DefaultData && entry->DefaultLength > 0);
+
+        VxD_Debug_Printf("NTK: RtlQueryRegistryValues name=");
+        ntk_DebugPrintWstr(entry->Name);
+        VxD_Debug_Printf("\n");
+
+        if ((entry->Flags & RTL_QUERY_REGISTRY_DIRECT) &&
+            entry->EntryContext &&
+            has_default) {
+            dbg_mark('d');
+            RtlCopyMemory(entry->EntryContext,
+                          entry->DefaultData,
+                          entry->DefaultLength);
+        } else if (entry->QueryRoutine && has_default) {
+            dbg_mark('q');
+            entry->QueryRoutine(entry->Name,
+                                entry->DefaultType,
+                                entry->DefaultData,
+                                entry->DefaultLength,
+                                Context,
+                                entry->EntryContext);
+        } else if ((entry->Flags & RTL_QUERY_REGISTRY_REQUIRED) &&
+                   !has_default) {
+            VxD_Debug_Printf("NTK: RtlQueryRegistryValues missing required name=");
+            ntk_DebugPrintWstr(entry->Name);
+            VxD_Debug_Printf("\n");
+            return STATUS_OBJECT_NAME_NOT_FOUND;
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -1883,31 +2275,40 @@ PVOID NTAPI ntk_IoBuildDeviceIoControlRequest(
     BOOLEAN InternalDeviceControl, PKEVENT Event,
     PIO_STATUS_BLOCK IoStatusBlock)
 {
-    PVOID irp;
+    PIRP irp;
+    PIO_STACK_LOCATION irp_sp;
 
-    (void)IoControlCode;
-    (void)DeviceObject;
-    (void)InBuf;
-    (void)InLen;
-    (void)OutBuf;
-    (void)OutLen;
-    (void)InternalDeviceControl;
-    (void)Event;
-    (void)IoStatusBlock;
+    if (!DeviceObject) {
+        return NULL;
+    }
 
-    irp = VxD_HeapAllocate(NTK_SIMPLE_IRP_SIZE, HEAPF_ZEROINIT);
+    irp = IrpMgr_IoAllocateIrp(DeviceObject->StackSize, FALSE);
+    dbg_mark('i');
     if (!irp) {
         VxD_Debug_Printf("NTK: IoBuildDeviceIoControlRequest alloc failed\n");
         return NULL;
     }
 
-    /*
-     * The real implementation would fill in MajorFunction
-     * (IRP_MJ_DEVICE_CONTROL or IRP_MJ_INTERNAL_DEVICE_CONTROL),
-     * set IoControlCode, InputBuffer, OutputBuffer, etc.
-     * This is done in the full NTKRNL.C which has access to
-     * the complete IRP structure definition.
-     */
+    dbg_mark('1');
+    irp->UserEvent = Event;
+    irp->UserIosb = IoStatusBlock;
+    irp->RequestorMode = KernelMode;
+    irp->Flags = IRP_SYNCHRONOUS_API;
+    irp->UserBuffer = OutBuf;
+    irp->AssociatedIrp.SystemBuffer = InBuf;
+
+    dbg_mark('2');
+    irp_sp = IrpMgr_IoGetNextIrpStackLocation(irp);
+    irp_sp->MajorFunction = InternalDeviceControl ?
+        IRP_MJ_INTERNAL_DEVICE_CONTROL : IRP_MJ_DEVICE_CONTROL;
+    irp_sp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;
+    irp_sp->Parameters.DeviceIoControl.InputBufferLength = InLen;
+    irp_sp->Parameters.DeviceIoControl.OutputBufferLength = OutLen;
+    irp_sp->Parameters.DeviceIoControl.Type3InputBuffer = InBuf;
+    irp_sp->DeviceObject = DeviceObject;
+    *(PVOID *)((PUCHAR)irp + 0x60) = (PVOID)((PUCHAR)irp_sp + 0x24);
+
+    dbg_mark('J');
     VxD_Debug_Printf("NTK: IoBuildDeviceIoControlRequest IOCTL=0x%08lX\n",
                      IoControlCode);
 
@@ -1919,22 +2320,54 @@ PVOID NTAPI ntk_IoBuildSynchronousFsdRequest(
     PVOID Buffer, ULONG Length, PLARGE_INTEGER StartingOffset,
     PKEVENT Event, PIO_STATUS_BLOCK IoStatusBlock)
 {
-    PVOID irp;
+    PIRP irp;
+    PIO_STACK_LOCATION irp_sp;
 
-    (void)MajorFunction;
-    (void)DeviceObject;
-    (void)Buffer;
-    (void)Length;
-    (void)StartingOffset;
-    (void)Event;
-    (void)IoStatusBlock;
+    if (!DeviceObject) {
+        return NULL;
+    }
 
-    irp = VxD_HeapAllocate(NTK_SIMPLE_IRP_SIZE, HEAPF_ZEROINIT);
+    irp = IrpMgr_IoAllocateIrp(DeviceObject->StackSize, FALSE);
+    dbg_mark('i');
     if (!irp) {
         VxD_Debug_Printf("NTK: IoBuildSynchronousFsdRequest alloc failed\n");
         return NULL;
     }
 
+    dbg_mark('1');
+    irp->UserEvent = Event;
+    irp->UserIosb = IoStatusBlock;
+    irp->RequestorMode = KernelMode;
+    irp->Flags = IRP_SYNCHRONOUS_API;
+    irp->UserBuffer = Buffer;
+
+    dbg_mark('2');
+    irp_sp = IrpMgr_IoGetNextIrpStackLocation(irp);
+    irp_sp->MajorFunction = (UCHAR)MajorFunction;
+    irp_sp->DeviceObject = DeviceObject;
+    dbg_mark('3');
+    if (MajorFunction == IRP_MJ_READ) {
+        irp_sp->Parameters.Read.Length = Length;
+        if (StartingOffset) {
+            irp_sp->Parameters.Read.ByteOffset = *StartingOffset;
+        }
+        irp->Flags |= IRP_READ_OPERATION;
+    } else if (MajorFunction == IRP_MJ_WRITE) {
+        irp_sp->Parameters.Write.Length = Length;
+        if (StartingOffset) {
+            irp_sp->Parameters.Write.ByteOffset = *StartingOffset;
+        }
+        irp->Flags |= IRP_WRITE_OPERATION;
+    }
+    dbg_mark('4');
+    if (Buffer && Length > 0 && (DeviceObject->Flags & DO_BUFFERED_IO)) {
+        irp->AssociatedIrp.SystemBuffer = Buffer;
+        irp->Flags |= IRP_BUFFERED_IO;
+    }
+    *(PVOID *)((PUCHAR)irp + 0x60) = (PVOID)((PUCHAR)irp_sp + 0x24);
+
+    dbg_mark('F');
+    dbg_mark((char)('0' + (MajorFunction & 0x0F)));
     VxD_Debug_Printf("NTK: IoBuildSynchronousFsdRequest MJ=0x%02X\n",
                      (UCHAR)MajorFunction);
     return irp;
@@ -1945,21 +2378,45 @@ PVOID NTAPI ntk_IoBuildAsynchronousFsdRequest(
     PVOID Buffer, ULONG Length, PLARGE_INTEGER StartingOffset,
     PIO_STATUS_BLOCK IoStatusBlock)
 {
-    PVOID irp;
+    PIRP irp;
+    PIO_STACK_LOCATION irp_sp;
 
-    (void)MajorFunction;
-    (void)DeviceObject;
-    (void)Buffer;
-    (void)Length;
-    (void)StartingOffset;
-    (void)IoStatusBlock;
+    if (!DeviceObject) {
+        return NULL;
+    }
 
-    irp = VxD_HeapAllocate(NTK_SIMPLE_IRP_SIZE, HEAPF_ZEROINIT);
+    irp = IrpMgr_IoAllocateIrp(DeviceObject->StackSize, FALSE);
+    dbg_mark('i');
     if (!irp) {
         VxD_Debug_Printf("NTK: IoBuildAsynchronousFsdRequest alloc failed\n");
         return NULL;
     }
 
+    dbg_mark('1');
+    irp->UserIosb = IoStatusBlock;
+    irp->RequestorMode = KernelMode;
+    irp->UserBuffer = Buffer;
+
+    irp_sp = IrpMgr_IoGetNextIrpStackLocation(irp);
+    irp_sp->MajorFunction = (UCHAR)MajorFunction;
+    irp_sp->DeviceObject = DeviceObject;
+    if (MajorFunction == IRP_MJ_READ) {
+        irp_sp->Parameters.Read.Length = Length;
+        if (StartingOffset) {
+            irp_sp->Parameters.Read.ByteOffset = *StartingOffset;
+        }
+        irp->Flags |= IRP_READ_OPERATION;
+    } else if (MajorFunction == IRP_MJ_WRITE) {
+        irp_sp->Parameters.Write.Length = Length;
+        if (StartingOffset) {
+            irp_sp->Parameters.Write.ByteOffset = *StartingOffset;
+        }
+        irp->Flags |= IRP_WRITE_OPERATION;
+    }
+    *(PVOID *)((PUCHAR)irp + 0x60) = (PVOID)((PUCHAR)irp_sp + 0x24);
+
+    dbg_mark('G');
+    dbg_mark((char)('0' + (MajorFunction & 0x0F)));
     VxD_Debug_Printf("NTK: IoBuildAsynchronousFsdRequest MJ=0x%02X\n",
                      (UCHAR)MajorFunction);
     return irp;
@@ -2040,6 +2497,7 @@ NTSTATUS NTAPI ntk_IoDeleteSymbolicLink(PVOID SymLinkName)
 
 PCONFIGURATION_INFORMATION NTAPI ntk_IoGetConfigurationInformation(void)
 {
+    dbg_mark('C');
     if (!g_ConfigInfoInit) {
         RtlZeroMemory(&g_ConfigInfo, sizeof(g_ConfigInfo));
         g_ConfigInfo.Version = 1;
@@ -2071,6 +2529,10 @@ NTSTATUS NTAPI ntk_IoReportDetectedDevice(PDRIVER_OBJECT DriverObject,
                                             BOOLEAN ResourceAssigned,
                                             PDEVICE_OBJECT *DeviceObject)
 {
+    NTSTATUS status;
+
+    dbg_mark('D');
+
     (void)DriverObject;
     (void)LegacyBusType;
     (void)BusNumber;
@@ -2078,10 +2540,25 @@ NTSTATUS NTAPI ntk_IoReportDetectedDevice(PDRIVER_OBJECT DriverObject,
     (void)ResourceList;
     (void)ResourceRequirements;
     (void)ResourceAssigned;
-    (void)DeviceObject;
 
     VxD_Debug_Printf("NTK: IoReportDetectedDevice stub\n");
-    return STATUS_SUCCESS;
+    if (!DeviceObject) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    ntk_init_legacy_pdo_driver();
+    status = IrpMgr_IoCreateDevice(&g_ntk_legacy_pdo_driver,
+                                   0,
+                                   NULL,
+                                   FILE_DEVICE_CONTROLLER,
+                                   0,
+                                   FALSE,
+                                   DeviceObject);
+    if (NT_SUCCESS(status) && *DeviceObject) {
+        (*DeviceObject)->Flags &= ~DO_DEVICE_INITIALIZING;
+        dbg_mark('P');
+    }
+    return status;
 }
 
 NTSTATUS NTAPI ntk_IoReportResourceForDetection(PDRIVER_OBJECT DriverObject,
@@ -2093,6 +2570,8 @@ NTSTATUS NTAPI ntk_IoReportResourceForDetection(PDRIVER_OBJECT DriverObject,
                                                   PVOID ConflictDetected)
 {
     BOOLEAN *pConflict;
+
+    dbg_mark('R');
 
     (void)DriverObject;
     (void)DriverList;
@@ -2579,6 +3058,9 @@ KIRQL NTAPI KeGetCurrentIrql(void)
      * Return PASSIVE_LEVEL unless we have explicitly raised it
      * (via spinlock acquire or DPC execution).
      */
+    if (g_nt5_trace_ports) {
+        dbg_mark('I');
+    }
     return g_CurrentIrql;
 }
 
@@ -2627,43 +3109,46 @@ ULONG NTAPI ntk_HalGetInterruptVector(
  * wrappers around cli/sti and the notional IRQL variable.
  * ================================================================ */
 
-KIRQL __cdecl ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
+KIRQL FASTCALL ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
 {
     KIRQL oldIrql;
-    ULONG flags;
 
-    PORT_SAVE_FLAGS_CLI(flags);
+    if (g_nt5_trace_ports) {
+        dbg_mark('A');
+    }
     oldIrql = g_CurrentIrql;
     g_CurrentIrql = DISPATCH_LEVEL;
 
-    if (SpinLock) {
-        *SpinLock = flags;
-    }
+    (void)SpinLock;
     return oldIrql;
 }
 
-VOID __cdecl ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql)
+VOID FASTCALL ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql)
 {
-    ULONG flags = 0;
-
-    if (SpinLock) {
-        flags = *SpinLock;
+    if (g_nt5_trace_ports) {
+        dbg_mark('R');
     }
+    (void)SpinLock;
     g_CurrentIrql = OldIrql;
-    PORT_RESTORE_FLAGS(flags);
 }
 
-KIRQL __cdecl ntk_KfRaiseIrql(KIRQL NewIrql)
+KIRQL FASTCALL ntk_KfRaiseIrql(KIRQL NewIrql)
 {
     KIRQL old = g_CurrentIrql;
+    if (g_nt5_trace_ports) {
+        dbg_mark('^');
+    }
     if (NewIrql > g_CurrentIrql) {
         g_CurrentIrql = NewIrql;
     }
     return old;
 }
 
-VOID __cdecl ntk_KfLowerIrql(KIRQL NewIrql)
+VOID FASTCALL ntk_KfLowerIrql(KIRQL NewIrql)
 {
+    if (g_nt5_trace_ports) {
+        dbg_mark('v');
+    }
     g_CurrentIrql = NewIrql;
 }
 
@@ -2695,6 +3180,7 @@ VOID NTAPI ntk_KeStallExecutionProcessor(ULONG Microseconds)
 VOID NTAPI ntk_READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer,
                                         ULONG Count)
 {
+    ntk_trace_port('B', (ULONG)Port, Count);
     PORT_READ_BUFFER_USHORT((unsigned short)(unsigned long)Port,
                             Buffer, Count);
 }
@@ -2702,6 +3188,7 @@ VOID NTAPI ntk_READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer,
 VOID NTAPI ntk_WRITE_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer,
                                           ULONG Count)
 {
+    ntk_trace_port('W', (ULONG)Port, Count);
     PORT_WRITE_BUFFER_USHORT((unsigned short)(unsigned long)Port,
                              Buffer, Count);
 }

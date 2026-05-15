@@ -88,6 +88,14 @@ int wdm_load_nt5_ide_stack(PCI_IDE_DEVICE pci_devices[], ULONG count);
  */
 void __cdecl wdm_calldown_handler(PIOR ior);
 
+/*
+ * nt5_get_bridge_context - Return the active single-device NT5 bridge context.
+ *
+ * The current NT5 loader path creates one atapi.sys stack directly rather than
+ * going through wdm_load_nt5_ide_stack().
+ */
+WDM_BRIDGE_CONTEXT *nt5_get_bridge_context(void);
+
 /* ================================================================
  * Function Prototypes: PE Loading Helpers
  * ================================================================ */

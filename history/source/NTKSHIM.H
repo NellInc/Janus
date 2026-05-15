@@ -42,6 +42,7 @@
 #ifndef _NTMINI_TYPES_DEFINED
 typedef unsigned char   UCHAR;
 typedef unsigned short  USHORT;
+typedef short           SHORT;
 typedef unsigned long   ULONG;
 typedef signed long     LONG;
 typedef int             BOOLEAN;
@@ -274,6 +275,8 @@ typedef struct _MDL {
  * ================================================================ */
 
 typedef struct _KDEVICE_QUEUE {
+    SHORT       Type;
+    SHORT       Size;
     LIST_ENTRY  DeviceListHead;
     KSPIN_LOCK  Lock;
     BOOLEAN     Busy;
@@ -392,6 +395,14 @@ typedef struct _RTL_QUERY_REGISTRY_TABLE {
     ULONG       DefaultLength;
 } RTL_QUERY_REGISTRY_TABLE, *PRTL_QUERY_REGISTRY_TABLE;
 
+#define RTL_QUERY_REGISTRY_SUBKEY       0x00000001
+#define RTL_QUERY_REGISTRY_TOPKEY       0x00000002
+#define RTL_QUERY_REGISTRY_REQUIRED     0x00000004
+#define RTL_QUERY_REGISTRY_NOVALUE      0x00000008
+#define RTL_QUERY_REGISTRY_NOEXPAND     0x00000010
+#define RTL_QUERY_REGISTRY_DIRECT       0x00000020
+#define RTL_QUERY_REGISTRY_DELETE       0x00000040
+
 /* ================================================================
  * WMILIB types
  * ================================================================ */
@@ -447,6 +458,9 @@ VOID    NTAPI KeInitializeDpc(PKDPC Dpc, PKDEFERRED_ROUTINE DeferredRoutine,
                               PVOID DeferredContext);
 BOOLEAN NTAPI KeInsertQueueDpc(PKDPC Dpc, PVOID Arg1, PVOID Arg2);
 VOID    __cdecl ntk_DrainDpcQueue(void);
+KIRQL   __cdecl ntk_EnterManualIsrIrql(void);
+VOID    __cdecl ntk_LeaveManualIsrIrql(KIRQL OldIrql);
+UCHAR   __cdecl ntk_InvokeManualInterrupt(ULONG irq);
 
 /* --- Timers --- */
 VOID    NTAPI KeInitializeTimer(PKTIMER Timer);
@@ -473,6 +487,7 @@ NTSTATUS NTAPI KeWaitForSingleObject(PVOID Object, ULONG WaitReason,
 PVOID   NTAPI ExAllocatePoolWithTag(ULONG PoolType, SIZE_T Size, ULONG Tag);
 VOID    NTAPI ExFreePoolWithTag(PVOID Ptr, ULONG Tag);
 PVOID   NTAPI ExAllocatePool(ULONG PoolType, SIZE_T Size);
+VOID    NTAPI ExFreePool(PVOID Ptr);
 
 /* --- Registry stubs --- */
 NTSTATUS NTAPI ZwOpenKey(PVOID KeyHandle, ULONG DesiredAccess,
@@ -528,6 +543,7 @@ VOID    NTAPI ntk_IoStartPacket(PDEVICE_OBJECT DeviceObject, PVOID Irp,
                                  PULONG Key, PVOID CancelFunction);
 VOID    NTAPI ntk_IoStartNextPacket(PDEVICE_OBJECT DeviceObject,
                                      BOOLEAN Cancelable);
+VOID    NTAPI ntk_KeStallExecutionProcessor(ULONG Microseconds);
 
 /* --- Device Queue --- */
 VOID    NTAPI ntk_KeInitializeDeviceQueue(PKDEVICE_QUEUE DeviceQueue);
@@ -569,7 +585,7 @@ NTSTATUS NTAPI ntk_ObReferenceObjectByHandle(PVOID Handle, ULONG Access,
                                               ULONG AccessMode,
                                               PVOID *Object,
                                               PVOID HandleInfo);
-VOID    NTAPI ntk_ObfDereferenceObject(PVOID Object);
+VOID    FASTCALL ntk_ObfDereferenceObject(PVOID Object);
 
 /* --- Interrupt --- */
 NTSTATUS NTAPI ntk_IoConnectInterrupt(
