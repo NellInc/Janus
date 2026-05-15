@@ -25,5 +25,8 @@ Test the ATA hard disk support (commit deea226) with the three-layer IOS fix (co
 - `build_srb_from_ior` uses `dev->sector_size` for block count calculation
 - HDD needs its own DCB + calldown splice (separate from CD-ROM D:)
 
+## WARNING: HDD Corrupts Win98 Boot
+Attaching a raw 10MB FAT16 image at IDE index=3 (secondary slave) causes Win98 to hang at the splash screen. The HDD corrupts Win98's hardware detection state, requiring a full disk restore from `en_win98_se.qcow2`. The test HDD needs proper CHS geometry that Win98's real-mode IDE init expects. Do NOT attach the test HDD until this is resolved.
+
 ## Key Question
 Can both CD-ROM (D:) and ATA HDD (E:?) work simultaneously, or is the bridge single-device?
