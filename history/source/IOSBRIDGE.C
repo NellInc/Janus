@@ -322,6 +322,9 @@ typedef struct _BRIDGE_DEVICE {
     UCHAR   lun;                /* Logical unit number (usually 0) */
     UCHAR   device_type;        /* DCB_TYPE_* */
     UCHAR   is_atapi;           /* TRUE if ATAPI (packet) device */
+    UCHAR   channel;            /* IDE channel (0=primary, 1=secondary) */
+    UCHAR   use_miniport;       /* TRUE if device uses miniport SCSI path */
+    UCHAR   pad_bd[2];          /* Alignment padding */
     ULONG   sector_size;        /* Sector size in bytes */
     ULONG   total_sectors;      /* Total addressable sectors */
 } BRIDGE_DEVICE, *PBRIDGE_DEVICE;
@@ -365,6 +368,12 @@ static struct {
     ULONG       irq_handle;            /* VPICD IRQ handle */
 
 } g_bridge;
+
+/* DCB pointers created by bridge_enumerate_devices (SCSI path).
+ * Used in aep_config_dcb to set use_miniport = TRUE. */
+#define MAX_ENUM_DCBS 8
+static PDCB  g_enum_dcbs[MAX_ENUM_DCBS];
+static ULONG g_num_enum_dcbs;
 
 
 /* ================================================================
@@ -2478,23 +2487,39 @@ int ios_register_port_driver(void)
     g_bridge.ios_ddb = (ULONG)&NTMINI_DDB;
 
     dbg_mark('R');
-    result = 0; /* control: skip real IOS_Register */
+    /* Approach 3: Enable real IOS_Register so IOS calls our AEP handler
+     * for DCB configuration. With ESDI_506 suppressed, we must claim
+     * all IDE disk DCBs ourselves. */
+    result = IOS_Register((PDDB)&g_bridge.drp);
     dbg_mark('r');
 
     if (result != 0) {
         dbg_mark('f');
         DBGPRINT("NTMINI: IOS_Register FAILED (result=%lx)\n", result);
-        return -1;
-    }
+        /* Fall back: continue without IOS registration.
+         * C: may still work via INT 13h real-mode fallback. */
+        DBGPRINT("NTMINI: Falling back to unregistered mode\n");
+        /* IOS_Register failed. Late-create path is our only option. */
+        result = 0; /* don't abort; late-create path may still work */
 
-    dbg_mark('s');
-    DBGPRINT("NTMINI: IOS_Register skipped\n");
-    dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
-    dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
-    dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
-    if (ios_late_create_device() != 0) {
-        dbg_mark('w');
-        return -1;
+        dbg_mark('s');
+        DBGPRINT("NTMINI: IOS_Register FAILED, using late-create fallback\n");
+        dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
+        dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
+        dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
+        if (ios_late_create_device() != 0) {
+            dbg_mark('w');
+            return -1;
+        }
+    } else {
+        /* IOS_Register succeeded. IOS will call our AEP handler for
+         * DCB configuration (AEP_CONFIG_DCB). Do NOT run late-create
+         * as it would create phantom DCBs that conflict with IOS. */
+        dbg_mark('s');
+        DBGPRINT("NTMINI: IOS_Register OK, skipping late-create\n");
+        dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
+        dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
+        dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
     }
     g_ios_registered = 1;
     dbg_mark('g');
@@ -2883,6 +2908,7 @@ static int ios_late_create_device(void)
                     dev3->lun = 0;
                     dev3->device_type = DCB_TYPE_DISK;
                     dev3->is_atapi = FALSE;
+                    dev3->channel = bridge_ctx->Channel;
                     dev3->sector_size = 512;
                     dev3->total_sectors = 0;
                     g_bridge.num_devices++;
@@ -2910,6 +2936,10 @@ static int ios_late_create_device(void)
                         depth++;
                     }
                     dbg_mark('~');
+                    /* Force VFAT to re-detect D: volume through our splice */
+                    dbg_mark('k');
+                    IFSMgr_NotifyVolumeArrival_Wrapper(3);
+                    dbg_mark('K');
                 }
             } else {
                 dbg_mark('j');
@@ -2976,12 +3006,14 @@ static int ios_late_create_device(void)
                     dev2->lun = 0;
                     dev2->device_type = DCB_TYPE_DISK;
                     dev2->is_atapi = FALSE;
+                    dev2->channel = bridge->Channel;
                     dev2->sector_size = 512;
                 } else {
                     dev2->target_id = existing->DCB_target_id;
                     dev2->lun = existing->DCB_lun;
                     dev2->device_type = existing->DCB_device_type;
                     dev2->is_atapi = (existing->DCB_device_type == DCB_TYPE_CDROM) ? TRUE : FALSE;
+                    dev2->channel = existing->DCB_bus_number;
                     dev2->sector_size = existing->DCB_apparent_blk_size ? existing->DCB_apparent_blk_size : 2048;
                 }
                 dev2->total_sectors = 0;
@@ -3460,6 +3492,16 @@ static void aep_config_dcb(PAEP aep)
     dev->lun        = dcb->DCB_lun;
     dev->device_type = dcb->DCB_device_type;
     dev->is_atapi   = (dcb->DCB_dmd_flags & DCB_DEV_ATAPI) ? TRUE : FALSE;
+    /* Derive IDE channel from DCB bus number:
+     * bus 0 = primary (0x1F0), bus 1 = secondary (0x170) */
+    dev->channel    = dcb->DCB_bus_number;
+    /* Breadcrumb: log bus_number so we can verify channel assignment.
+     * If IOS doesn't set bus_number, we'll see 0 (primary) for all
+     * DCBs, which would be WRONG for the secondary slave. */
+    dbg_mark('b');
+    ios_dbg_hex8(dcb->DCB_bus_number);
+    ios_dbg_hex8(dcb->DCB_target_id);
+    ios_dbg_hex8(dcb->DCB_device_type);
 
     /* Set sector size based on device type */
     if (dcb->DCB_device_type == DCB_TYPE_CDROM) {
@@ -3503,6 +3545,20 @@ static void aep_config_dcb(PAEP aep)
                          ISPCDF_BOTTOM | ISPCDF_PORT_DRIVER);
 
     g_bridge.num_devices++;
+
+    /* If this DCB was created by bridge_enumerate_devices, mark the
+     * device for the miniport SCSI path instead of ATA passthrough. */
+    {
+        ULONG e;
+        for (e = 0; e < g_num_enum_dcbs; e++) {
+            if (g_enum_dcbs[e] == dcb) {
+                dev->use_miniport = TRUE;
+                DBGPRINT("NTMINI: Device target=%d use_miniport\n",
+                         dev->target_id);
+                break;
+            }
+        }
+    }
 
     DBGPRINT("NTMINI: Claimed device target=%d type=%d (now %lu devices)\n",
              dev->target_id, dev->device_type, g_bridge.num_devices);
@@ -3763,6 +3819,17 @@ void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
     ior_handler(ior, dcb);
 }
 
+/* ATA register constants for primary IDE channel */
+#define ATA_PRI_DATA        0x1F0
+#define ATA_PRI_ERROR       0x1F1
+#define ATA_PRI_SECTOR_CNT  0x1F2
+#define ATA_PRI_LBA_LOW     0x1F3
+#define ATA_PRI_LBA_MID     0x1F4
+#define ATA_PRI_LBA_HIGH    0x1F5
+#define ATA_PRI_DRIVE_HEAD  0x1F6
+#define ATA_PRI_CMD_STATUS  0x1F7
+#define ATA_PRI_ALT_STATUS  0x3F6
+
 /* ATA register constants for secondary IDE channel */
 #define ATA_SEC_DATA        0x170
 #define ATA_SEC_ERROR       0x171
@@ -3776,16 +3843,17 @@ void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
 
 #define ATA_CMD_READ_SECTORS    0x20
 #define ATA_CMD_WRITE_SECTORS   0x30
+#define ATA_CMD_IDENTIFY        0xEC
 #define ATA_STATUS_BSY          0x80
 #define ATA_STATUS_DRQ          0x08
 #define ATA_STATUS_ERR          0x01
 
-static int ata_wait_not_busy(ULONG timeout_us)
+static int ata_wait_not_busy(USHORT alt_status_port, ULONG timeout_us)
 {
     ULONG i;
     UCHAR status;
     for (i = 0; i < timeout_us; i++) {
-        status = PORT_IN_BYTE(ATA_SEC_ALT_STATUS);
+        status = PORT_IN_BYTE(alt_status_port);
         if (!(status & ATA_STATUS_BSY))
             return 0;
         PORT_STALL_ONE();
@@ -3793,12 +3861,12 @@ static int ata_wait_not_busy(ULONG timeout_us)
     return -1;
 }
 
-static int ata_wait_drq(ULONG timeout_us)
+static int ata_wait_drq(USHORT alt_status_port, ULONG timeout_us)
 {
     ULONG i;
     UCHAR status;
     for (i = 0; i < timeout_us; i++) {
-        status = PORT_IN_BYTE(ATA_SEC_ALT_STATUS);
+        status = PORT_IN_BYTE(alt_status_port);
         if (status & ATA_STATUS_ERR)
             return -1;
         if (!(status & ATA_STATUS_BSY) && (status & ATA_STATUS_DRQ))
@@ -3814,6 +3882,9 @@ static void ata_direct_ior(PIOR ior, PBRIDGE_DEVICE dev)
     PUSHORT buf;
     UCHAR drive_sel;
     int err;
+    /* Port addresses selected by channel */
+    USHORT data_port, sector_cnt_port, lba_low_port, lba_mid_port;
+    USHORT lba_high_port, drive_head_port, cmd_status_port, alt_status_port;
 
     if (ior->IOR_func != IOR_READ && ior->IOR_func != IOR_WRITE &&
         ior->IOR_func != IOR_WRITEV) {
@@ -3824,6 +3895,31 @@ static void ata_direct_ior(PIOR ior, PBRIDGE_DEVICE dev)
         }
         complete_ior(ior, IORS_NOT_SUPPORTED);
         return;
+    }
+
+    /* Select port set based on IDE channel */
+    if (dev->channel == 0) {
+        /* Primary channel: ports 0x1F0-0x1F7, alt 0x3F6 */
+        data_port       = ATA_PRI_DATA;
+        sector_cnt_port = ATA_PRI_SECTOR_CNT;
+        lba_low_port    = ATA_PRI_LBA_LOW;
+        lba_mid_port    = ATA_PRI_LBA_MID;
+        lba_high_port   = ATA_PRI_LBA_HIGH;
+        drive_head_port = ATA_PRI_DRIVE_HEAD;
+        cmd_status_port = ATA_PRI_CMD_STATUS;
+        alt_status_port = ATA_PRI_ALT_STATUS;
+        dbg_mark('0');
+    } else {
+        /* Secondary channel: ports 0x170-0x177, alt 0x376 */
+        data_port       = ATA_SEC_DATA;
+        sector_cnt_port = ATA_SEC_SECTOR_CNT;
+        lba_low_port    = ATA_SEC_LBA_LOW;
+        lba_mid_port    = ATA_SEC_LBA_MID;
+        lba_high_port   = ATA_SEC_LBA_HIGH;
+        drive_head_port = ATA_SEC_DRIVE_HEAD;
+        cmd_status_port = ATA_SEC_CMD_STATUS;
+        alt_status_port = ATA_SEC_ALT_STATUS;
+        dbg_mark('1');
     }
 
     lba = ior->IOR_start_addr[0];
@@ -3842,18 +3938,29 @@ static void ata_direct_ior(PIOR ior, PBRIDGE_DEVICE dev)
     drive_sel = (dev->target_id == 0) ? 0xE0 : 0xF0;
     drive_sel |= (UCHAR)((lba >> 24) & 0x0F);
 
-    /* Soft-reset the IDE channel if BSY is stuck. ESDI_506.PDR may
-     * have left the controller in a state where BSY won't clear. */
+    /* Soft-reset the IDE channel if BSY is stuck.
+     * SAFETY: Only reset the SECONDARY channel automatically.
+     * Resetting primary (C: boot disk) could corrupt in-flight
+     * I/O. For primary, just fail the IOR and let IOS retry. */
     {
-        UCHAR status = PORT_IN_BYTE(ATA_SEC_ALT_STATUS);
+        UCHAR status = PORT_IN_BYTE(alt_status_port);
         if (status & ATA_STATUS_BSY) {
-            PORT_OUT_BYTE(ATA_SEC_ALT_STATUS, 0x04); /* SRST set */
+            if (dev->channel == 0) {
+                /* Primary channel: do NOT reset. Fail safely. */
+                dbg_mark('!');
+                dbg_mark('B');
+                ios_dbg_hex8(status);
+                complete_ior(ior, IORS_CMD_FAILED);
+                return;
+            }
+            /* Secondary channel: reset is safe */
+            PORT_OUT_BYTE(alt_status_port, 0x04); /* SRST set */
             PORT_STALL_ONE(); PORT_STALL_ONE(); PORT_STALL_ONE();
-            PORT_OUT_BYTE(ATA_SEC_ALT_STATUS, 0x00); /* SRST clear */
+            PORT_OUT_BYTE(alt_status_port, 0x00); /* SRST clear */
             {
                 ULONG rst;
                 for (rst = 0; rst < 1000000; rst++) {
-                    status = PORT_IN_BYTE(ATA_SEC_ALT_STATUS);
+                    status = PORT_IN_BYTE(alt_status_port);
                     if (!(status & ATA_STATUS_BSY)) break;
                     PORT_STALL_ONE();
                 }
@@ -3861,57 +3968,57 @@ static void ata_direct_ior(PIOR ior, PBRIDGE_DEVICE dev)
         }
     }
 
-    if (ata_wait_not_busy(500000) != 0) {
+    if (ata_wait_not_busy(alt_status_port, 500000) != 0) {
         dbg_mark('$');
-        ios_dbg_hex8(PORT_IN_BYTE(ATA_SEC_CMD_STATUS));
+        ios_dbg_hex8(PORT_IN_BYTE(cmd_status_port));
         complete_ior(ior, IORS_CMD_FAILED);
         return;
     }
 
-    PORT_OUT_BYTE(ATA_SEC_DRIVE_HEAD, drive_sel);
+    PORT_OUT_BYTE(drive_head_port, drive_sel);
     PORT_STALL_ONE(); PORT_STALL_ONE();
 
-    if (ata_wait_not_busy(500000) != 0) {
+    if (ata_wait_not_busy(alt_status_port, 500000) != 0) {
         dbg_mark('~');
-        ios_dbg_hex8(PORT_IN_BYTE(ATA_SEC_CMD_STATUS));
+        ios_dbg_hex8(PORT_IN_BYTE(cmd_status_port));
         complete_ior(ior, IORS_CMD_FAILED);
         return;
     }
 
-    PORT_OUT_BYTE(ATA_SEC_SECTOR_CNT, (UCHAR)(sector_count & 0xFF));
-    PORT_OUT_BYTE(ATA_SEC_LBA_LOW,    (UCHAR)(lba & 0xFF));
-    PORT_OUT_BYTE(ATA_SEC_LBA_MID,    (UCHAR)((lba >> 8) & 0xFF));
-    PORT_OUT_BYTE(ATA_SEC_LBA_HIGH,   (UCHAR)((lba >> 16) & 0xFF));
+    PORT_OUT_BYTE(sector_cnt_port, (UCHAR)(sector_count & 0xFF));
+    PORT_OUT_BYTE(lba_low_port,    (UCHAR)(lba & 0xFF));
+    PORT_OUT_BYTE(lba_mid_port,    (UCHAR)((lba >> 8) & 0xFF));
+    PORT_OUT_BYTE(lba_high_port,   (UCHAR)((lba >> 16) & 0xFF));
 
     if (ior->IOR_func == IOR_READ) {
-        PORT_OUT_BYTE(ATA_SEC_CMD_STATUS, ATA_CMD_READ_SECTORS);
+        PORT_OUT_BYTE(cmd_status_port, ATA_CMD_READ_SECTORS);
 
         for (i = 0; i < sector_count; i++) {
-            err = ata_wait_drq(1000000);
+            err = ata_wait_drq(alt_status_port, 1000000);
             if (err != 0) {
                 dbg_mark('E');
                 complete_ior(ior, IORS_CMD_FAILED);
                 return;
             }
-            port_read_buffer_ushort(ATA_SEC_DATA, buf, 256);
+            port_read_buffer_ushort(data_port, buf, 256);
             buf += 256;
         }
     } else {
-        PORT_OUT_BYTE(ATA_SEC_CMD_STATUS, ATA_CMD_WRITE_SECTORS);
+        PORT_OUT_BYTE(cmd_status_port, ATA_CMD_WRITE_SECTORS);
 
         for (i = 0; i < sector_count; i++) {
-            err = ata_wait_drq(1000000);
+            err = ata_wait_drq(alt_status_port, 1000000);
             if (err != 0) {
                 dbg_mark('E');
                 complete_ior(ior, IORS_CMD_FAILED);
                 return;
             }
-            port_write_buffer_ushort(ATA_SEC_DATA, buf, 256);
+            port_write_buffer_ushort(data_port, buf, 256);
             buf += 256;
         }
     }
 
-    if (ata_wait_not_busy(500000) != 0) {
+    if (ata_wait_not_busy(alt_status_port, 500000) != 0) {
         dbg_mark('T');
     }
 
@@ -3937,18 +4044,17 @@ static void ior_handler(PIOR ior, PDCB dcb)
         return;
     }
 
-    /* ATA hard disks: pass through to the next handler (ESDI_506) for now.
-     * Once we confirm the chain passes I/O correctly, we'll swap in
-     * ata_direct_ior to serve data from our own port I/O path. */
-    if (dev->device_type == DCB_TYPE_DISK) {
-        dbg_mark('P');
+    /* ATA hard disks: serve directly via ata_direct_ior.
+     * With ESDI_506.PDR suppressed, we are the sole IDE port driver
+     * for both primary (C:) and secondary (D:) channels. */
+    if (dev->device_type == DCB_TYPE_DISK && !dev->use_miniport) {
+        dbg_mark('D');
         ios_dbg_hex16(ior->IOR_func);
         ios_dbg_hex32(ior->IOR_start_addr[0]);
-        /* Don't complete — IOS should send to next handler */
+        ios_dbg_hex8(dev->channel);
+        ata_direct_ior(ior, dev);
         return;
     }
-    /* Log when device lookup succeeds but type isn't disk */
-    dbg_mark('T');
     ios_dbg_hex8(dev->device_type);
 
     /* CD-ROM and other ATAPI: use the miniport SCSI path */
@@ -4925,8 +5031,13 @@ void bridge_enumerate_devices(void)
             }
 
             /* Create the DCB */
-            bridge_create_dcb(target, 0, is_atapi, dcb_type,
+            {
+                PDCB new_dcb = bridge_create_dcb(target, 0, is_atapi, dcb_type,
                               vendor_id, product_id, rev_level);
+                if (new_dcb && g_num_enum_dcbs < MAX_ENUM_DCBS) {
+                    g_enum_dcbs[g_num_enum_dcbs++] = new_dcb;
+                }
+            }
         }
     }
 
