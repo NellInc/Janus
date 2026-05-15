@@ -2945,6 +2945,7 @@ void __cdecl ios_late_cdrom_attach_probe(void)
     dbg_mark('t');
     ios_dbg_hex32(attach_result);
     ios_dbg_hex32(vrp);
+
 }
 
 static void __cdecl ios_late_cdrom_attach_timer(PVOID refdata)

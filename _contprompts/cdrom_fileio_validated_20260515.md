@@ -1,6 +1,6 @@
 ---
-stepsCompleted: 0
-status: READY
+stepsCompleted: 1
+status: IN_PROGRESS
 ---
 
 # CD-ROM File I/O Validated — Next Steps (2026-05-15)
