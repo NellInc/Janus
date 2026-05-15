@@ -12,7 +12,7 @@ Fixes applied (matching ESDI_506.PDR pattern):
 5. Merges all objects into a single flat object
 6. Extended LE fields (LE+0xB8, LE+0xBC, LE+0xC0)
 
-IOS-compatible layout (page data at ios_dp = align_up(et_off, 32)):
+Layout (matching ESDI_506.PDR structure):
   MZ header (0x80 bytes)
   LE header (0xC4 bytes)
   [LOADER SECTION]
@@ -20,16 +20,15 @@ IOS-compatible layout (page data at ios_dp = align_up(et_off, 32)):
     Object page map
     Resident names table
     Entry table
-  [padding to 32-byte alignment]
-  [PAGE DATA]           <- at LE-relative ios_dp
-  [NONRESIDENT NAMES TABLE]
   [FIXUP SECTION]
     Fixup page table
     Fixup record table
+  [padding to alignment]
+  [PAGE DATA]
+  [NONRESIDENT NAMES TABLE]
 
 Usage: python3 build_nt5_fixed.py [max_fixups] [output_name]
   Default: all fixups, NT5FIXED.VXD
-  Example: python3 build_nt5_fixed.py 99999 NT5PDR.VXD
 """
 import struct
 import os
@@ -189,9 +188,7 @@ for pg in range(num_pages):
 
 print(f"\nFixups: {fixup_count} records, {len(new_fixup_data)} bytes")
 
-# --- Build LE with IOS-compatible layout ---
-# Key: page data must start at ios_dp = align_up(et_off, 32) (LE-relative)
-# so IOS's formula lands on our pages.
+# --- Build LE with ESDI-style layout ---
 NP = num_pages
 LE_HDR_SIZE = 0xC4
 
@@ -222,32 +219,33 @@ et_size = len(entry)
 loader_section_end = et_off + et_size
 loader_section_size = loader_section_end - obj_off
 
-# --- IOS-compatible layout: page data at ios_dp ---
-# IOS computes: dp = align_up(entry_table_offset, 32)
-# We place page data exactly there so both loaders work.
-ios_dp = (et_off + 0x1F) & ~0x1F        # IOS's formula (LE-relative)
-data_off_le_rel = ios_dp                 # page data starts at ios_dp
-data_pages_file = MZ_SIZE + ios_dp       # file-absolute
+# IOS PDR LAYOUT: page data IMMEDIATELY after entry table (aligned to 32).
+# IOS loader finds pages at: LE_base + align_up(entry_table_offset, 32).
+# Fixup section moves AFTER page data so IOS can find pages.
+ios_dp = (et_off + 0x1F) & ~0x1F
+data_off_le_rel = ios_dp
+data_pages_file = MZ_SIZE + ios_dp
 
-# NONRESIDENT NAMES TABLE (immediately after page data, file-absolute offset)
-nrn = bytearray()
-nrn.append(len(rnt_name))
-nrn.extend(rnt_name)
-nrn.extend(b'\x00\x01')  # ordinal = 1
-nrn.append(0)  # end marker
-nrn_file_off = data_pages_file + NP * page_size  # right after page data
-nrn_len = len(nrn)
+# PAGE DATA first, then FIXUP SECTION after it
+pages_end_le_rel = data_off_le_rel + NP * page_size
 
-# FIXUP SECTION (after NRN, still LE-relative offsets in header)
-fpt_off = nrn_file_off + nrn_len - MZ_SIZE  # LE-relative
+# FIXUP SECTION (after page data)
+fpt_off = pages_end_le_rel
 frt_off = fpt_off + (NP + 1) * 4
 fixup_section_end = frt_off + len(new_fixup_data)
-
-# import_module_table and import_proc_table point to end of fixup data
 import_off = fixup_section_end
 fixup_section_size = (NP + 1) * 4 + len(new_fixup_data)
 
-print(f"\n--- Layout (IOS-compatible) ---")
+# NONRESIDENT NAMES TABLE (after fixup section, file-absolute)
+nrn = bytearray()
+nrn.append(len(rnt_name))
+nrn.extend(rnt_name)
+nrn.extend(b'\x00\x01')
+nrn.append(0)
+nrn_file_off = MZ_SIZE + fixup_section_end
+nrn_len = len(nrn)
+
+print(f"\n--- Layout ---")
 print(f"  MZ header:        0x000 - 0x07F ({MZ_SIZE} bytes)")
 print(f"  LE header:        0x080 - 0x143 ({LE_HDR_SIZE} bytes)")
 print(f"  LOADER SECTION (LE-relative offsets):")
@@ -256,16 +254,14 @@ print(f"    Page map:       0x{pm_off:03X}")
 print(f"    Resident names: 0x{rnt_off:03X} ({rnt_size} bytes)")
 print(f"    Entry table:    0x{et_off:03X} ({et_size} bytes)")
 print(f"    Loader size:    0x{loader_section_size:03X} ({loader_section_size} bytes)")
-print(f"  PAGE DATA (at ios_dp):")
-print(f"    LE-relative:    0x{data_off_le_rel:03X} (ios_dp)")
-print(f"    File-absolute:  0x{data_pages_file:03X}")
-print(f"  NONRESIDENT NAMES:")
-print(f"    File-absolute:  0x{nrn_file_off:04X} ({nrn_len} bytes)")
-print(f"  FIXUP SECTION (after pages+NRN):")
-print(f"    FPT:            0x{fpt_off:04X} (LE-rel)")
-print(f"    FRT:            0x{frt_off:04X} (LE-rel)")
-print(f"    Import tables:  0x{import_off:04X} (LE-rel)")
+print(f"  FIXUP SECTION:")
+print(f"    FPT:            0x{fpt_off:03X} ({(NP+1)*4} bytes)")
+print(f"    FRT:            0x{frt_off:03X} ({len(new_fixup_data)} bytes)")
+print(f"    Import tables:  0x{import_off:03X}")
 print(f"    Fixup size:     0x{fixup_section_size:03X} ({fixup_section_size} bytes)")
+print(f"  PAGE DATA:")
+print(f"    File-absolute:  0x{data_pages_file:03X}")
+print(f"    LE-relative:    0x{data_off_le_rel:03X}")
 
 # --- Build FPT ---
 fpt_data = bytearray((NP + 1) * 4)
@@ -309,11 +305,11 @@ struct.pack_into('<I', le_hdr, 0x88, nrn_file_off)         # nonresident_names_o
 struct.pack_into('<I', le_hdr, 0x8C, nrn_len)              # nonresident_names_len
 
 # Extended VLE fields (LE+0xB0 to LE+0xC0) - ALL Microsoft VxDs have these
-# LE+0xB8 = end of module data (file-absolute) = end of fixup section
+# LE+0xB8 = end of module data (file-absolute) = nrn_off + nrn_len
 # LE+0xBC = varies (~500, purpose unclear but always present)
 # LE+0xC0 = OS version info (high byte = 0x04 = Win386)
-file_end = MZ_SIZE + fixup_section_end
-struct.pack_into('<I', le_hdr, 0xB8, file_end)              # end of module data
+nrn_end = nrn_file_off + nrn_len
+struct.pack_into('<I', le_hdr, 0xB8, nrn_end)              # end of module data
 struct.pack_into('<I', le_hdr, 0xBC, 0x000001F4)           # common value from MS VxDs
 struct.pack_into('<I', le_hdr, 0xC0, 0x04000000)           # Win386 OS type
 
@@ -351,7 +347,6 @@ dos_stub = bytes([
 ]) + b'This program cannot be run in DOS mode.\r\n$'
 mz[0x40:0x40+len(dos_stub)] = dos_stub
 
-# File assembly order: MZ -> LE hdr -> loader -> pad -> pages -> NRN -> fixups
 out = bytearray()
 out.extend(mz)           # MZ header
 out.extend(le_hdr)        # LE header
@@ -359,22 +354,19 @@ out.extend(obj_e)         # Object table
 out.extend(pm)            # Page map
 out.extend(rn)            # Resident names
 out.extend(entry)         # Entry table
+out.extend(fpt_data)      # FPT
+out.extend(new_fixup_data) # FRT
 
-# Pad to ios_dp (32-byte aligned boundary after entry table)
+# Pad to data_pages_file offset
 while len(out) < data_pages_file:
     out.append(0)
 
-# Page data (at ios_dp, file-absolute = MZ_SIZE + ios_dp)
+# Page data
 out.extend(all_pages[:NP * page_size])
 
 # Nonresident names table (immediately after page data)
 out.extend(nrn)
 
-# Fixup tables (after NRN, not needed at IOS load time)
-out.extend(fpt_data)      # FPT
-out.extend(new_fixup_data) # FRT
-
-# --- Output ---
 legacy_outpath = os.path.join(SCRIPT_DIR, OUT_NAME)
 
 if os.path.isabs(OUT_NAME) or os.path.dirname(OUT_NAME):
@@ -385,20 +377,10 @@ else:
 open(outpath, 'wb').write(out)
 if outpath != legacy_outpath:
     open(legacy_outpath, 'wb').write(out)
-
-# Also produce NT5PDR.VXD alongside the primary output
-if OUT_NAME != 'NT5PDR.VXD':
-    pdr_path = os.path.join(BIN_DIR, 'NT5PDR.VXD')
-    open(pdr_path, 'wb').write(out)
-    pdr_legacy = os.path.join(SCRIPT_DIR, 'NT5PDR.VXD')
-    open(pdr_legacy, 'wb').write(out)
-
 print(f'\n{OUT_NAME}: {len(out)} bytes')
 print(f'  Output path: {outpath}')
 if outpath != legacy_outpath:
     print(f'  Legacy copy: {legacy_outpath}')
-if OUT_NAME != 'NT5PDR.VXD':
-    print(f'  PDR copy:    {pdr_path}')
 print(f'  1 object (merged from {num_obj}), {NP} pages, vsize=0x{merged_vsize:X}')
 print(f'  {fixup_count} fixup records')
 print(f'  DDB at merged offset 0x{merged_ddb_off:X}')
@@ -406,7 +388,8 @@ print(f'  data_pages_off (file-absolute): 0x{data_pages_file:X}')
 print(f'  nonresident_names_off (file-absolute): 0x{nrn_file_off:X} ({nrn_len} bytes)')
 print(f'  object reserved field: 0x444F434C (LCOD)')
 
-# Verify the IOS loader dp formula
+# Verify the IOS loader dp formula still works
+ios_dp = (et_off + 0x1F) & ~0x1F
 print(f'\n--- IOS loader compatibility ---')
 print(f'  IOS dp = align_up(et_off=0x{et_off:X}, 32) = 0x{ios_dp:X} (LE-relative)')
 print(f'  Actual page data LE-relative: 0x{data_off_le_rel:X}')

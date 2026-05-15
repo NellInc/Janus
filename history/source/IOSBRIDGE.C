@@ -2465,7 +2465,7 @@ int ios_register_port_driver(void)
     g_bridge.drp.eyecatch[5] = 'X';
     g_bridge.drp.eyecatch[6] = 'X';
     g_bridge.drp.eyecatch[7] = 'X';
-    g_bridge.drp.lgn = (1UL << 0x16);      /* DRP_ESDI_PD */
+    g_bridge.drp.lgn = (1UL << 0x15);      /* DRP_NT_PD — higher priority than ESDI_506 */
     g_bridge.drp.aer = (ULONG)aep_handler;
     g_bridge.drp.ilb = 0;
     g_bridge.drp.ascii_name[0] = 'N';
@@ -2747,7 +2747,7 @@ static int ios_late_create_device(void)
             isp_cd.flags = 0x00000109UL; /* SRB CDB, physical, not-512 */
         }
     }
-    isp_cd.lgn = 0x16;        /* DRP_ESDI_PD_BIT */
+    isp_cd.lgn = 0x15;        /* DRP_NT_PD_BIT */
     Call_ILB_Service(ilb->service_rtn, &isp_cd);
     if (isp_cd.result != 0) {
         dbg_mark('q');
@@ -2890,7 +2890,7 @@ static int ios_late_create_device(void)
             isp_hdd_cd.req = (ULONG)ios_wdm_ior_entry;
             isp_hdd_cd.ddb = g_bridge.ios_ddb;
             isp_hdd_cd.flags = 0x00000100UL; /* 512-byte sectors */
-            isp_hdd_cd.lgn = 0x16;
+            isp_hdd_cd.lgn = 0x15;
             Call_ILB_Service(ilb->service_rtn, &isp_hdd_cd);
             dbg_mark('s');
             ios_dbg_hex16(isp_hdd_cd.result);
@@ -2981,7 +2981,7 @@ static int ios_late_create_device(void)
                 isp_cd2.flags = 0x00000109UL;
             }
         }
-        isp_cd2.lgn = 0x16;
+        isp_cd2.lgn = 0x15;
         Call_ILB_Service(ilb->service_rtn, &isp_cd2);
         if (isp_cd2.result == 0) {
             PBRIDGE_DEVICE dev2;

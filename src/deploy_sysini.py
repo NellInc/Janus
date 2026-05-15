@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-deploy_sysini.py - Deploy VxD via SYSTEM.INI instead of IOSUBSYS.
+deploy_sysini.py - Deploy VxD via SYSTEM.INI or IOSUBSYS.
 
-Deploys to WINDOWS/SYSTEM/NTMINI.VXD and adds device=NTMINI.VXD
-to the [386Enh] section of SYSTEM.INI. Also removes any existing
-NECATAPI.VXD from IOSUBSYS.
+Default mode: deploys to WINDOWS/SYSTEM/NTMINI.VXD and adds device=NTMINI.VXD
+to the [386Enh] section of SYSTEM.INI.
 
-Usage: python3 deploy_sysini.py <VXD_FILE>
+PDR mode (--pdr): deploys to WINDOWS/SYSTEM/IOSUBSYS/NTMINI.PDR instead.
+This loads during IOS init, before ESDI_506 claims devices.
+
+Also removes any existing NECATAPI.VXD from IOSUBSYS in both modes.
+
+Usage:
+  python3 deploy_sysini.py <VXD_FILE>                  # SYSTEM.INI mode
+  python3 deploy_sysini.py <VXD_FILE> --pdr             # IOSUBSYS PDR mode
+  python3 deploy_sysini.py <VXD_FILE> --suppress-esdi   # Also remove ESDI_506.PDR
 """
 import struct
 import sys
@@ -161,6 +168,75 @@ def deploy_to_system_dir(f, vxd_data, vxd_name_83=b'NTMINI  VXD'):
     f.write(new_entry)
     print(f"  Deployed {file_size} bytes as {vxd_name_83.decode().strip()} ({len(clusters)} clusters)")
     return True
+
+
+def deploy_to_iosubsys(f, vxd_data):
+    """Deploy VxD as NTMINI.PDR to WINDOWS\\SYSTEM\\IOSUBSYS directory.
+
+    PDRs in IOSUBSYS load during IOS initialization, before ESDI_506
+    claims IDE devices. This solves the timing problem where our driver
+    needs to register before the default IDE driver.
+    """
+    print("\n--- Deploy to WINDOWS\\SYSTEM\\IOSUBSYS\\ as NTMINI.PDR ---")
+
+    # Traverse to IOSUBSYS
+    try:
+        iosubsys_cluster = fat.traverse_to_iosubsys(f)
+    except RuntimeError as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    pdr_name_83 = b'NTMINI  PDR'
+    file_size = len(vxd_data)
+    clusters_needed = (file_size + fat.CLUSTER_SIZE - 1) // fat.CLUSTER_SIZE
+
+    # Check for existing NTMINI.PDR entry
+    existing_entry, existing_offset = fat.find_entry_in_dir(f, iosubsys_cluster, pdr_name_83)
+
+    if existing_entry is not None:
+        old_cluster = fat.parse_entry_cluster(existing_entry)
+        old_size = fat.parse_entry_size(existing_entry)
+        print(f"  Found existing NTMINI.PDR at 0x{existing_offset:X} (cluster {old_cluster}, size {old_size})")
+        entry_offset = existing_offset
+        # Free old clusters
+        if old_cluster >= 2:
+            c = old_cluster
+            freed = 0
+            while c >= 2 and c < 0x0FFFFFF8:
+                next_c = fat.read_fat_entry(f, c)
+                fat.write_fat_entry(f, c, 0)
+                freed += 1
+                c = next_c
+            print(f"  Freed {freed} old clusters")
+    else:
+        print(f"  No existing NTMINI.PDR, creating new entry")
+        entry_offset, is_end = fat.find_free_entry(f, iosubsys_cluster)
+        if is_end:
+            next_off = entry_offset + 32
+            f.seek(next_off)
+            b = f.read(1)
+            if b and b[0] != 0x00:
+                f.seek(next_off)
+                f.write(b'\x00' * 32)
+
+    # Allocate clusters and write data
+    clusters = fat.allocate_clusters(f, clusters_needed)
+    for i, c in enumerate(clusters):
+        chunk_start = i * fat.CLUSTER_SIZE
+        chunk = vxd_data[chunk_start:chunk_start + fat.CLUSTER_SIZE]
+        if len(chunk) < fat.CLUSTER_SIZE:
+            chunk = chunk + b'\x00' * (fat.CLUSTER_SIZE - len(chunk))
+        offset = fat.cluster_to_offset(c)
+        f.seek(offset)
+        f.write(chunk)
+
+    # Write directory entry
+    new_entry = fat.build_dir_entry(pdr_name_83, clusters[0], file_size)
+    f.seek(entry_offset)
+    f.write(new_entry)
+    print(f"  Deployed {file_size} bytes as NTMINI.PDR ({len(clusters)} clusters)")
+    return True
+
 
 def edit_system_ini(f):
     """Add device=NTMINI.VXD to [386Enh] in SYSTEM.INI."""
@@ -392,9 +468,10 @@ def suppress_esdi_506(f):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 deploy_sysini.py <VXD_FILE> [--suppress-esdi]")
+        print("Usage: python3 deploy_sysini.py <VXD_FILE> [--pdr] [--suppress-esdi]")
         sys.exit(1)
 
+    pdr_mode = '--pdr' in sys.argv
     suppress_esdi = '--suppress-esdi' in sys.argv
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     vxd_path = args[0]
@@ -402,13 +479,21 @@ def main():
 
     vxd_data = open(vxd_path, 'rb').read()
     print(f"VxD: {vxd_path} ({len(vxd_data)} bytes)")
+    if pdr_mode:
+        print("Mode: PDR (IOSUBSYS, loads during IOS init)")
+    else:
+        print("Mode: SYSTEM.INI (loads during VMM init)")
 
     with open(DISK, 'r+b') as f:
         print("\n--- FAT32 geometry ---")
         fat.detect_fat32_geometry(f)
 
-        deploy_to_system_dir(f, vxd_data)
-        edit_system_ini(f)
+        if pdr_mode:
+            deploy_to_iosubsys(f, vxd_data)
+        else:
+            deploy_to_system_dir(f, vxd_data)
+            edit_system_ini(f)
+
         edit_msdos_sys(f)
         remove_from_iosubsys(f)
         if suppress_esdi:
@@ -444,7 +529,10 @@ def main():
             f.write(bytes([0x00]))
             print(f"  Fixed BPB dirty byte (was 0x{bpb_dirty:02x})")
 
-    print("\nDone. VxD will load via SYSTEM.INI [386Enh] device= on next boot.")
+    if pdr_mode:
+        print("\nDone. PDR will load from IOSUBSYS during IOS init on next boot.")
+    else:
+        print("\nDone. VxD will load via SYSTEM.INI [386Enh] device= on next boot.")
 
 if __name__ == '__main__':
     main()
