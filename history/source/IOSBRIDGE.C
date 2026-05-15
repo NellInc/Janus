@@ -3214,12 +3214,12 @@ static void aep_config_dcb(PAEP aep)
     }
 
     /* Only claim devices we can handle.
-     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus).
-     * We could also handle hard disks, but Win98's built-in
-     * ESDI_506.PDR already handles IDE hard disks well.
-     * Our value-add is ATAPI/SCSI devices that need the
-     * NT miniport's superior command handling. */
+     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus),
+     * and ATA hard disks when the NT5 bridge detected one.
+     * For hard disks, the NT miniport provides the same command
+     * translation as for ATAPI, just with 512-byte sectors. */
     if (dcb->DCB_device_type != DCB_TYPE_CDROM &&
+        dcb->DCB_device_type != DCB_TYPE_DISK &&
         !(dcb->DCB_dmd_flags & DCB_DEV_ATAPI)) {
         /* Not our device. Let another port driver handle it. */
         aep->AEP_result = AEP_FAILURE;
