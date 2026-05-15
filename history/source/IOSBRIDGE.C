@@ -2843,66 +2843,83 @@ static int ios_late_create_device(void)
     dbg_mark(')');
     dbg_mark((isp_match.result == 0 && (isp_match.drives & (1UL << 3))) ? 'Z' : 'z');
 
-    /* For HDD mode: ALWAYS assign our own DCB a drive letter rather than
-     * splicing into ESDI_506's DCB chain. ESDI_506 handles I/O before our
-     * calldown can intercept. Our own DCB routes directly to us.
-     * For CD-ROM mode: use splice only if no match (existing logic below). */
+    /* HDD mode: splice our calldown into D:'s EXISTING calldown chain so
+     * we intercept I/O before ESDI_506. The key change from previous attempts:
+     * insert WITHOUT ISPCDF_BOTTOM — this puts us ABOVE ESDI_506 in the chain.
+     * We then consume the I/O via ata_direct_ior instead of passing it down. */
     {
         WDM_BRIDGE_CONTEXT *bridge_ctx = nt5_get_bridge_context();
-        if ((bridge_ctx && bridge_ctx->DeviceType == 0x00) ||
-            (isp_get.result != 0 || !is_ring0_ptr(isp_get.dcb) ||
-             isp_get.dcb == isp_dcb.dcb_ptr)) {
-        dbg_mark('L');
-        zero_mem(&isp_pick, sizeof(isp_pick));
-        isp_pick.func = 14;       /* ISP_PICK_DRIVE_LETTER */
-        isp_pick.dcb = isp_dcb.dcb_ptr;
-        Call_ILB_Service(ilb->service_rtn, &isp_pick);
-        dbg_mark('l');
-        ios_dbg_hex16(isp_pick.result);
-        ios_dbg_hex8(isp_pick.letter[0]);
+        if (bridge_ctx && bridge_ctx->DeviceType == 0x00 &&
+            isp_get.result == 0 && is_ring0_ptr(isp_get.dcb) &&
+            isp_get.dcb != isp_dcb.dcb_ptr) {
+            ISP_INSERT_CD_PKT isp_hdd_cd;
 
-        if (isp_pick.result == 0) {
-            zero_mem(&isp_assoc, sizeof(isp_assoc));
-            isp_assoc.func = 13;   /* ISP_ASSOCIATE_DCB */
-            isp_assoc.dcb = isp_dcb.dcb_ptr;
-            isp_assoc.drive = isp_pick.letter[0];
-            Call_ILB_Service(ilb->service_rtn, &isp_assoc);
-            dbg_mark('A');
-            ios_dbg_hex16(isp_assoc.result);
+            dbg_mark('H');
+            dbg_mark('S');
+            DBGPRINT("NTMINI: HDD splice into D: DCB %08lx (above ESDI_506)\n",
+                     isp_get.dcb);
 
-            if (isp_assoc.result == 0) {
-                DBGPRINT("NTMINI: Assigned drive letter %c: to our DCB\n",
-                         'A' + isp_pick.letter[0]);
-                dbg_mark('R');
+            zero_mem(&isp_hdd_cd, sizeof(isp_hdd_cd));
+            isp_hdd_cd.func = 5;          /* ISP_INSERT_CALLDOWN */
+            isp_hdd_cd.dcb = isp_get.dcb;
+            isp_hdd_cd.req = (ULONG)ios_wdm_ior_entry;
+            isp_hdd_cd.ddb = g_bridge.ios_ddb;
+            isp_hdd_cd.flags = 0x00000100UL; /* 512-byte sectors */
+            isp_hdd_cd.lgn = 0x16;
+            Call_ILB_Service(ilb->service_rtn, &isp_hdd_cd);
+            dbg_mark('s');
+            ios_dbg_hex16(isp_hdd_cd.result);
 
-                /* Register device entry for our orphan DCB so ior_handler
-                 * can find it via find_device_for_dcb(). */
+            if (isp_hdd_cd.result == 0) {
+                dbg_mark('J');
+                g_existing_dcb_ptr = isp_get.dcb;
+
+                /* Register device entry for the existing D: DCB */
                 if (g_bridge.num_devices < MAX_DEVICES) {
                     PBRIDGE_DEVICE dev3 = &g_bridge.devices[g_bridge.num_devices];
                     zero_mem(dev3, sizeof(BRIDGE_DEVICE));
-                    dev3->dcb = (PDCB)isp_dcb.dcb_ptr;
+                    dev3->dcb = (PDCB)isp_get.dcb;
                     dev3->target_id = bridge_ctx->TargetId;
                     dev3->lun = 0;
-                    dev3->device_type = bridge_ctx->DeviceType;
-                    dev3->is_atapi = (bridge_ctx->DeviceType == 0x05);
-                    dev3->sector_size = bridge_ctx->SectorSize;
+                    dev3->device_type = DCB_TYPE_DISK;
+                    dev3->is_atapi = FALSE;
+                    dev3->sector_size = 512;
                     dev3->total_sectors = 0;
                     g_bridge.num_devices++;
                     dbg_mark('K');
-                    DBGPRINT("NTMINI: Device entry for orphan: target=%d type=%d sector=%lu\n",
-                             dev3->target_id, dev3->device_type, (ULONG)dev3->sector_size);
+                    DBGPRINT("NTMINI: HDD device entry: target=%d dcb=%08lx\n",
+                             dev3->target_id, (ULONG)isp_get.dcb);
                 }
 
-                /* Notify IOS the device is ready */
-                zero_mem(&isp_arrived, sizeof(isp_arrived));
-                isp_arrived.func = 16; /* ISP_DEVICE_ARRIVED */
-                isp_arrived.dcb = isp_dcb.dcb_ptr;
-                isp_arrived.flags = 0;
-                Call_ILB_Service(ilb->service_rtn, &isp_arrived);
-                dbg_mark('r');
-                ios_dbg_hex16(isp_arrived.result);
+                /* Walk chain to verify position */
+                {
+                    ULONG cd;
+                    ULONG depth;
+                    cd = *(ULONG *)((UCHAR *)isp_get.dcb + 0x08);
+                    depth = 0;
+                    dbg_mark('~');
+                    while (is_ring0_ptr(cd) && depth < 8) {
+                        ULONG handler = *(ULONG *)cd;
+                        dbg_mark('#');
+                        dbg_mark((char)('0' + (char)depth));
+                        ios_dbg_hex32(handler);
+                        if (handler == (ULONG)ios_wdm_ior_entry) {
+                            dbg_mark('*');
+                        }
+                        cd = *(ULONG *)(cd + 0x0C);
+                        depth++;
+                    }
+                    dbg_mark('~');
+                }
+            } else {
+                dbg_mark('j');
+                DBGPRINT("NTMINI: HDD splice FAILED result=%04x\n",
+                         isp_hdd_cd.result);
             }
-        }
+        } else if (isp_get.result != 0 || !is_ring0_ptr(isp_get.dcb) ||
+                   isp_get.dcb == isp_dcb.dcb_ptr) {
+            dbg_mark('!');
+            DBGPRINT("NTMINI: No suitable DCB found for HDD mode\n");
         }
     }
 
@@ -3046,8 +3063,14 @@ static int ios_late_create_device(void)
         dbg_mark(found_stub ? 'F' : 'f');
     }
 
-    /* Leave the direct-ILB DCB live for the next isolation step. */
-    if (!g_fsd_registered) {
+    /* Register ISO 9660 FSD for CD-ROM mode only. In HDD mode, the ISO
+     * FSD would claim D: and serve stale CD content, blocking real disk I/O. */
+    {
+        WDM_BRIDGE_CONTEXT *fsd_bridge = nt5_get_bridge_context();
+        if (fsd_bridge && fsd_bridge->DeviceType == 0x00) {
+            dbg_mark('f');
+            DBGPRINT("NTMINI: HDD mode — skipping FSD/IFS registration\n");
+        } else if (!g_fsd_registered) {
         dbg_mark('Y');
         g_fsd_provider_id = IFSMgr_RegisterMount_Wrapper((ULONG)ntmini_fsd_mount_probe,
                                                          0x22, 0);
@@ -3078,6 +3101,7 @@ static int ios_late_create_device(void)
             dbg_mark('v');
         } else {
             dbg_mark('p');
+        }
         }
     }
     return 0;
