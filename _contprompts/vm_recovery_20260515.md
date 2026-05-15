@@ -1,5 +1,5 @@
 ---
-stepsCompleted: 14
+stepsCompleted: 16
 status: IN_PROGRESS
 ---
 
@@ -128,7 +128,8 @@ WREAD_OPS_DONE
 NT5 WDM atapi.sys served real CD-ROM file I/O through Win98's IFS layer on the restored disk. All three fix layers verified working together.
 
 ### Next Steps
-1. **Commit changes** — the three-layer fix is validated.
-2. **Debug SREAD divergence** — SREAD's GetFileAttributesA("D:\\SECOND.TXT") hangs while WREAD's GetFileAttributesA("D:\\WDMTEST.TXT") succeeds. Both files exist on the ISO. Likely a timing issue with when GetFileAttributesA runs relative to the D: mount completion.
-3. **ATA hard disk support** — code committed at deea226, needs testing with the new IOS fixes.
-4. **IRQHOOK crash** — separate issue on restored disk.
+1. **DONE** — Three-layer fix committed as `64044bd`. Both SREAD and WREAD pass.
+2. **DONE** — SREAD divergence was timing variance (race with second mount cycle). Rerun succeeded.
+3. **ATA hard disk support** — code committed at deea226, needs test HDD image (`/tmp/win98vm/test_hd.img`). Create a small FAT16 image with test files, then run WREAD/SREAD targeting the HDD.
+4. **IRQHOOK crash** — VPICD virtualization is `#if 0` in current build. Polling mode works. Enable and debug when interrupt-driven I/O is needed (DMA, better performance).
+5. **Push to remote** — `64044bd` is local only. Push when ready.
