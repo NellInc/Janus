@@ -1564,12 +1564,25 @@ int nt5_init(BOOLEAN use_primary)
         return -3;
     }
 
-    /* Step 4: Smoke test */
+    /* Step 4: Smoke test (with retry for CD-ROM spin-up) */
     dbg_mark('(');
     nt5_log_device_list();
     g_nt5_child_pdo = nt5_query_bus_relations();
     nt5_log_device_list();
-    result = nt5_test_read();
+    {
+        int retry;
+        result = -1;
+        for (retry = 0; retry < 5 && result != 0; retry++) {
+            if (retry > 0) {
+                int stall;
+                VxD_Debug_Printf("NT5: Smoke test retry %d\n", retry);
+                dbg_mark('W');
+                for (stall = 0; stall < 5; stall++)
+                    ntk_KeStallExecutionProcessor(100000);
+            }
+            result = nt5_test_read();
+        }
+    }
     dbg_mark('T');
     dbg_mark(')');
     if (result == 0) {
