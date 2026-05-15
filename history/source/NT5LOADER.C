@@ -1722,6 +1722,93 @@ int nt5_init(BOOLEAN use_primary)
                         dbg_mark('D');
                         VxD_Debug_Printf("NT5: MBR detected via direct ATA on slave\n");
                         found_mbr = 1;
+
+                        /* Validate: read partition boot sector (LBA 63) and
+                         * FAT16 data area to prove ata_direct_ior path works.
+                         * Also read SECOND.TXT content from known cluster. */
+                        {
+                            UCHAR vbuf[512];
+                            USHORT *vwp = (USHORT *)vbuf;
+                            ULONG vw;
+                            UCHAR vs;
+                            ULONG part_lba = 63;
+
+                            /* Read FAT16 boot sector at LBA 63 */
+                            PORT_OUT_BYTE(0x176, 0xF0);
+                            ntk_KeStallExecutionProcessor(500);
+                            for (vw = 0; vw < 500000; vw++) {
+                                vs = PORT_IN_BYTE(0x376);
+                                if (!(vs & 0x80)) break;
+                                PORT_STALL_ONE();
+                            }
+                            PORT_OUT_BYTE(0x172, 1);
+                            PORT_OUT_BYTE(0x173, (UCHAR)(part_lba & 0xFF));
+                            PORT_OUT_BYTE(0x174, (UCHAR)((part_lba >> 8) & 0xFF));
+                            PORT_OUT_BYTE(0x175, (UCHAR)((part_lba >> 16) & 0xFF));
+                            PORT_OUT_BYTE(0x177, 0x20);
+                            for (vw = 0; vw < 1000000; vw++) {
+                                vs = PORT_IN_BYTE(0x376);
+                                if (vs & 0x01) break;
+                                if (!(vs & 0x80) && (vs & 0x08)) break;
+                                PORT_STALL_ONE();
+                            }
+                            if (!(vs & 0x01) && (vs & 0x08)) {
+                                for (vw = 0; vw < 256; vw++)
+                                    vwp[vw] = PORT_IN_WORD(0x170);
+                                dbg_mark('V');
+                                nt5_dbg_hex8(vbuf[0]);  /* JMP (0xEB) */
+                                nt5_dbg_hex8(vbuf[54]); /* FAT type string */
+                                nt5_dbg_hex8(vbuf[55]);
+                                nt5_dbg_hex8(vbuf[56]);
+                                nt5_dbg_hex8(vbuf[57]);
+                                nt5_dbg_hex8(vbuf[58]);
+                                VxD_Debug_Printf("NT5: FAT16 boot sector: jmp=%02x type=%c%c%c%c%c\n",
+                                                 vbuf[0], vbuf[54], vbuf[55], vbuf[56], vbuf[57], vbuf[58]);
+                            } else {
+                                dbg_mark('v');
+                                nt5_dbg_hex8(vs);
+                            }
+
+                            /* Read data cluster 3 (SECOND.TXT):
+                             * LBA = partition_start + data_start + (cluster-2)*spc
+                             * = 63 + 65 + (3-2)*8 = 63 + 65 + 8 = 136 */
+                            {
+                                ULONG data_lba = 136;
+                                PORT_OUT_BYTE(0x176, 0xF0);
+                                ntk_KeStallExecutionProcessor(500);
+                                for (vw = 0; vw < 500000; vw++) {
+                                    vs = PORT_IN_BYTE(0x376);
+                                    if (!(vs & 0x80)) break;
+                                    PORT_STALL_ONE();
+                                }
+                                PORT_OUT_BYTE(0x172, 1);
+                                PORT_OUT_BYTE(0x173, (UCHAR)(data_lba & 0xFF));
+                                PORT_OUT_BYTE(0x174, (UCHAR)((data_lba >> 8) & 0xFF));
+                                PORT_OUT_BYTE(0x175, (UCHAR)((data_lba >> 16) & 0xFF));
+                                PORT_OUT_BYTE(0x177, 0x20);
+                                for (vw = 0; vw < 1000000; vw++) {
+                                    vs = PORT_IN_BYTE(0x376);
+                                    if (vs & 0x01) break;
+                                    if (!(vs & 0x80) && (vs & 0x08)) break;
+                                    PORT_STALL_ONE();
+                                }
+                                if (!(vs & 0x01) && (vs & 0x08)) {
+                                    for (vw = 0; vw < 256; vw++)
+                                        vwp[vw] = PORT_IN_WORD(0x170);
+                                    dbg_mark('D');
+                                    nt5_dbg_hex8(vbuf[0]);
+                                    nt5_dbg_hex8(vbuf[1]);
+                                    nt5_dbg_hex8(vbuf[2]);
+                                    nt5_dbg_hex8(vbuf[3]);
+                                    VxD_Debug_Printf("NT5: SECOND.TXT data: %c%c%c%c%c%c%c%c\n",
+                                                     vbuf[0], vbuf[1], vbuf[2], vbuf[3],
+                                                     vbuf[4], vbuf[5], vbuf[6], vbuf[7]);
+                                } else {
+                                    dbg_mark('d');
+                                    nt5_dbg_hex8(vs);
+                                }
+                            }
+                        }
                     }
                 }
             }
