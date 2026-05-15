@@ -36,7 +36,20 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MZ_SIZE = 0x80  # MZ header = LE file offset
 
 # --- Read V5SMALL ---
-data = bytearray(open(os.path.join(SCRIPT_DIR, 'V5SMALL.VXD'), 'rb').read())
+INPUT_CANDIDATES = [
+    os.path.join(os.path.dirname(SCRIPT_DIR), 'binaries', 'V5SMALL.VXD'),
+    os.path.join(SCRIPT_DIR, 'V5SMALL.VXD'),
+    os.path.join(os.path.dirname(SCRIPT_DIR), 'history', 'source', 'V5SMALL.VXD'),
+]
+
+INPUT_PATH = next((path for path in INPUT_CANDIDATES if os.path.exists(path)), None)
+if INPUT_PATH is None:
+    raise FileNotFoundError(
+        'V5SMALL.VXD not found. Looked in: ' + ', '.join(INPUT_CANDIDATES)
+    )
+
+print(f'Reading input VxD: {INPUT_PATH}')
+data = bytearray(open(INPUT_PATH, 'rb').read())
 le = struct.unpack_from('<I', data, 0x3C)[0]
 page_size = struct.unpack_from('<I', data, le + 0x28)[0]
 num_pages = struct.unpack_from('<I', data, le + 0x14)[0]

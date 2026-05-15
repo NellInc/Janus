@@ -450,11 +450,13 @@ static ULONG NTAPI pci_bus_set_data(PVOID Context, ULONG DataType,
  */
 static VOID NTAPI pci_interface_ref(PVOID Context)
 {
+    (void)Context;
     /* No-op: device lifetime matches VxD lifetime */
 }
 
 static VOID NTAPI pci_interface_deref(PVOID Context)
 {
+    (void)Context;
     /* No-op */
 }
 

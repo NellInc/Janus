@@ -158,6 +158,20 @@ typedef struct _PORT_CONFIGURATION_INFORMATION {
     ULONG   SrbExtensionSize;
 } PORT_CONFIGURATION_INFORMATION, *PPORT_CONFIGURATION_INFORMATION;
 
+enum {
+    NTMINI_PORTCFG_ACCESS_RANGES_OFFSET =
+        (int)(&((PPORT_CONFIGURATION_INFORMATION)0)->AccessRanges),
+    NTMINI_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET =
+        (int)(&((PPORT_CONFIGURATION_INFORMATION)0)->DeviceExtensionSize),
+    NTMINI_PORTCFG_SIZE = sizeof(PORT_CONFIGURATION_INFORMATION)
+};
+typedef char NTMINI_ASSERT_PORTCFG_ACCESS_RANGES_OFFSET_IS_0x38[
+    (NTMINI_PORTCFG_ACCESS_RANGES_OFFSET == 0x38) ? 1 : -1];
+typedef char NTMINI_ASSERT_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET_IS_0x80[
+    (NTMINI_PORTCFG_DEVICE_EXTENSION_SIZE_OFFSET == 0x80) ? 1 : -1];
+typedef char NTMINI_ASSERT_PORTCFG_SIZE_IS_0x8C[
+    (NTMINI_PORTCFG_SIZE == 0x8C) ? 1 : -1];
+
 /* SCSI_REQUEST_BLOCK (simplified for IDE miniport use) */
 typedef struct _SCSI_REQUEST_BLOCK {
     USHORT  Length;
@@ -182,6 +196,19 @@ typedef struct _SCSI_REQUEST_BLOCK {
     ULONG   InternalStatus;
     UCHAR   Cdb[16];
 } SCSI_REQUEST_BLOCK, *PSCSI_REQUEST_BLOCK;
+
+/*
+ * Hard layout guard: NT miniports consume SRBs by fixed offsets. If this
+ * struct drifts, CDB bytes move and the on-wire command is silently corrupted.
+ */
+enum {
+    NTMINI_SRB_CDB_OFFSET = (int)(&((PSCSI_REQUEST_BLOCK)0)->Cdb),
+    NTMINI_SRB_SIZE = sizeof(SCSI_REQUEST_BLOCK)
+};
+typedef char NTMINI_ASSERT_SRB_CDB_OFFSET_IS_0x30[
+    (NTMINI_SRB_CDB_OFFSET == 0x30) ? 1 : -1];
+typedef char NTMINI_ASSERT_SRB_SIZE_IS_0x40[
+    (NTMINI_SRB_SIZE == 0x40) ? 1 : -1];
 
 /* HW_INITIALIZATION_DATA: miniport fills this in DriverEntry */
 typedef struct _HW_INITIALIZATION_DATA {
@@ -211,6 +238,20 @@ typedef struct _HW_INITIALIZATION_DATA {
     PVOID   DeviceId;
     PVOID   HwAdapterControl;
 } HW_INITIALIZATION_DATA, *PHW_INITIALIZATION_DATA;
+
+enum {
+    NTMINI_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET =
+        (int)(&((PHW_INITIALIZATION_DATA)0)->DeviceExtensionSize),
+    NTMINI_HWINIT_MAP_BUFFERS_OFFSET =
+        (int)(&((PHW_INITIALIZATION_DATA)0)->MapBuffers),
+    NTMINI_HWINIT_SIZE = sizeof(HW_INITIALIZATION_DATA)
+};
+typedef char NTMINI_ASSERT_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET_IS_0x24[
+    (NTMINI_HWINIT_DEVICE_EXTENSION_SIZE_OFFSET == 0x24) ? 1 : -1];
+typedef char NTMINI_ASSERT_HWINIT_MAP_BUFFERS_OFFSET_IS_0x38[
+    (NTMINI_HWINIT_MAP_BUFFERS_OFFSET == 0x38) ? 1 : -1];
+typedef char NTMINI_ASSERT_HWINIT_SIZE_IS_0x50[
+    (NTMINI_HWINIT_SIZE == 0x50) ? 1 : -1];
 
 
 /* ================================================================
@@ -409,9 +450,18 @@ void NTMINI_ScsiPortStallExecution(ULONG Microseconds)
 
 void NTMINI_ScsiPortMoveMemory(PVOID Dest, PVOID Src, ULONG Length)
 {
-    /* [IMPL] Simple memcpy */
+    /* [IMPL] memcpy, with NULL Src treated as zero-fill for local callers */
     PUCHAR d = (PUCHAR)Dest;
     PUCHAR s = (PUCHAR)Src;
+    if (d == NULL || Length == 0) {
+        return;
+    }
+    if (s == NULL) {
+        while (Length-- > 0) {
+            *d++ = 0;
+        }
+        return;
+    }
     ULONG i;
     for (i = 0; i < Length; i++)
         d[i] = s[i];

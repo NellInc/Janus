@@ -403,6 +403,18 @@ typedef struct _MDL {
  * POOL_TYPE
  * ================================================================ */
 
+#ifdef NTKSHIM_H
+#ifdef NonPagedPool
+#undef NonPagedPool
+#endif
+#ifdef PagedPool
+#undef PagedPool
+#endif
+#ifdef NonPagedPoolMustSucceed
+#undef NonPagedPoolMustSucceed
+#endif
+#endif
+
 typedef enum _POOL_TYPE {
     NonPagedPool            = 0,
     PagedPool               = 1,
@@ -417,6 +429,18 @@ typedef enum _POOL_TYPE {
 /* ================================================================
  * MEMORY_CACHING_TYPE
  * ================================================================ */
+
+#ifdef NTKSHIM_H
+#ifdef MmNonCached
+#undef MmNonCached
+#endif
+#ifdef MmCached
+#undef MmCached
+#endif
+#ifdef MmWriteCombined
+#undef MmWriteCombined
+#endif
+#endif
 
 typedef enum _MEMORY_CACHING_TYPE {
     MmNonCached             = 0,
@@ -938,9 +962,11 @@ struct _IO_STACK_LOCATION {
 };
 
 /* IO_STACK_LOCATION Control flags */
-#define SL_INVOKE_ON_SUCCESS    0x01
-#define SL_INVOKE_ON_ERROR      0x02
-#define SL_INVOKE_ON_CANCEL     0x04
+#define SL_PENDING_RETURNED     0x01
+#define SL_ERROR_RETURNED       0x02
+#define SL_INVOKE_ON_CANCEL     0x20
+#define SL_INVOKE_ON_SUCCESS    0x40
+#define SL_INVOKE_ON_ERROR      0x80
 
 /* IRP */
 struct _IRP {

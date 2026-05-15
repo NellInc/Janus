@@ -48,13 +48,44 @@ extern ULONG  ntk_KeQueryTimeIncrement;
 extern ULONG  NTAPI ntk_HalGetInterruptVector(
     ULONG InterfaceType, ULONG BusNumber, ULONG BusInterruptLevel,
     ULONG BusInterruptVector, PKIRQL Irql, PULONG Affinity);
-extern KIRQL __cdecl ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock);
-extern VOID  __cdecl ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql);
-extern KIRQL __cdecl ntk_KfRaiseIrql(KIRQL NewIrql);
-extern VOID  __cdecl ntk_KfLowerIrql(KIRQL NewIrql);
+extern KIRQL FASTCALL ntk_KfAcquireSpinLock(PKSPIN_LOCK SpinLock);
+extern VOID  FASTCALL ntk_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL OldIrql);
+extern KIRQL FASTCALL ntk_KfRaiseIrql(KIRQL NewIrql);
+extern VOID  FASTCALL ntk_KfLowerIrql(KIRQL NewIrql);
 extern VOID  NTAPI ntk_KeStallExecutionProcessor(ULONG Microseconds);
 extern VOID  NTAPI ntk_READ_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count);
 extern VOID  NTAPI ntk_WRITE_PORT_BUFFER_USHORT(PUSHORT Port, PUSHORT Buffer, ULONG Count);
+extern PIRP  NTAPI ntk_IoAllocateIrp(CHAR StackSize, BOOLEAN ChargeQuota);
+extern VOID  NTAPI ntk_IoFreeIrp(PIRP Irp);
+extern NTSTATUS NTAPI ntk_IoCallDriver(PDEVICE_OBJECT DeviceObject, PIRP Irp);
+extern VOID  NTAPI ntk_IoCompleteRequest(PIRP Irp, CHAR PriorityBoost);
+extern NTSTATUS NTAPI ntk_IoCreateDevice(
+    PDRIVER_OBJECT DriverObject, ULONG ExtensionSize,
+    PUNICODE_STRING DeviceName, ULONG DeviceType,
+    ULONG Characteristics, BOOLEAN Exclusive,
+    PDEVICE_OBJECT *DeviceObject);
+extern VOID NTAPI ntk_IoDeleteDevice(PDEVICE_OBJECT DeviceObject);
+extern PDEVICE_OBJECT NTAPI ntk_IoAttachDeviceToDeviceStack(
+    PDEVICE_OBJECT SourceDevice, PDEVICE_OBJECT TargetDevice);
+extern VOID NTAPI ntk_IoDetachDevice(PDEVICE_OBJECT TargetDevice);
+extern PDEVICE_OBJECT NTAPI ntk_IoGetAttachedDeviceReference(
+    PDEVICE_OBJECT DeviceObject);
+extern VOID  FASTCALL ntk_ObfDereferenceObject(PVOID Object);
+extern KIRQL __cdecl ntk_KfAcquireSpinLock_ms(PKSPIN_LOCK SpinLock);
+extern VOID  __cdecl ntk_KfReleaseSpinLock_ms(PKSPIN_LOCK SpinLock, KIRQL OldIrql);
+extern KIRQL __cdecl ntk_KfRaiseIrql_ms(KIRQL NewIrql);
+extern VOID  __cdecl ntk_KfLowerIrql_ms(KIRQL NewIrql);
+extern LONG   __cdecl ntk_InterlockedIncrement_ms(PLONG Addend);
+extern LONG   __cdecl ntk_InterlockedDecrement_ms(PLONG Addend);
+extern LONG   __cdecl ntk_InterlockedExchange_ms(PLONG Target, LONG Value);
+extern VOID   __cdecl ntk_IofCompleteRequest_ms(PIRP Irp, CHAR PriorityBoost);
+extern PIRP   __cdecl ntk_IoAllocateIrp_ms(CHAR StackSize, BOOLEAN ChargeQuota);
+extern VOID   __cdecl ntk_KeInitializeEvent_ms(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State);
+extern LONG   __cdecl ntk_KeSetEvent_ms(PKEVENT Event, LONG Increment, BOOLEAN Wait);
+extern NTSTATUS __cdecl ntk_KeWaitForSingleObject_ms(PVOID Object, ULONG WaitReason,
+                                                     ULONG WaitMode, BOOLEAN Alertable,
+                                                     PLARGE_INTEGER Timeout);
+extern VOID   __cdecl ntk_ExFreePool_ms(PVOID Ptr);
 
 /* ================================================================
  * ntoskrnl.exe EXPORT TABLE
@@ -92,10 +123,10 @@ static const IMPORT_FUNC_ENTRY ntoskrnl_exports[] = {
     { "KeQuerySystemTime",              (PVOID)KeQuerySystemTime },
 
     /* --- Events (NTKSHIM) --- */
-    { "KeInitializeEvent",              (PVOID)KeInitializeEvent },
-    { "KeSetEvent",                     (PVOID)KeSetEvent },
+    { "KeInitializeEvent",              (PVOID)ntk_KeInitializeEvent_ms },
+    { "KeSetEvent",                     (PVOID)ntk_KeSetEvent_ms },
     { "KeResetEvent",                   (PVOID)KeResetEvent },
-    { "KeWaitForSingleObject",          (PVOID)KeWaitForSingleObject },
+    { "KeWaitForSingleObject",          (PVOID)ntk_KeWaitForSingleObject_ms },
 
     /* --- IRQL (NTKSHIM) --- */
     { "KeGetCurrentIrql",               (PVOID)KeGetCurrentIrql },
@@ -103,23 +134,23 @@ static const IMPORT_FUNC_ENTRY ntoskrnl_exports[] = {
     /* --- Pool allocation (NTKSHIM) --- */
     { "ExAllocatePool",                 (PVOID)ExAllocatePool },
     { "ExAllocatePoolWithTag",          (PVOID)ExAllocatePoolWithTag },
-    { "ExFreePool",                     (PVOID)ExFreePoolWithTag },
+    { "ExFreePool",                     (PVOID)ntk_ExFreePool_ms },
     { "ExFreePoolWithTag",              (PVOID)ExFreePoolWithTag },
 
     /* --- IRP allocation and dispatch (IRPMGR) --- */
-    { "IoAllocateIrp",                  (PVOID)IrpMgr_IoAllocateIrp },
-    { "IoFreeIrp",                      (PVOID)IrpMgr_IoFreeIrp },
-    { "IoCallDriver",                   (PVOID)IrpMgr_IoCallDriver },
-    { "IofCallDriver",                  (PVOID)IrpMgr_IoCallDriver },
-    { "IoCompleteRequest",              (PVOID)IrpMgr_IoCompleteRequest },
-    { "IofCompleteRequest",             (PVOID)IrpMgr_IoCompleteRequest },
+    { "IoAllocateIrp",                  (PVOID)ntk_IoAllocateIrp_ms },
+    { "IoFreeIrp",                      (PVOID)ntk_IoFreeIrp },
+    { "IoCallDriver",                   (PVOID)ntk_IoCallDriver },
+    { "IofCallDriver",                  (PVOID)IrpMgr_IofCallDriver },
+    { "IoCompleteRequest",              (PVOID)ntk_IoCompleteRequest },
+    { "IofCompleteRequest",             (PVOID)ntk_IofCompleteRequest_ms },
 
     /* --- Device object management (IRPMGR) --- */
-    { "IoCreateDevice",                 (PVOID)IrpMgr_IoCreateDevice },
-    { "IoDeleteDevice",                 (PVOID)IrpMgr_IoDeleteDevice },
-    { "IoAttachDeviceToDeviceStack",    (PVOID)IrpMgr_IoAttachDeviceToDeviceStack },
-    { "IoDetachDevice",                 (PVOID)IrpMgr_IoDetachDevice },
-    { "IoGetAttachedDeviceReference",   (PVOID)IrpMgr_IoGetAttachedDeviceReference },
+    { "IoCreateDevice",                 (PVOID)ntk_IoCreateDevice },
+    { "IoDeleteDevice",                 (PVOID)ntk_IoDeleteDevice },
+    { "IoAttachDeviceToDeviceStack",    (PVOID)ntk_IoAttachDeviceToDeviceStack },
+    { "IoDetachDevice",                 (PVOID)ntk_IoDetachDevice },
+    { "IoGetAttachedDeviceReference",   (PVOID)ntk_IoGetAttachedDeviceReference },
 
     /* --- Error logging (IRPMGR) --- */
     { "IoAllocateErrorLogEntry",        (PVOID)IrpMgr_IoAllocateErrorLogEntry },
@@ -219,9 +250,9 @@ static const IMPORT_FUNC_ENTRY ntoskrnl_exports[] = {
     { "ObfDereferenceObject",           (PVOID)ntk_ObfDereferenceObject },
 
     /* --- Interlocked operations --- */
-    { "InterlockedDecrement",           (PVOID)ntk_InterlockedDecrement },
-    { "InterlockedIncrement",           (PVOID)ntk_InterlockedIncrement },
-    { "InterlockedExchange",            (PVOID)ntk_InterlockedExchange },
+    { "InterlockedDecrement",           (PVOID)ntk_InterlockedDecrement_ms },
+    { "InterlockedIncrement",           (PVOID)ntk_InterlockedIncrement_ms },
+    { "InterlockedExchange",            (PVOID)ntk_InterlockedExchange_ms },
 
     /* --- Synchronization extras --- */
     { "KeSynchronizeExecution",         (PVOID)ntk_KeSynchronizeExecution },
@@ -264,9 +295,8 @@ static const IMPORT_FUNC_ENTRY ntoskrnl_exports[] = {
  * wrappers around IN/OUT instructions and PCI config space access.
  *
  * Note: KfAcquireSpinLock, KfReleaseSpinLock, KfRaiseIrql, and
- * KfLowerIrql are __fastcall on NT. Our ntk_Kf* implementations
- * are __cdecl; the PE loader or ASM wrapper must handle the
- * calling convention translation.
+ * KfLowerIrql are __fastcall on NT, so the exported shim entry
+ * points use FASTCALL too.
  * ================================================================ */
 
 static const IMPORT_FUNC_ENTRY hal_exports[] = {
@@ -291,12 +321,12 @@ static const IMPORT_FUNC_ENTRY hal_exports[] = {
     { "HalSetBusDataByOffset",          (PVOID)HalSetBusData },
     { "HalGetInterruptVector",          (PVOID)ntk_HalGetInterruptVector },
 
-    /* --- IRQL management (NTKSHIM, cdecl wrappers for fastcall) --- */
+    /* --- IRQL management (MS fastcall ASM thunks) --- */
     { "KeGetCurrentIrql",               (PVOID)KeGetCurrentIrql },
-    { "KfAcquireSpinLock",              (PVOID)ntk_KfAcquireSpinLock },
-    { "KfReleaseSpinLock",              (PVOID)ntk_KfReleaseSpinLock },
-    { "KfRaiseIrql",                    (PVOID)ntk_KfRaiseIrql },
-    { "KfLowerIrql",                    (PVOID)ntk_KfLowerIrql },
+    { "KfAcquireSpinLock",              (PVOID)ntk_KfAcquireSpinLock_ms },
+    { "KfReleaseSpinLock",              (PVOID)ntk_KfReleaseSpinLock_ms },
+    { "KfRaiseIrql",                    (PVOID)ntk_KfRaiseIrql_ms },
+    { "KfLowerIrql",                    (PVOID)ntk_KfLowerIrql_ms },
 
     /* --- Stall execution (NTKSHIM) --- */
     { "KeStallExecutionProcessor",      (PVOID)ntk_KeStallExecutionProcessor },

@@ -76,8 +76,8 @@
 #define SRB_STATUS_DATA_OVERRUN     0x12
 
 /* SRB Flags */
-#define SRB_FLAGS_DATA_IN           0x00000008
-#define SRB_FLAGS_DATA_OUT          0x00000010
+#define SRB_FLAGS_DATA_IN           0x00000040
+#define SRB_FLAGS_DATA_OUT          0x00000080
 #define SRB_FLAGS_NO_DATA_TRANSFER  0x00000000
 #define SRB_FLAGS_DISABLE_SYNCH_TRANSFER 0x00000020
 
@@ -112,6 +112,15 @@ typedef struct _SCSI_REQUEST_BLOCK {
     UCHAR   Cdb[16];
 } SCSI_REQUEST_BLOCK, *PSCSI_REQUEST_BLOCK;
 
+enum {
+    WDMBRIDGE_SRB_CDB_OFFSET = (int)(&((PSCSI_REQUEST_BLOCK)0)->Cdb),
+    WDMBRIDGE_SRB_SIZE = sizeof(SCSI_REQUEST_BLOCK)
+};
+typedef char WDMBRIDGE_ASSERT_SRB_CDB_OFFSET_IS_0x30[
+    (WDMBRIDGE_SRB_CDB_OFFSET == 0x30) ? 1 : -1];
+typedef char WDMBRIDGE_ASSERT_SRB_SIZE_IS_0x40[
+    (WDMBRIDGE_SRB_SIZE == 0x40) ? 1 : -1];
+
 /* Sense data */
 typedef struct _SENSE_DATA {
     UCHAR   ErrorCode;
@@ -142,7 +151,6 @@ static void wdm_copy_mem(PVOID dst, PVOID src, ULONG size);
 static USHORT wdm_srb_status_to_ior_status(UCHAR srb_status,
                                              UCHAR scsi_status);
 static void wdm_complete_ior(PIOR ior, USHORT status);
-static PWDM_BRIDGE_CONTEXT wdm_find_context_for_dcb(PDCB dcb);
 
 
 /* ================================================================
@@ -203,7 +211,7 @@ NTSTATUS wdm_ior_to_irp(PIOR ior, PDEVICE_OBJECT top_device)
 
     /* Allocate an IRP with enough stack locations for the device stack.
      * StackSize comes from the target device object. */
-    irp = IoAllocateIrp(top_device->StackSize, FALSE);
+    irp = IrpMgr_IoAllocateIrp(top_device->StackSize, FALSE);
     if (!irp) {
         VxD_Debug_Printf("WDM: IoAllocateIrp failed\n");
         wdm_complete_ior(ior, IORS_MEMORY_PROBLEM);
@@ -215,7 +223,7 @@ NTSTATUS wdm_ior_to_irp(PIOR ior, PDEVICE_OBJECT top_device)
         sizeof(SCSI_REQUEST_BLOCK), HEAPF_ZEROINIT);
     if (!srb) {
         VxD_Debug_Printf("WDM: SRB allocation failed\n");
-        IoFreeIrp(irp);
+        IrpMgr_IoFreeIrp(irp);
         wdm_complete_ior(ior, IORS_MEMORY_PROBLEM);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
@@ -378,7 +386,7 @@ NTSTATUS wdm_ior_to_irp(PIOR ior, PDEVICE_OBJECT top_device)
     default:
         VxD_Debug_Printf("WDM: Unsupported IOR func=%04x\n", ior->IOR_func);
         VxD_HeapFree(srb, 0);
-        IoFreeIrp(irp);
+        IrpMgr_IoFreeIrp(irp);
         wdm_complete_ior(ior, IORS_NOT_SUPPORTED);
         return STATUS_NOT_SUPPORTED;
     }
@@ -387,7 +395,7 @@ NTSTATUS wdm_ior_to_irp(PIOR ior, PDEVICE_OBJECT top_device)
      * This is how NT5 storage drivers receive SCSI requests:
      * IRP_MJ_INTERNAL_DEVICE_CONTROL with the SRB pointer in
      * Parameters.Scsi.Srb. */
-    irpSp = IoGetNextIrpStackLocation(irp);
+    irpSp = IrpMgr_IoGetNextIrpStackLocation(irp);
     irpSp->MajorFunction = IRP_MJ_SCSI;
     irpSp->Parameters.Scsi.Srb = srb;
 
@@ -397,8 +405,8 @@ NTSTATUS wdm_ior_to_irp(PIOR ior, PDEVICE_OBJECT top_device)
     irp->Tail.Overlay.DriverContext[1] = srb;
 
     /* Set completion routine: fires on success, error, and cancel */
-    IoSetCompletionRoutine(irp, wdm_irp_completion, ior,
-                            TRUE, TRUE, TRUE);
+    IrpMgr_IoSetCompletionRoutine(irp, wdm_irp_completion, ior,
+                                  TRUE, TRUE, TRUE);
 
     /* Dispatch the IRP down the NT5 device stack */
     VxD_Debug_Printf("WDM: Dispatching IRP %08lx to device %08lx\n",
@@ -427,6 +435,9 @@ NTSTATUS NTAPI wdm_irp_completion(PDEVICE_OBJECT DeviceObject,
     PSCSI_REQUEST_BLOCK srb;
     USHORT ior_status;
 
+    (void)DeviceObject;
+    (void)Context;
+
     /* Recover the IOR and SRB from the IRP's DriverContext */
     ior = (PIOR)Irp->Tail.Overlay.DriverContext[0];
     srb = (PSCSI_REQUEST_BLOCK)Irp->Tail.Overlay.DriverContext[1];
@@ -434,14 +445,14 @@ NTSTATUS NTAPI wdm_irp_completion(PDEVICE_OBJECT DeviceObject,
     if (!ior) {
         VxD_Debug_Printf("WDM: Completion with no IOR (orphaned)\n");
         if (srb) VxD_HeapFree(srb, 0);
-        IoFreeIrp(Irp);
+        IrpMgr_IoFreeIrp(Irp);
         return STATUS_MORE_PROCESSING_REQUIRED;
     }
 
     if (!srb) {
         VxD_Debug_Printf("WDM: Completion with no SRB\n");
         wdm_complete_ior(ior, IORS_DEVICE_ERROR);
-        IoFreeIrp(Irp);
+        IrpMgr_IoFreeIrp(Irp);
         return STATUS_MORE_PROCESSING_REQUIRED;
     }
 
@@ -492,7 +503,7 @@ NTSTATUS NTAPI wdm_irp_completion(PDEVICE_OBJECT DeviceObject,
      * manager we've taken ownership of the IRP and freed it ourselves.
      * This prevents double-free. */
     VxD_HeapFree(srb, 0);
-    IoFreeIrp(Irp);
+    IrpMgr_IoFreeIrp(Irp);
 
     return STATUS_MORE_PROCESSING_REQUIRED;
 }
@@ -671,7 +682,6 @@ int wdm_load_nt5_ide_stack(PCI_IDE_DEVICE pci_devices[], ULONG count)
 void __cdecl wdm_calldown_handler(PIOR ior)
 {
     PWDM_BRIDGE_CONTEXT ctx;
-    PDCB dcb;
 
     if (!ior) {
         return;
@@ -754,6 +764,9 @@ void __cdecl wdm_calldown_handler(PIOR ior)
 PVOID wdm_load_driver(const char *filename,
                        PVOID exports[], ULONG export_count)
 {
+    (void)exports;
+    (void)export_count;
+
     VxD_Debug_Printf("WDM: wdm_load_driver('%s') - "
                      "STUB: needs multi-DLL PELOAD.C\n", filename);
 
@@ -865,15 +878,4 @@ static void wdm_copy_mem(PVOID dst, PVOID src, ULONG size)
     for (i = 0; i < size; i++) {
         d[i] = s[i];
     }
-}
-
-static PWDM_BRIDGE_CONTEXT wdm_find_context_for_dcb(PDCB dcb)
-{
-    ULONG i;
-    for (i = 0; i < g_wdm.num_devices; i++) {
-        if (g_wdm.devices[i].Active && g_wdm.devices[i].Dcb == dcb) {
-            return &g_wdm.devices[i];
-        }
-    }
-    return NULL;
 }

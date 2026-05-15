@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-deploy_to_iosubsys.py - Deploy a VxD to WINDOWS\SYSTEM\IOSUBSYS on a FAT32 disk image.
+deploy_to_iosubsys.py - Deploy a VxD to WINDOWS\\SYSTEM\\IOSUBSYS on a FAT32 disk image.
 
 Auto-detects FAT32 geometry from the disk's BPB. Traverses the FAT32 directory
 tree from root -> WINDOWS -> SYSTEM -> IOSUBSYS, then creates or updates an
@@ -18,8 +18,49 @@ import struct
 import sys
 import os
 
+PERSISTENT_VM_DIR = os.path.expanduser("~/Documents/VMs/win98vm")
+DEFAULT_DISK = "/tmp/win98vm/win98.img"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+
+
+def resolve_disk_path():
+    env_disk = os.environ.get("WIN98_IMG")
+    candidates = [
+        env_disk,
+        DEFAULT_DISK,
+        "/tmp/win98vm/win98_nogeom.img",
+        os.path.join(PERSISTENT_VM_DIR, "win98.img"),
+        os.path.join(PERSISTENT_VM_DIR, "win98_nogeom.img"),
+    ]
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+
+    return env_disk or DEFAULT_DISK
+
+
+def resolve_vxd_input_path(vxd_path):
+    """Resolve a VxD path from cwd, repo root, or the script directory."""
+    if os.path.isabs(vxd_path):
+        return vxd_path
+
+    candidates = [
+        os.path.abspath(vxd_path),
+        os.path.join(REPO_DIR, vxd_path),
+        os.path.join(SCRIPT_DIR, vxd_path),
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+
+    return os.path.abspath(vxd_path)
+
+
 # ── Disk geometry (auto-detected from BPB) ────────────────────────────────
-DISK = os.environ.get("WIN98_IMG", "/tmp/win98vm/win98.img")
+DISK = resolve_disk_path()
 # These are set by detect_fat32_geometry()
 PARTITION_LBA = 0
 BPS = 512
@@ -598,10 +639,7 @@ def main():
         sys.exit(1)
 
     if args:
-        vxd_path = args[0]
-        # If not an absolute path, look relative to script directory
-        if not os.path.isabs(vxd_path):
-            vxd_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), vxd_path)
+        vxd_path = resolve_vxd_input_path(args[0])
 
         if not deploy_vxd(vxd_path):
             sys.exit(1)

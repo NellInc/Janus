@@ -42,7 +42,9 @@ typedef USHORT         *PUSHORT;
 typedef ULONG          *PULONG;
 #define TRUE  1
 #define FALSE 0
+#ifndef NULL
 #define NULL  ((void *)0)
+#endif
 #endif
 
 /* Win9x VxD callback types */
@@ -228,21 +230,25 @@ typedef struct _IOR {
 #define DCB_TYPE_COMM           0x0009  /* Communications device */
 
 /* DCB device flags (DCB_dmd_flags) */
-#define DCB_DEV_PHYSICAL        0x00000001  /* Physical device */
-#define DCB_DEV_LOGICAL         0x00000002  /* Logical device */
+#define DCB_DEV_INT13           0x00000001  /* INT 13h device */
+#define DCB_DEV_WRITEABLE       0x00000002  /* Writable media */
 #define DCB_DEV_REMOVABLE       0x00000004  /* Removable media */
-#define DCB_DEV_ATAPI           0x00000008  /* ATAPI device */
-#define DCB_DEV_SCSI            0x00000010  /* SCSI device */
-#define DCB_DEV_INT13           0x00000020  /* INT 13h device */
-#define DCB_DEV_CDROM           0x00000040  /* CD-ROM device */
-#define DCB_DEV_RMM             0x00000080  /* Real Mode Mapper device */
-#define DCB_DEV_EJECTABLE       0x00000100  /* Media is ejectable */
-#define DCB_DEV_NOPMMODE        0x00000200  /* No protected mode access */
+#define DCB_DEV_UNCERTAIN_MEDIA 0x00001000  /* Media state uncertain */
+#define DCB_DEV_LOGICAL         0x00004000  /* Logical device */
+#define DCB_DEV_PHYSICAL        0x00008000  /* Physical device */
+#define DCB_DEV_TSD_PROCESSED   0x01000000  /* TSD has configured DCB */
+/* Legacy local aliases retained for older bridge code paths. */
+#define DCB_DEV_ATAPI           0x00000000
+#define DCB_DEV_SCSI            0x00000000
+#define DCB_DEV_CDROM           0x00000000
+#define DCB_DEV_RMM             0x00002000
+#define DCB_DEV_EJECTABLE       0x00000000
+#define DCB_DEV_NOPMMODE        0x00000000
 
 /* DCB bus type */
-#define DCB_BUS_ESDI            0x0001
-#define DCB_BUS_SCSI            0x0002
-#define DCB_BUS_FLOPPY          0x0003
+#define DCB_BUS_ESDI            0x0000
+#define DCB_BUS_SCSI            0x0001
+#define DCB_BUS_FLOPPY          0x000A
 #define DCB_BUS_ABIOS           0x0004
 #define DCB_BUS_EISA            0x0005
 #define DCB_BUS_SMART           0x0006
@@ -255,7 +261,7 @@ typedef struct _DCB {
     ULONG   DCB_cmn_size;               /* 0x00: Total DCB size */
     struct _DCB *DCB_next;              /* 0x04: Next DCB in chain */
     struct _DCB *DCB_next_logical;      /* 0x08: Next logical DCB */
-    struct _DDB *DCB_ddb;               /* 0x0C: Owning DDB */
+    ULONG   DCB_ddb;                    /* 0x0C: IOS DDB id/handle */
 
     /* ---- Device identification ---- */
     UCHAR   DCB_device_type;            /* 0x10: DCB_TYPE_* */
@@ -339,9 +345,10 @@ typedef struct _DDB {
  * When IOS needs to initialize a driver, configure a device,
  * or route an I/O request, it sends an AEP.
  *
- * The AEP_func field selects the event type. For AEP_IOR events,
- * the IOR pointer is included. For AEP_CONFIG_DCB events, the
- * DCB pointer is included.
+ * The AEP_func field selects the event type. For AEP_CONFIG_DCB
+ * events, the DCB pointer is included. Some older bridge code in
+ * this tree still uses legacy helper names for request-routing
+ * paths, and IOS itself uses the modern function numbers below.
  *
  * The port driver's AEP handler is a single __cdecl function
  * that dispatches on AEP_func.
@@ -353,22 +360,28 @@ typedef struct _DDB {
 #define AEP_BOOT_COMPLETE       0x02    /* Boot sequence finished */
 #define AEP_CONFIG_DCB          0x03    /* Configure a DCB (device detected) */
 #define AEP_UNCONFIG_DCB        0x04    /* Unconfigure a DCB (device removed) */
-#define AEP_IOR                 0x05    /* Process an I/O request */
-#define AEP_ASSOCIATE_DCB       0x06    /* Associate DCB with a port driver */
-#define AEP_DISASSOCIATE_DCB    0x07    /* Disassociate DCB */
-#define AEP_REAL_MODE_HANDOFF   0x08    /* Transitioning from real mode */
-#define AEP_SYSTEM_SHUTDOWN     0x09    /* Normal system shutdown */
-#define AEP_UNINITIALIZE        0x0A    /* Driver being unloaded */
-#define AEP_DCB_LOCK            0x0B    /* Lock DCB (prevent removal) */
-#define AEP_MOUNT_NOTIFY        0x0C    /* Volume mount notification */
-#define AEP_CREATE_VRP          0x0E    /* Create Volume Request Params */
-#define AEP_DESTROY_VRP         0x0F    /* Destroy VRP */
-#define AEP_REFRESH_DRIVE       0x10    /* Refresh drive letter assignment */
+#define AEP_IOP_TIMEOUT         0x05    /* Timed out IOP */
+#define AEP_DEVICE_INQUIRY      0x06    /* Device inquiry */
+#define AEP_HALF_SEC            0x07    /* Half-second timer */
+#define AEP_1_SEC               0x08    /* One-second timer */
+#define AEP_2_SECS              0x09    /* Two-second timer */
+#define AEP_4_SECS              0x0A    /* Four-second timer */
+#define AEP_DBG_DOT_CMD         0x0B    /* Debug command */
+#define AEP_ASSOCIATE_DCB       0x0C    /* Associate DCB with a port driver */
+#define AEP_REAL_MODE_HANDOFF   0x0D    /* Transitioning from real mode */
+#define AEP_SYSTEM_SHUTDOWN     0x0E    /* Normal system shutdown */
+#define AEP_UNINITIALIZE        0x0F    /* Driver being unloaded */
+#define AEP_DCB_LOCK            0x10    /* Lock DCB (prevent removal) */
+#define AEP_MOUNT_NOTIFY        0x11    /* Volume mount notification */
+#define AEP_CREATE_VRP          0x12    /* Create Volume Request Params */
+#define AEP_DESTROY_VRP         0x13    /* Destroy VRP */
+#define AEP_REFRESH_DRIVE       0x14    /* Refresh drive letter assignment */
+#define AEP_PEND_UNCONFIG_DCB   0x15    /* Pending DCB unconfigure */
 
 /* --- AEP Result Codes --- */
-#define AEP_SUCCESS             0x0000  /* Event handled successfully */
-#define AEP_FAILURE             0x0001  /* Event handling failed */
-#define AEP_NO_SUPPORT          0x0002  /* Event not supported by driver */
+#define AEP_SUCCESS             0       /* Event handled successfully */
+#define AEP_DEREGISTER          1       /* Deregister driver */
+#define AEP_FAILURE             (-1L)   /* Event handling failed */
 
 /* --- AEP_bi_flags (for AEP_INITIALIZE) --- */
 #define AEP_BI_FLAG_PD          0x00000001  /* This is a port driver init */
@@ -380,43 +393,45 @@ typedef struct _DDB {
 
 /* --- The AEP structure --- */
 
+#pragma pack(push,1)
 typedef struct _AEP {
-    /* ---- Core fields (present in all AEP types) ---- */
-    USHORT  AEP_func;               /* 0x00: AEP function code */
-    USHORT  AEP_result;             /* 0x02: Result (set by handler) */
-    PDDB    AEP_ddb;                /* 0x04: Our DDB */
-    ULONG   AEP_lgn;                /* 0x08: Logical group number */
+    USHORT  AEP_func;       /* AEP function code */
+    USHORT  AEP_result;     /* Result code */
+    ULONG   AEP_ddb;        /* IOS DDB id/handle */
+    UCHAR   AEP_lgn;        /* Load group number */
+    UCHAR   AEP_align[3];   /* Alignment padding */
 
-    /* ---- Union for event-specific data ---- */
     union {
-        /* AEP_INITIALIZE (func == 0x00) */
+        /* AEP_INITIALIZE */
         struct {
-            ULONG   bi_flags;       /* AEP_BI_FLAG_* */
             ULONG   bi_reference;   /* IOS reference data */
-            PVOID   bi_dvt;         /* Default volume tracker entry */
-            PVOID   bi_reserved;    /* Reserved */
+            UCHAR   bi_flags;       /* Initialization flags */
+            UCHAR   bi_max_target;  /* Maximum target ID */
+            UCHAR   bi_max_lun;     /* Maximum LUN */
+            PDCB    bi_dcb;         /* Initial DCB */
+            PVOID   bi_devnode;     /* CONFIGMG devnode */
+            PVOID   bi_regkey;      /* Registry key */
+            UCHAR   bi_align;       /* Alignment padding */
         } aep_bi;
 
-        /* AEP_CONFIG_DCB (func == 0x03) */
+        /* AEP_CONFIG_DCB */
         struct {
             PDCB    cd_dcb;         /* DCB being configured */
-            ULONG   cd_flags;       /* AEP_CD_FLAG_* */
-            PVOID   cd_drive_lt;    /* Drive letter table entry */
+            ULONG   cd_flags;       /* Legacy local flags */
         } aep_cd;
 
-        /* AEP_UNCONFIG_DCB (func == 0x04) */
+        /* AEP_UNCONFIG_DCB */
         struct {
             PDCB    ud_dcb;         /* DCB being unconfigured */
-            ULONG   ud_flags;       /* Flags */
         } aep_ud;
 
-        /* AEP_IOR (func == 0x05) */
+        /* Legacy request-routing helper payload */
         struct {
             PIOR    ior_ior;        /* The I/O request to process */
             PDCB    ior_dcb;        /* Target DCB for this request */
         } aep_ior;
 
-        /* AEP_ASSOCIATE_DCB (func == 0x06) */
+        /* AEP_ASSOCIATE_DCB */
         struct {
             PDCB    as_dcb;         /* DCB to associate */
             ULONG   as_flags;       /* Association flags */
@@ -428,6 +443,7 @@ typedef struct _AEP {
         } aep_generic;
     } u;
 } AEP, *PAEP;
+#pragma pack(pop)
 
 /* Convenience macros for accessing AEP union fields */
 #define AEP_BI_FLAGS        u.aep_bi.bi_flags
@@ -456,7 +472,7 @@ typedef void (__cdecl *CALLDOWN_FUNC)(PIOR ior);
 
 typedef struct _CALLDOWN {
     CALLDOWN_FUNC   CD_func;        /* Handler function */
-    PDDB            CD_ddb;         /* Owning DDB */
+    ULONG           CD_ddb;         /* IOS DDB id/handle */
     struct _CALLDOWN *CD_next;      /* Next entry in chain */
     ULONG           CD_flags;       /* Flags */
 } CALLDOWN, *PCALLDOWN;
@@ -558,7 +574,7 @@ extern void __cdecl IOS_BD_Command_Complete(PIOR ior);
  * Parameters:
  *   dcb     - The DCB to insert into
  *   cd      - Our calldown entry
- *   ddb     - Our DDB
+ *   ddb     - IOS DDB id/handle
  *   flags   - Insertion flags
  *
  * Returns:
@@ -567,7 +583,7 @@ extern void __cdecl IOS_BD_Command_Complete(PIOR ior);
  * This is how we tell IOS "send I/O for this device to me."
  */
 extern ULONG __cdecl ISP_INSERT_CALLDOWN(PDCB dcb, PCALLDOWN cd,
-                                          PDDB ddb, ULONG flags);
+                                          ULONG ddb, ULONG flags);
 
 /* Insert calldown flags */
 #define ISPCDF_BOTTOM       0x0001  /* Insert at bottom of chain */

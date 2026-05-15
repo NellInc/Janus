@@ -158,8 +158,10 @@ NTSTATUS __cdecl pnp_start_device(
     PCM_FULL_RESOURCE_DESCRIPTOR full_desc;
     PCM_PARTIAL_RESOURCE_LIST partial_list;
     PCM_PARTIAL_RESOURCE_DESCRIPTOR port_desc;
+    PCM_PARTIAL_RESOURCE_DESCRIPTOR ctrl_desc;
     PCM_PARTIAL_RESOURCE_DESCRIPTOR irq_desc;
     NTSTATUS status;
+    ULONG ControlPortBase;
 
     if (!DeviceObject) {
         return STATUS_INVALID_PARAMETER;
@@ -182,7 +184,15 @@ NTSTATUS __cdecl pnp_start_device(
     partial_list = &full_desc->PartialResourceList;
     partial_list->Version = 1;
     partial_list->Revision = 1;
-    partial_list->Count = 2; /* I/O port + interrupt */
+    partial_list->Count = 3; /* command I/O port + control I/O port + interrupt */
+
+    if (IoPortBase == 0x1F0) {
+        ControlPortBase = 0x3F6;
+    } else if (IoPortBase == 0x170) {
+        ControlPortBase = 0x376;
+    } else {
+        ControlPortBase = IoPortBase + IoPortLength;
+    }
 
     /* Descriptor 0: I/O port range */
     port_desc = &partial_list->Descriptors[0];
@@ -193,18 +203,37 @@ NTSTATUS __cdecl pnp_start_device(
     port_desc->u.Port.Start.u.HighPart = 0;
     port_desc->u.Port.Length = IoPortLength;
 
-    /* Descriptor 1: Interrupt
-     * We place it right after descriptor 0 in memory. Since
+    /* Descriptor 1: IDE control port */
+    ctrl_desc = (PCM_PARTIAL_RESOURCE_DESCRIPTOR)(
+        (PUCHAR)port_desc + sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR));
+    ctrl_desc->Type = (UCHAR)CmResourceTypePort;
+    ctrl_desc->ShareDisposition = (UCHAR)CmResourceShareDeviceExclusive;
+    ctrl_desc->Flags = 1; /* CM_RESOURCE_PORT_IO */
+    ctrl_desc->u.Port.Start.u.LowPart = ControlPortBase;
+    ctrl_desc->u.Port.Start.u.HighPart = 0;
+    ctrl_desc->u.Port.Length = 1;
+
+    /* Descriptor 2: Interrupt
+     * We place it right after descriptor 1 in memory. Since
      * Descriptors[] is declared as [1] in the structure, we
      * need to index manually. */
     irq_desc = (PCM_PARTIAL_RESOURCE_DESCRIPTOR)(
-        (PUCHAR)port_desc + sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR));
+        (PUCHAR)ctrl_desc + sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR));
     irq_desc->Type = (UCHAR)CmResourceTypeInterrupt;
     irq_desc->ShareDisposition = (UCHAR)CmResourceShareShared;
     irq_desc->Flags = 1; /* CM_RESOURCE_INTERRUPT_LEVEL_SENSITIVE */
     irq_desc->u.Interrupt.Level = Irq;
     irq_desc->u.Interrupt.Vector = Irq;
     irq_desc->u.Interrupt.Affinity = 1; /* Single processor */
+
+    VxD_Debug_Printf("PNPDBG: res count=%lu desc_size=%lu port=%lx/%lu ctrl=%lx/%lu irq=%lu\n",
+                     partial_list->Count,
+                     (ULONG)sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR),
+                     port_desc->u.Port.Start.u.LowPart,
+                     port_desc->u.Port.Length,
+                     ctrl_desc->u.Port.Start.u.LowPart,
+                     ctrl_desc->u.Port.Length,
+                     irq_desc->u.Interrupt.Level);
 
     /* ---- Allocate and set up the IRP ---- */
 
