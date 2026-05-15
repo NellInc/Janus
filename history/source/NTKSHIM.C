@@ -1750,9 +1750,6 @@ static void __cdecl ntk_IsrTrampoline(ULONG irq)
         intObj->ServiceRoutine(intObj, intObj->ServiceContext);
 
         g_CurrentIrql = oldIrql;
-
-        /* Send EOI and drain DPCs */
-        VxD_VPICD_PhysicalEOI(intObj->ShimIrqHandle);
         ntk_DrainDpcQueue();
     }
 }
@@ -1764,6 +1761,29 @@ UCHAR __cdecl ntk_InvokeManualInterrupt(ULONG irq)
     }
     ntk_IsrTrampoline(irq);
     return 1;
+}
+
+static BOOLEAN __cdecl ntk_IrqBridgeCallback(PVOID context)
+{
+    ULONG irq = (ULONG)context;
+    PKINTERRUPT intObj;
+    BOOLEAN claimed;
+    KIRQL oldIrql;
+
+    if (irq >= 16) return FALSE;
+
+    intObj = g_ConnectedInterrupts[irq];
+    if (!intObj || !intObj->ServiceRoutine) return FALSE;
+
+    oldIrql = g_CurrentIrql;
+    g_CurrentIrql = DIRQL;
+
+    claimed = intObj->ServiceRoutine(intObj, intObj->ServiceContext);
+
+    g_CurrentIrql = oldIrql;
+    ntk_DrainDpcQueue();
+
+    return claimed;
 }
 
 NTSTATUS NTAPI ntk_IoConnectInterrupt(
@@ -1836,27 +1856,30 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
         g_ConnectedInterrupts[irq] = intObj;
     }
 
-    handle = 0;
-#if 0
     {
-        NTK_VPICD_IRQ_DESCRIPTOR irqDesc;
-        RtlZeroMemory(&irqDesc, sizeof(irqDesc));
-        irqDesc.VID_IRQ_Number = (USHORT)irq;
-        irqDesc.VID_Options = ShareVector ? 0x0002 : 0;
-        irqDesc.VID_Hw_Int_Proc = (PVOID)ntk_IsrTrampoline;
-        irqDesc.VID_Hw_Int_Ref = (PVOID)irq;
-        handle = VxD_VPICD_Virtualize_IRQ(&irqDesc);
+        extern int __cdecl irq_hook_install(ULONG,
+            BOOLEAN (__cdecl *)(PVOID), PVOID);
+
+        dbg_mark('H');
+        if (irq_hook_install(irq,
+                ntk_IrqBridgeCallback,
+                (PVOID)irq) == 0) {
+            handle = 1;
+            dbg_mark('h');
+        } else {
+            handle = 0;
+            dbg_mark('!');
+        }
     }
-#endif
     if (handle) {
         intObj->ShimIrqHandle = handle;
         intObj->ShimConnected = TRUE;
+        dbg_mark('V');
         VxD_Debug_Printf("NTK: IoConnectInterrupt IRQ %lu -> handle 0x%08lX\n",
                          irq, handle);
     } else {
         VxD_Debug_Printf("NTK: IoConnectInterrupt VPICD failed for IRQ %lu\n",
                          irq);
-        /* Continue anyway: some configurations may still work */
     }
 
     *InterruptObject = intObj;
@@ -1873,8 +1896,9 @@ VOID NTAPI ntk_IoDisconnectInterrupt(PKINTERRUPT InterruptObject)
 
     if (!InterruptObject) return;
 
-    if (InterruptObject->ShimConnected && InterruptObject->ShimIrqHandle) {
-        VxD_VPICD_ForceDefaultBehavior(InterruptObject->ShimIrqHandle);
+    if (InterruptObject->ShimConnected) {
+        extern void __cdecl irq_hook_remove(void);
+        irq_hook_remove();
         InterruptObject->ShimConnected = FALSE;
     }
 
