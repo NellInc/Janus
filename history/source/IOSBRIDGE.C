@@ -2677,17 +2677,29 @@ static int ios_late_create_device(void)
         WDM_BRIDGE_CONTEXT *bridge = nt5_get_bridge_context();
         if (bridge && bridge->DeviceType == 0x00) {
             /* ATA disk: 512-byte sectors */
-            *(ULONG *)(raw + 0x40) = 0x00000000UL; /* DCB_TYPE_DISK */
+            *(UCHAR *)(raw + 0x10) = 0x00;          /* DCB_device_type (struct) */
+            *(UCHAR *)(raw + 0x11) = 0x00;          /* DCB_bus_type = ESDI */
+            *(ULONG *)(raw + 0x18) = 0x00000001UL;  /* DCB_dmd_flags = PHYSICAL */
+            *(ULONG *)(raw + 0x40) = 0x00000000UL;  /* DCB type field (IOS) */
             *(ULONG *)(raw + 0x44) = 0x00000000UL;
-            *(ULONG *)(raw + 0x4C) = 9UL;          /* log2(512) */
-            *(ULONG *)(raw + 0x50) = 512UL;
+            *(ULONG *)(raw + 0x1C) = 9UL;           /* blk_shift (struct) */
+            *(ULONG *)(raw + 0x20) = 512UL;         /* blk_size (struct) */
+            *(ULONG *)(raw + 0x24) = 16UL;          /* heads */
+            *(ULONG *)(raw + 0x28) = 32UL;          /* cylinders */
+            *(ULONG *)(raw + 0x2C) = 63UL;          /* sectors per track */
+            *(ULONG *)(raw + 0x30) = 32768UL;       /* total sectors (16MB) */
+            *(ULONG *)(raw + 0x4C) = 9UL;           /* blk_shift (IOS) */
+            *(ULONG *)(raw + 0x50) = 512UL;         /* blk_size (IOS) */
             dbg_mark('H');
         } else {
             /* CD-ROM: 2048-byte sectors (default) */
-            *(ULONG *)(raw + 0x40) = 0x01009005UL;
+            *(UCHAR *)(raw + 0x10) = 0x05;          /* DCB_device_type (struct) */
+            *(ULONG *)(raw + 0x40) = 0x01009005UL;  /* DCB type field (IOS) */
             *(ULONG *)(raw + 0x44) = 0x00000002UL;
-            *(ULONG *)(raw + 0x4C) = 11UL;         /* log2(2048) */
-            *(ULONG *)(raw + 0x50) = 2048UL;
+            *(ULONG *)(raw + 0x1C) = 11UL;          /* blk_shift (struct) */
+            *(ULONG *)(raw + 0x20) = 2048UL;        /* blk_size (struct) */
+            *(ULONG *)(raw + 0x4C) = 11UL;          /* blk_shift (IOS) */
+            *(ULONG *)(raw + 0x50) = 2048UL;        /* blk_size (IOS) */
             dbg_mark('c');
         }
     }
@@ -2749,32 +2761,68 @@ static int ios_late_create_device(void)
     }
 
     /* Probe drive letters D: through G: to find the DCB IOS assigned.
-     * CD-ROM is typically D:; an additional HDD partition may be D:-G:
-     * depending on Win98's enumeration order. */
+     * In HDD mode, look for DCB_TYPE_DISK; in CD-ROM mode, DCB_TYPE_CDROM.
+     * Always scan ALL letters for diagnostics; pick the type-matched one. */
     {
         UCHAR probe_drive;
+        WDM_BRIDGE_CONTEXT *bridge = nt5_get_bridge_context();
+        UCHAR want_type = (bridge && bridge->DeviceType == 0x00)
+                          ? 0x00   /* DCB_TYPE_DISK */
+                          : 0x05;  /* DCB_TYPE_CDROM */
+        ISP_GET_DCB_PKT fallback;
+        fallback.result = 0xFFFF;
+        fallback.dcb = 0;
         isp_get.result = 0xFFFF;
         isp_get.dcb = 0;
         for (probe_drive = 3; probe_drive <= 6; probe_drive++) {
             ISP_GET_DCB_PKT probe;
+            UCHAR dcb_type;
             zero_mem(&probe, sizeof(probe));
             probe.func = 7;          /* ISP_GET_DCB */
             probe.drive = probe_drive;
             Call_ILB_Service(ilb->service_rtn, &probe);
-            DBGPRINT("NTMINI: ISP_GET_DCB %c: result=%04x dcb=%08lx\n",
-                     'A' + probe_drive, probe.result, probe.dcb);
             dbg_mark('[');
             dbg_mark((char)('A' + probe_drive));
             ios_dbg_hex16(probe.result);
             ios_dbg_hex32(probe.dcb);
+            if (probe.result == 0 && is_ring0_ptr(probe.dcb)) {
+                /* Log both possible offsets for device type:
+                 * 0x10 = our DDK struct offset
+                 * 0x40 = offset used in ISP_CREATE_DCB init code */
+                dbg_mark('t');
+                ios_dbg_hex8(*(UCHAR *)((UCHAR *)probe.dcb + 0x10));
+                dbg_mark('/');
+                ios_dbg_hex8(*(UCHAR *)((UCHAR *)probe.dcb + 0x40));
+            }
             dbg_mark(']');
-            if (probe.result == 0 && is_ring0_ptr(probe.dcb) &&
-                probe.dcb != isp_dcb.dcb_ptr) {
-                /* Found an existing DCB we didn't create — use it */
+            if (probe.result != 0 || !is_ring0_ptr(probe.dcb) ||
+                probe.dcb == isp_dcb.dcb_ptr)
+                continue;
+            /* Remember first valid DCB as fallback */
+            if (fallback.result != 0)
+                fallback = probe;
+            /* Check device type at both offsets; use whichever is non-zero,
+             * preferring 0x40 (IOS internal) over 0x10 (DDK struct) */
+            {
+                UCHAR t10 = *(UCHAR *)((UCHAR *)probe.dcb + 0x10);
+                UCHAR t40 = *(UCHAR *)((UCHAR *)probe.dcb + 0x40);
+                dcb_type = (t40 != 0) ? t40 : t10;
+            }
+            if (dcb_type == want_type) {
                 isp_get = probe;
                 dbg_mark('Y');
-                break;
+                DBGPRINT("NTMINI: Matched DCB %c: type=%02x dcb=%08lx\n",
+                         'A' + probe_drive, dcb_type, probe.dcb);
+            } else {
+                dbg_mark('n');
             }
+        }
+        /* If no type match, use fallback */
+        if (isp_get.result != 0 && fallback.result == 0) {
+            isp_get = fallback;
+            dbg_mark('F');
+            DBGPRINT("NTMINI: No type match, using fallback DCB %08lx\n",
+                     fallback.dcb);
         }
         if (isp_get.result != 0 || !is_ring0_ptr(isp_get.dcb)) {
             dbg_mark('y');
@@ -2795,12 +2843,79 @@ static int ios_late_create_device(void)
     dbg_mark(')');
     dbg_mark((isp_match.result == 0 && (isp_match.drives & (1UL << 3))) ? 'Z' : 'z');
 
-    /* Splice our calldown into the EXISTING DCB's chain.
-     * ISP_GET_DCB returned the real DCB that IOS routes file ops through.
-     * Our own late-created DCB is an orphan; nothing routes to it.
-     * We must insert into the real DCB so IFS->IOS->calldown reaches us. */
-    if (isp_get.result == 0 && is_ring0_ptr(isp_get.dcb) &&
-        isp_get.dcb != isp_dcb.dcb_ptr) {
+    /* For HDD mode: ALWAYS assign our own DCB a drive letter rather than
+     * splicing into ESDI_506's DCB chain. ESDI_506 handles I/O before our
+     * calldown can intercept. Our own DCB routes directly to us.
+     * For CD-ROM mode: use splice only if no match (existing logic below). */
+    {
+        WDM_BRIDGE_CONTEXT *bridge_ctx = nt5_get_bridge_context();
+        if ((bridge_ctx && bridge_ctx->DeviceType == 0x00) ||
+            (isp_get.result != 0 || !is_ring0_ptr(isp_get.dcb) ||
+             isp_get.dcb == isp_dcb.dcb_ptr)) {
+        dbg_mark('L');
+        zero_mem(&isp_pick, sizeof(isp_pick));
+        isp_pick.func = 14;       /* ISP_PICK_DRIVE_LETTER */
+        isp_pick.dcb = isp_dcb.dcb_ptr;
+        Call_ILB_Service(ilb->service_rtn, &isp_pick);
+        dbg_mark('l');
+        ios_dbg_hex16(isp_pick.result);
+        ios_dbg_hex8(isp_pick.letter[0]);
+
+        if (isp_pick.result == 0) {
+            zero_mem(&isp_assoc, sizeof(isp_assoc));
+            isp_assoc.func = 13;   /* ISP_ASSOCIATE_DCB */
+            isp_assoc.dcb = isp_dcb.dcb_ptr;
+            isp_assoc.drive = isp_pick.letter[0];
+            Call_ILB_Service(ilb->service_rtn, &isp_assoc);
+            dbg_mark('A');
+            ios_dbg_hex16(isp_assoc.result);
+
+            if (isp_assoc.result == 0) {
+                DBGPRINT("NTMINI: Assigned drive letter %c: to our DCB\n",
+                         'A' + isp_pick.letter[0]);
+                dbg_mark('R');
+
+                /* Register device entry for our orphan DCB so ior_handler
+                 * can find it via find_device_for_dcb(). */
+                if (g_bridge.num_devices < MAX_DEVICES) {
+                    PBRIDGE_DEVICE dev3 = &g_bridge.devices[g_bridge.num_devices];
+                    zero_mem(dev3, sizeof(BRIDGE_DEVICE));
+                    dev3->dcb = (PDCB)isp_dcb.dcb_ptr;
+                    dev3->target_id = bridge_ctx->TargetId;
+                    dev3->lun = 0;
+                    dev3->device_type = bridge_ctx->DeviceType;
+                    dev3->is_atapi = (bridge_ctx->DeviceType == 0x05);
+                    dev3->sector_size = bridge_ctx->SectorSize;
+                    dev3->total_sectors = 0;
+                    g_bridge.num_devices++;
+                    dbg_mark('K');
+                    DBGPRINT("NTMINI: Device entry for orphan: target=%d type=%d sector=%lu\n",
+                             dev3->target_id, dev3->device_type, (ULONG)dev3->sector_size);
+                }
+
+                /* Notify IOS the device is ready */
+                zero_mem(&isp_arrived, sizeof(isp_arrived));
+                isp_arrived.func = 16; /* ISP_DEVICE_ARRIVED */
+                isp_arrived.dcb = isp_dcb.dcb_ptr;
+                isp_arrived.flags = 0;
+                Call_ILB_Service(ilb->service_rtn, &isp_arrived);
+                dbg_mark('r');
+                ios_dbg_hex16(isp_arrived.result);
+            }
+        }
+        }
+    }
+
+    /* Splice our calldown into the EXISTING DCB's chain (CD-ROM mode only).
+     * In HDD mode, we assigned our own DCB a drive letter above; skip splice.
+     * For CD-ROM, ISP_GET_DCB returned the real DCB that IOS routes file ops
+     * through. We must insert into it so IFS->IOS->calldown reaches us. */
+    {
+        WDM_BRIDGE_CONTEXT *splice_bridge = nt5_get_bridge_context();
+        if (splice_bridge && splice_bridge->DeviceType == 0x00) {
+            dbg_mark('h');
+        } else if (isp_get.result == 0 && is_ring0_ptr(isp_get.dcb) &&
+                   isp_get.dcb != isp_dcb.dcb_ptr) {
         ISP_INSERT_CD_PKT isp_cd2;
 
         dbg_mark('X');
@@ -2829,19 +2944,29 @@ static int ios_late_create_device(void)
             DBGPRINT("NTMINI: Calldown spliced into existing DCB OK\n");
 
             /* Register a device entry for this DCB so ior_handler
-             * can find it via find_device_for_dcb(). Read real fields
-             * from the existing DCB rather than hardcoding. */
+             * can find it via find_device_for_dcb(). Use bridge context
+             * for device type/sector size since our struct layout may
+             * not match the real IOS DCB offsets. */
             if (g_bridge.num_devices < MAX_DEVICES) {
                 PDCB existing = (PDCB)isp_get.dcb;
+                WDM_BRIDGE_CONTEXT *bridge = nt5_get_bridge_context();
 
                 dev2 = &g_bridge.devices[g_bridge.num_devices];
                 zero_mem(dev2, sizeof(BRIDGE_DEVICE));
                 dev2->dcb = existing;
-                dev2->target_id = existing->DCB_target_id;
-                dev2->lun = existing->DCB_lun;
-                dev2->device_type = existing->DCB_device_type;
-                dev2->is_atapi = (existing->DCB_device_type == DCB_TYPE_CDROM) ? TRUE : FALSE;
-                dev2->sector_size = existing->DCB_apparent_blk_size ? existing->DCB_apparent_blk_size : 2048;
+                if (bridge && bridge->DeviceType == 0x00) {
+                    dev2->target_id = bridge->TargetId;
+                    dev2->lun = 0;
+                    dev2->device_type = DCB_TYPE_DISK;
+                    dev2->is_atapi = FALSE;
+                    dev2->sector_size = 512;
+                } else {
+                    dev2->target_id = existing->DCB_target_id;
+                    dev2->lun = existing->DCB_lun;
+                    dev2->device_type = existing->DCB_device_type;
+                    dev2->is_atapi = (existing->DCB_device_type == DCB_TYPE_CDROM) ? TRUE : FALSE;
+                    dev2->sector_size = existing->DCB_apparent_blk_size ? existing->DCB_apparent_blk_size : 2048;
+                }
                 dev2->total_sectors = 0;
                 g_bridge.num_devices++;
                 dbg_mark('K');
@@ -2875,6 +3000,7 @@ static int ios_late_create_device(void)
             dbg_mark('j');
             DBGPRINT("NTMINI: Splice into existing DCB FAILED result=%04x\n",
                      isp_cd2.result);
+        }
         }
     }
 
