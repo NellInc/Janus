@@ -1,0 +1,72 @@
+---
+stepsCompleted: 0
+status: READY
+---
+
+# CD-ROM File I/O Validated — Next Steps (2026-05-15)
+
+## What Was Achieved (Previous Session)
+
+NT5 WDM atapi.sys (Windows 2000 driver) now serves real CD-ROM file I/O through Win98's IFS layer. Both SREAD.EXE and WREAD.EXE read correct ISO 9660 file content (391 bytes each) on a restored Win98 SE disk with no native CD-ROM support.
+
+### Three-Layer Fix (commit `64044bd`)
+
+1. **IOS calldown splice**: `ios_wdm_ior_entry` inserted into D:'s existing DCB chain via `ISP_INSERT_CALLDOWN`. BRIDGE_DEVICE entry reads real DCB fields. Chain walk verified with `*` marker.
+
+2. **IFS hook at init**: `IFSMgr_InstallFSHook` moved from lazy (inside `ntmini_fsd_open`) to init time (after `IFSMgr_RegisterMount`). Without this, `GetFileAttributesA` never reaches the FSD.
+
+3. **IOS_BD_Command_Complete for internal IOPs**: `IFSMgr_CDROM_Attach` triggers IOS internal probes. `IOS_BD_Complete_IOP` deadlocks (recursive chain). `IOS_BD_Command_Complete` (IOR-level) avoids re-entry. Also: `ios_schedule_late_cdrom_attach_probe()` called after FSD registration (was dead code).
+
+### Other Fixes (commit `4f0f639`)
+- `deploy_sysini.py`: BPB dirty byte was set to 0x03 (dirty+error) instead of 0x00 (clean). Win98 triggers ScanDisk on 0x03.
+
+### 4 Commits Pushed to `origin/main`
+- `64044bd` — Three-layer IOS/IFS/CDROM fix
+- `b1dea6e` — Contprompt documentation
+- `8fbd408` — ATA HDD test contprompt
+- `4f0f639` — BPB dirty byte fix
+
+## Current State
+
+- **VxD binary**: `binaries/NT5FIXED.VXD` (175KB, built from `history/source/`)
+- **Build**: Docker + Open Watcom v2 + NASM. `history/source/build.sh nt5` then `python3 src/build_nt5_fixed.py` then `python3 src/deploy_sysini.py binaries/NT5FIXED.VXD`
+- **QEMU**: `-cpu pentium2 -m 256` required. Runner: `artifacts_search_ctx_instrument_20260514_143819/run_unix_once.sh`
+- **Disk**: Restored from `~/Documents/VMs/win98vm/en_win98_se.qcow2`. ScanDisk runs on first boot (~150s). Empty CONFIG.SYS/AUTOEXEC.BAT (no native CD-ROM).
+- **IRQHOOK**: `#if 0` in `ntk_IoConnectInterrupt`. Polling mode works. VPICD virtualization crashes on restored disk.
+- **SREAD timing**: First run sometimes gets mount=1 (hardware wizard delays desktop). Second run reliably gets mount=2 + full file I/O. An `IFSMgr_NotifyVolumeArrival` call from timer context crashes boot — don't do that.
+
+## Next Steps (Priority Order)
+
+### 1. Suppress Hardware Wizard on Boot
+The PCI bus scan in our VxD creates device nodes that trigger Win98's "Add New Hardware Wizard". This blocks the desktop, delaying `run=` programs. Options:
+- Delete the PnP device registry entries after boot (via disk_ops.py pre-deployment)
+- Suppress `IoReportDetectedDevice` calls
+- Pre-answer the wizard by creating appropriate registry entries
+
+### 2. ATA Hard Disk Testing
+Code at commit `deea226`. Needs:
+- Test HDD image with proper CHS geometry (raw FAT16 at IDE index=3 crashes Win98 boot)
+- Bridge context `DeviceType` switching (0x05 CD-ROM vs 0x00 disk)
+- 512-byte sector translation
+- WARNING: attaching a bad HDD image corrupts Win98's hardware state, requiring full disk restore
+
+### 3. IRQHOOK Debugging
+Enable `#if 0` block in `ntk_IoConnectInterrupt`. The VPICD hook installs but stray IRQs crash before ISR bridge is ready. Potential fix: defer VPICD hook until after StartDevice completes and first I/O succeeds.
+
+### 4. Multi-Device Support
+Can both CD-ROM (D:) and ATA HDD (E:?) work simultaneously? Currently single-device bridge.
+
+## Key Files
+- `history/source/IOSBRIDGE.C` — IOS bridge, FSD hooks, calldown splice (4700+ lines)
+- `history/source/NTKSHIM.C` — ntoskrnl/HAL shim (3200 lines)
+- `history/source/NT5LOADER.C` — PE loader + smoke test (1600 lines)
+- `history/source/IRQHOOK.C` — VPICD IRQ virtualization (400 lines)
+- `src/deploy_sysini.py` — FAT32 deployment to disk image
+- `artifacts_search_ctx_instrument_20260514_143819/` — QEMU test harness + guest EXEs
+
+## Test Validation Command
+```bash
+ART=artifacts_search_ctx_instrument_20260514_143819
+bash "$ART/run_unix_once.sh" "$ART" "TEST_NAME" "WREAD.EXE" "WREAD.TXT" 300
+# Check: guest-output/WREAD.TXT should be 391 bytes with ATTR=0x00000001, READ_OK, WREAD_END
+```
