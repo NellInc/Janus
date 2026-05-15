@@ -1775,6 +1775,8 @@ static BOOLEAN __cdecl ntk_IrqBridgeCallback(PVOID context)
     intObj = g_ConnectedInterrupts[irq];
     if (!intObj || !intObj->ServiceRoutine) return FALSE;
 
+    dbg_mark('$');
+
     oldIrql = g_CurrentIrql;
     g_CurrentIrql = DIRQL;
 
@@ -1783,6 +1785,7 @@ static BOOLEAN __cdecl ntk_IrqBridgeCallback(PVOID context)
     g_CurrentIrql = oldIrql;
     ntk_DrainDpcQueue();
 
+    dbg_mark(claimed ? '+' : '-');
     return claimed;
 }
 
