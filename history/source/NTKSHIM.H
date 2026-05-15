@@ -601,6 +601,7 @@ NTSTATUS NTAPI ntk_IoConnectInterrupt(
     ULONG ProcessorMask,
     BOOLEAN FloatingSave);
 VOID    NTAPI ntk_IoDisconnectInterrupt(PKINTERRUPT InterruptObject);
+int     CDECL ntk_ConnectDeferredVpicd(ULONG irq);
 BOOLEAN NTAPI ntk_KeSynchronizeExecution(PKINTERRUPT Interrupt,
                                           PKSYNCHRONIZE_ROUTINE SyncRoutine,
                                           PVOID SyncContext);

@@ -110,6 +110,9 @@ fat[3] = 0xFF
 # Cluster 2 = TESTFILE.TXT (single cluster, end-of-chain)
 fat[4] = 0xFF
 fat[5] = 0xFF
+# Cluster 3 = SECOND.TXT (single cluster, end-of-chain)
+fat[6] = 0xFF
+fat[7] = 0xFF
 
 # Build root directory
 rootdir = bytearray(ROOT_SECTORS * SECTOR)
@@ -126,6 +129,19 @@ entry2[11] = 0x20  # archive attribute
 struct.pack_into("<H", entry2, 26, 2)  # start cluster = 2
 struct.pack_into("<I", entry2, 28, len(test_content))  # file size
 rootdir[32:64] = entry2
+# SECOND.TXT entry
+second_content = (
+    b"HDD_SECOND_TXT: This file was read from the FAT16 hard disk image.\r\n"
+    b"NTMINI HDD I/O PATH ACTIVE\r\n"
+    b"Sector size: 512 bytes\r\n"
+    b"Device type: ATA disk (0x00)\r\n"
+)
+entry3 = bytearray(32)
+entry3[0:11] = b'SECOND  TXT'  # 8.3 name (padded with spaces)
+entry3[11] = 0x20  # archive attribute
+struct.pack_into("<H", entry3, 26, 3)  # start cluster = 3
+struct.pack_into("<I", entry3, 28, len(second_content))  # file size
+rootdir[64:96] = entry3
 
 # Assemble image
 img = bytearray(TOTAL_SECTORS * SECTOR)
@@ -147,6 +163,9 @@ img[root_off:root_off+len(rootdir)] = rootdir
 # Data area (cluster 2 = first data cluster)
 data_off = root_off + ROOT_SECTORS * SECTOR
 img[data_off:data_off+len(test_content)] = test_content
+# Cluster 3 data (one cluster after cluster 2)
+cluster3_off = data_off + CLUSTER_SIZE
+img[cluster3_off:cluster3_off+len(second_content)] = second_content
 
 with open(OUT, "wb") as f:
     f.write(img)
@@ -157,3 +176,4 @@ print(f"  CHS: {CYLINDERS}/{HEADS}/{SPT}")
 print(f"  Partition: LBA {PART_START_LBA}-{PART_START_LBA+PART_SECTORS-1} (type 0x06 FAT16)")
 print(f"  FAT16: {total_clusters} clusters, {CLUSTER_SIZE}-byte clusters")
 print(f"  TESTFILE.TXT: {len(test_content)} bytes at cluster 2")
+print(f"  SECOND.TXT:  {len(second_content)} bytes at cluster 3")
