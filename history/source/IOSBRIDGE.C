@@ -2387,27 +2387,38 @@ int ntmini_device_init(void)
                  (int)result);
         /* Don't abort - IOS registration still needed for the NT4 fallback */
     } else {
-        dbg_mark('C');
-        dbg_mark('S');
-        if (nt5_get_iso_pvd_info(&pvd_root_lba, &pvd_root_size) == 0) {
-            g_iso_root_lba = pvd_root_lba;
-            g_iso_root_size = pvd_root_size;
-            g_iso_pvd_valid = 1;
-            g_iso_root_cached = 0;
-            dbg_mark('V');
-            ios_dbg_hex32(g_iso_root_lba);
-            dbg_mark('v');
-            ios_dbg_hex32(g_iso_root_size);
-            if (nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
-                                       &pvd_root_lba, &pvd_root_size) == 0) {
+        /* Check bridge context device type. ISO PVD caching only
+         * applies to CD-ROM devices, not ATA hard disks. */
+        WDM_BRIDGE_CONTEXT *bridge_ctx = nt5_get_bridge_context();
+        if (bridge_ctx && bridge_ctx->DeviceType == 0x00) {
+            /* ATA hard disk: skip ISO PVD cache */
+            dbg_mark('H');
+            dbg_mark('D');
+            DBGPRINT("NTMINI: ATA disk detected, skipping ISO PVD cache\n");
+        } else {
+            /* CD-ROM: cache the ISO PVD and root directory */
+            dbg_mark('C');
+            dbg_mark('S');
+            if (nt5_get_iso_pvd_info(&pvd_root_lba, &pvd_root_size) == 0) {
                 g_iso_root_lba = pvd_root_lba;
                 g_iso_root_size = pvd_root_size;
-                g_iso_root_cached = 1;
-                dbg_mark('W');
+                g_iso_pvd_valid = 1;
+                g_iso_root_cached = 0;
+                dbg_mark('V');
+                ios_dbg_hex32(g_iso_root_lba);
+                dbg_mark('v');
+                ios_dbg_hex32(g_iso_root_size);
+                if (nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
+                                           &pvd_root_lba, &pvd_root_size) == 0) {
+                    g_iso_root_lba = pvd_root_lba;
+                    g_iso_root_size = pvd_root_size;
+                    g_iso_root_cached = 1;
+                    dbg_mark('W');
+                }
+            } else {
+                dbg_mark('V');
+                dbg_mark('!');
             }
-        } else {
-            dbg_mark('V');
-            dbg_mark('!');
         }
     }
 
@@ -3127,12 +3138,12 @@ static void aep_config_dcb(PAEP aep)
     }
 
     /* Only claim devices we can handle.
-     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus).
-     * We could also handle hard disks, but Win98's built-in
-     * ESDI_506.PDR already handles IDE hard disks well.
-     * Our value-add is ATAPI/SCSI devices that need the
-     * NT miniport's superior command handling. */
+     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus),
+     * and ATA hard disks when the NT5 bridge detected one.
+     * For hard disks, the NT miniport provides the same command
+     * translation as for ATAPI, just with 512-byte sectors. */
     if (dcb->DCB_device_type != DCB_TYPE_CDROM &&
+        dcb->DCB_device_type != DCB_TYPE_DISK &&
         !(dcb->DCB_dmd_flags & DCB_DEV_ATAPI)) {
         /* Not our device. Let another port driver handle it. */
         aep->AEP_result = AEP_FAILURE;
@@ -4434,7 +4445,17 @@ void bridge_enumerate_devices(void)
          *   Bytes 16-31:  Product ID (ASCII)
          *   Bytes 32-35:  Revision level (ASCII) */
         device_type = inquiry_buf[0] & 0x1F;
-        is_atapi    = TRUE; /* We're on IDE, so if it responds, it's ATAPI */
+
+        /* Determine ATAPI vs ATA from the device type.
+         * SCSI device type 0x00 (disk) on IDE is ATA, not ATAPI.
+         * CD-ROM (0x05) and other removable types are ATAPI. */
+        if (device_type == 0x00) {
+            /* ATA hard disk */
+            is_atapi = FALSE;
+        } else {
+            /* CD-ROM, tape, optical, etc. are ATAPI */
+            is_atapi = TRUE;
+        }
 
         /* Extract strings */
         zero_mem(vendor_id, sizeof(vendor_id));
