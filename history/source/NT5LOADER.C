@@ -1327,7 +1327,7 @@ static int nt5_test_read(void)
     return -1;
 }
 
-int nt5_read_lba(ULONG lba, UCHAR *data_buf)
+int nt5_read_lba_ex(ULONG lba, UCHAR *data_buf, ULONG sector_size)
 {
     SCSI_REQUEST_BLOCK srb;
     UCHAR srb_status;
@@ -1339,7 +1339,7 @@ int nt5_read_lba(ULONG lba, UCHAR *data_buf)
 
     scsi_target = g_nt5_child_pdo ? g_nt5_child_pdo : g_nt5_fdo;
     RtlZeroMemory(&srb, sizeof(srb));
-    RtlZeroMemory(data_buf, 2048);
+    RtlZeroMemory(data_buf, sector_size);
 
     srb.Length              = sizeof(SCSI_REQUEST_BLOCK);
     srb.Function            = SRB_FUNCTION_EXECUTE_SCSI;
@@ -1349,7 +1349,7 @@ int nt5_read_lba(ULONG lba, UCHAR *data_buf)
     srb.Lun                 = 0;
     srb.CdbLength           = 10;
     srb.DataBuffer          = data_buf;
-    srb.DataTransferLength  = 2048;
+    srb.DataTransferLength  = sector_size;
     srb.SrbFlags            = SRB_FLAGS_DATA_IN | SRB_FLAGS_DISABLE_SYNCH_TRANSFER;
     srb.TimeOutValue        = 10;
 
@@ -1369,6 +1369,11 @@ int nt5_read_lba(ULONG lba, UCHAR *data_buf)
         return -2;
     }
     return 0;
+}
+
+int nt5_read_lba(ULONG lba, UCHAR *data_buf)
+{
+    return nt5_read_lba_ex(lba, data_buf, 2048);
 }
 
 /* ================================================================
@@ -1597,13 +1602,49 @@ int nt5_init(BOOLEAN use_primary)
      *
      * The bridge context links the NT5 device stack to the Win9x
      * IOS layer. The calldown handler (in WDMBRIDGE.C) translates
-     * IOS IORs into NT IRPs and dispatches them to g_nt5_fdo. */
+     * IOS IORs into NT IRPs and dispatches them to g_nt5_fdo.
+     *
+     * Detect device type: if the smoke test found ISO 9660 media,
+     * this is a CD-ROM (2048-byte sectors, type 0x05). Otherwise,
+     * try reading LBA 0 with a 512-byte sector; if we find an MBR
+     * signature (0x55AA at offset 510), it is an ATA hard disk
+     * (512-byte sectors, type 0x00). Default to CD-ROM if neither
+     * detection succeeds. */
     RtlZeroMemory(&g_nt5_bridge, sizeof(WDM_BRIDGE_CONTEXT));
     g_nt5_bridge.StackTop   = g_nt5_fdo;
-    g_nt5_bridge.SectorSize = 2048;     /* CD-ROM default */
-    g_nt5_bridge.DeviceType = 0x05;     /* DCB_TYPE_CDROM */
     g_nt5_bridge.Channel    = use_primary ? 0 : 1;
     g_nt5_bridge.TargetId   = g_nt5_detected_target_id;
+
+    if (result == 0) {
+        /* Smoke test found ISO 9660 -- this is a CD-ROM */
+        g_nt5_bridge.SectorSize = 2048;
+        g_nt5_bridge.DeviceType = 0x05;     /* DCB_TYPE_CDROM */
+        dbg_mark('c');
+        dbg_mark('d');
+    } else {
+        /* No ISO media. Try reading LBA 0 as a 512-byte sector
+         * and check for MBR signature 0x55AA. */
+        UCHAR mbr_buf[512];
+        int mbr_result;
+
+        mbr_result = nt5_read_lba_ex(0, mbr_buf, 512);
+        if (mbr_result == 0 &&
+            mbr_buf[510] == 0x55 && mbr_buf[511] == 0xAA) {
+            /* MBR found -- ATA hard disk */
+            g_nt5_bridge.SectorSize = 512;
+            g_nt5_bridge.DeviceType = 0x00;     /* DCB_TYPE_DISK */
+            dbg_mark('H');
+            dbg_mark('D');
+            VxD_Debug_Printf("NT5: MBR detected, device is ATA disk\n");
+        } else {
+            /* No MBR either -- default to CD-ROM (no media) */
+            g_nt5_bridge.SectorSize = 2048;
+            g_nt5_bridge.DeviceType = 0x05;     /* DCB_TYPE_CDROM */
+            dbg_mark('c');
+            dbg_mark('?');
+        }
+    }
+
     g_nt5_bridge.Active     = TRUE;
 
     /* IOS registration is handled by ios_register_port_driver() in
