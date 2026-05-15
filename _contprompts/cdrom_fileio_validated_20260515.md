@@ -1,6 +1,7 @@
 ---
 stepsCompleted: 1
 status: IN_PROGRESS
+session_date: 2026-05-15
 ---
 
 # CD-ROM File I/O Validated — Next Steps (2026-05-15)
@@ -55,6 +56,38 @@ Enable `#if 0` block in `ntk_IoConnectInterrupt`. The VPICD hook installs but st
 
 ### 4. Multi-Device Support
 Can both CD-ROM (D:) and ATA HDD (E:?) work simultaneously? Currently single-device bridge.
+
+## Session Progress (2026-05-15)
+
+### Priority 1: DONE — First-Boot Reliability
+- **Root cause**: wizard is Win98 PCI re-enumeration (VGA adapter), not our VxD code
+- **BPB clean_bpb** added to `disk_ops.py` and `run_unix_once.sh` — prevents ScanDisk
+- **Removed Alt-F4** from runner dismiss loop — was opening Win98 shutdown dialog!
+- **Escape-only** dismiss loop from T+60-240s is safe and sufficient
+- **Screenshots at checkpoints** added to runner for diagnostics
+- **Smoke test retry** (5 attempts, 500ms delays) in NT5LOADER.C — handles ATAPI spin-up
+- **Validated**: SREAD.EXE reads correct 391-byte ISO file on first boot from fresh restore
+- Commits: `c8b4004` (smoke test retry + create_test_hdd.py)
+
+### Priority 2: IN PROGRESS — ATA HDD Testing
+- **Proper FAT16 HDD image**: `src/create_test_hdd.py` creates 16MB image with correct CHS geometry (32/16/63)
+- **Win98 boots with HDD attached**: no crash (old bare-MBR caused hangs)
+- **CD-ROM still works with HDD present**: smoke test passes, SREAD reads correctly
+- **First boot with HDD is slow**: ~300s at splash screen (ScanDisk/hardware detection)
+- **HDD not detected by bridge**: ESDI_506.PDR claims the HDD before our port driver sees it
+- **DCB_TYPE_DISK filter alone causes BSOD**: commit `deea226` had 3 changes, not just the filter:
+  1. Filter: accept DCB_TYPE_DISK in aep_config_dcb
+  2. ISO PVD bypass: skip ISO caching for ATA disks (DeviceType=0x00)
+  3. ATAPI vs ATA detection: is_atapi=FALSE for device_type 0x00
+  All three must be applied together. Filter alone crashes because ISO PVD caching runs on non-CD device.
+- **Reverted**: DCB filter commit reverted (`b68bf9f`) to restore CD-ROM stability
+- **Next**: cherry-pick all 3 IOSBRIDGE.C changes from deea226 + NT5LOADER.C changes
+
+### Priority 3: ANALYZED — IRQHOOK
+- `#if 0` at NTKSHIM.C:1840 disables VPICD virtualization
+- Proposed: `ntk_ConnectDeferredVpicd()` after IoConnectInterrupt, before first I/O
+- NT5LOADER.C ~line 786 is the safe insertion point
+- Not yet implemented
 
 ## Key Files
 - `history/source/IOSBRIDGE.C` — IOS bridge, FSD hooks, calldown splice (4700+ lines)
