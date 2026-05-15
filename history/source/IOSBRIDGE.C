@@ -472,6 +472,7 @@ static int g_ios_registered = 0;
 static ULONG g_late_dcb_ptr = 0;
 static ULONG g_late_delta_to_ior = 0;
 static int g_late_dcb_destroyed = 0;
+static ULONG g_existing_dcb_ptr = 0;
 static int g_wdm_iop_dump_count = 0;
 ULONG g_late_next_handler = 0;
 static int g_fsd_registered = 0;
@@ -2387,38 +2388,27 @@ int ntmini_device_init(void)
                  (int)result);
         /* Don't abort - IOS registration still needed for the NT4 fallback */
     } else {
-        /* Check bridge context device type. ISO PVD caching only
-         * applies to CD-ROM devices, not ATA hard disks. */
-        WDM_BRIDGE_CONTEXT *bridge_ctx = nt5_get_bridge_context();
-        if (bridge_ctx && bridge_ctx->DeviceType == 0x00) {
-            /* ATA hard disk: skip ISO PVD cache */
-            dbg_mark('H');
-            dbg_mark('D');
-            DBGPRINT("NTMINI: ATA disk detected, skipping ISO PVD cache\n");
-        } else {
-            /* CD-ROM: cache the ISO PVD and root directory */
-            dbg_mark('C');
-            dbg_mark('S');
-            if (nt5_get_iso_pvd_info(&pvd_root_lba, &pvd_root_size) == 0) {
+        dbg_mark('C');
+        dbg_mark('S');
+        if (nt5_get_iso_pvd_info(&pvd_root_lba, &pvd_root_size) == 0) {
+            g_iso_root_lba = pvd_root_lba;
+            g_iso_root_size = pvd_root_size;
+            g_iso_pvd_valid = 1;
+            g_iso_root_cached = 0;
+            dbg_mark('V');
+            ios_dbg_hex32(g_iso_root_lba);
+            dbg_mark('v');
+            ios_dbg_hex32(g_iso_root_size);
+            if (nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
+                                       &pvd_root_lba, &pvd_root_size) == 0) {
                 g_iso_root_lba = pvd_root_lba;
                 g_iso_root_size = pvd_root_size;
-                g_iso_pvd_valid = 1;
-                g_iso_root_cached = 0;
-                dbg_mark('V');
-                ios_dbg_hex32(g_iso_root_lba);
-                dbg_mark('v');
-                ios_dbg_hex32(g_iso_root_size);
-                if (nt5_get_iso_root_cache(g_iso_sector_buf, g_iso_enum_sector_buf,
-                                           &pvd_root_lba, &pvd_root_size) == 0) {
-                    g_iso_root_lba = pvd_root_lba;
-                    g_iso_root_size = pvd_root_size;
-                    g_iso_root_cached = 1;
-                    dbg_mark('W');
-                }
-            } else {
-                dbg_mark('V');
-                dbg_mark('!');
+                g_iso_root_cached = 1;
+                dbg_mark('W');
             }
+        } else {
+            dbg_mark('V');
+            dbg_mark('!');
         }
     }
 
@@ -2745,6 +2735,82 @@ static int ios_late_create_device(void)
     dbg_mark(')');
     dbg_mark((isp_match.result == 0 && (isp_match.drives & (1UL << 3))) ? 'Z' : 'z');
 
+    /* Splice our calldown into D:'s EXISTING DCB chain.
+     * ISP_GET_DCB returned the real DCB that IOS routes file ops through.
+     * Our own late-created DCB is an orphan; nothing routes to it.
+     * We must insert into the real DCB so IFS->IOS->calldown reaches us. */
+    if (isp_get.result == 0 && is_ring0_ptr(isp_get.dcb) &&
+        isp_get.dcb != isp_dcb.dcb_ptr) {
+        ISP_INSERT_CD_PKT isp_cd2;
+
+        dbg_mark('X');
+        DBGPRINT("NTMINI: Splicing calldown into existing D: DCB %08lx\n",
+                 isp_get.dcb);
+        zero_mem(&isp_cd2, sizeof(isp_cd2));
+        isp_cd2.func = 5;          /* ISP_INSERT_CALLDOWN */
+        isp_cd2.dcb = isp_get.dcb; /* D:'s real DCB, not ours */
+        isp_cd2.req = (ULONG)ios_wdm_ior_entry;
+        isp_cd2.ddb = g_bridge.ios_ddb;
+        isp_cd2.flags = 0x00000109UL;
+        isp_cd2.lgn = 0x16;
+        Call_ILB_Service(ilb->service_rtn, &isp_cd2);
+        if (isp_cd2.result == 0) {
+            PBRIDGE_DEVICE dev2;
+
+            dbg_mark('J');
+            g_existing_dcb_ptr = isp_get.dcb;
+            DBGPRINT("NTMINI: Calldown spliced into existing DCB OK\n");
+
+            /* Register a device entry for this DCB so ior_handler
+             * can find it via find_device_for_dcb(). Read real fields
+             * from the existing DCB rather than hardcoding. */
+            if (g_bridge.num_devices < MAX_DEVICES) {
+                PDCB existing = (PDCB)isp_get.dcb;
+
+                dev2 = &g_bridge.devices[g_bridge.num_devices];
+                zero_mem(dev2, sizeof(BRIDGE_DEVICE));
+                dev2->dcb = existing;
+                dev2->target_id = existing->DCB_target_id;
+                dev2->lun = existing->DCB_lun;
+                dev2->device_type = existing->DCB_device_type;
+                dev2->is_atapi = (existing->DCB_device_type == DCB_TYPE_CDROM) ? TRUE : FALSE;
+                dev2->sector_size = existing->DCB_apparent_blk_size ? existing->DCB_apparent_blk_size : 2048;
+                dev2->total_sectors = 0;
+                g_bridge.num_devices++;
+                dbg_mark('K');
+                DBGPRINT("NTMINI: Device entry: target=%d type=%d sector=%lu\n",
+                         dev2->target_id, dev2->device_type, dev2->sector_size);
+            }
+
+            /* Walk the existing DCB's calldown chain to verify splice */
+            {
+                ULONG cd;
+                ULONG depth;
+
+                cd = *(ULONG *)((UCHAR *)isp_get.dcb + 0x08);
+                depth = 0;
+                dbg_mark('~');
+                while (is_ring0_ptr(cd) && depth < 8) {
+                    ULONG handler = *(ULONG *)cd;
+
+                    dbg_mark('#');
+                    dbg_mark((char)('0' + (char)depth));
+                    ios_dbg_hex32(handler);
+                    if (handler == (ULONG)ios_wdm_ior_entry) {
+                        dbg_mark('*');
+                    }
+                    cd = *(ULONG *)(cd + 0x0C);
+                    depth++;
+                }
+                dbg_mark('~');
+            }
+        } else {
+            dbg_mark('j');
+            DBGPRINT("NTMINI: Splice into existing DCB FAILED result=%04x\n",
+                     isp_cd2.result);
+        }
+    }
+
     dbg_mark('S');
     dbg_mark('s');
 
@@ -2802,11 +2868,20 @@ static int ios_late_create_device(void)
             g_fsd_registered = 1;
             dbg_mark('P');
             if (!g_fsd_hook_installed) {
+                ULONG prev_hook;
+
                 dbg_mark('h');
+                prev_hook = IFSMgr_InstallFSHook_Wrapper((ULONG)ntmini_ifs_hook);
+                g_fsd_prev_hook_ptr = prev_hook;
+                g_fsd_hook_installed = 1;
+                dbg_mark('H');
+                DBGPRINT("NTMINI: IFS hook installed at init, prev=%08lx\n",
+                         prev_hook);
             }
             dbg_mark('V');
             IFSMgr_NotifyVolumeArrival_Wrapper(3);
             dbg_mark('N');
+            ios_schedule_late_cdrom_attach_probe();
             dbg_mark('v');
         } else {
             dbg_mark('p');
@@ -3138,12 +3213,12 @@ static void aep_config_dcb(PAEP aep)
     }
 
     /* Only claim devices we can handle.
-     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus),
-     * and ATA hard disks when the NT5 bridge detected one.
-     * For hard disks, the NT miniport provides the same command
-     * translation as for ATAPI, just with 512-byte sectors. */
+     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus).
+     * We could also handle hard disks, but Win98's built-in
+     * ESDI_506.PDR already handles IDE hard disks well.
+     * Our value-add is ATAPI/SCSI devices that need the
+     * NT miniport's superior command handling. */
     if (dcb->DCB_device_type != DCB_TYPE_CDROM &&
-        dcb->DCB_device_type != DCB_TYPE_DISK &&
         !(dcb->DCB_dmd_flags & DCB_DEV_ATAPI)) {
         /* Not our device. Let another port driver handle it. */
         aep->AEP_result = AEP_FAILURE;
@@ -3422,67 +3497,58 @@ void __cdecl ios_wdm_log_iop(PVOID iop_ptr)
 
 void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
 {
-    UCHAR *ior_raw;
+    PUCHAR iop;
+    PIOR ior;
+    PDCB dcb;
 
-    /* Diagnostic-only probe: verify IOS actually routes a D: request into
-     * our late calldown before decoding the IOP/IOR.  The real IOR offset
-     * must come from ISP_CREATE_IOP's delta_to_ior, not the old hard-coded
-     * iop+0x64 guess. */
     dbg_mark('W');
     if (!iop_ptr || !is_ring0_ptr((ULONG)iop_ptr)) {
         dbg_mark('w');
         return;
     }
 
+    iop = (PUCHAR)iop_ptr;
+    ior = (PIOR)(iop + 0x64);
+    if (!is_ring0_ptr((ULONG)ior)) {
+        dbg_mark('x');
+        return;
+    }
+
     dbg_mark('<');
-    ios_dbg_hex32((ULONG)iop_ptr);
+    ios_dbg_hex16(ior->IOR_func);
     dbg_mark('>');
-    if (g_wdm_iop_dump_count < 1) {
-        ULONG off;
-        UCHAR *dump_ptr;
 
-        dump_ptr = (UCHAR *)iop_ptr - 0x60;
-        dbg_mark('D');
-        for (off = 0; off < 256; off++) {
-            ios_dbg_hex8(dump_ptr[off]);
-        }
-        dbg_mark('d');
-        g_wdm_iop_dump_count++;
-    }
-    dbg_mark('R');
-    ios_dbg_hex16(*(USHORT *)((UCHAR *)iop_ptr + 0x68));
-    ios_dbg_hex16(*(USHORT *)((UCHAR *)iop_ptr + 0x6A));
-    ios_dbg_hex32(*(ULONG *)((UCHAR *)iop_ptr + 0x6C));
-    ios_dbg_hex32(*(ULONG *)((UCHAR *)iop_ptr + 0x70));
-    dbg_mark('r');
-    ior_raw = (UCHAR *)iop_ptr + 0x64;
-    if (!is_ring0_ptr((ULONG)ior_raw)) {
-        dbg_mark('w');
+    /* IOS internal requests: succeed via IOR-level completion.
+     * IOS_BD_Complete_IOP deadlocks for internal IOPs (recursive chain).
+     * IOS_BD_Command_Complete operates on the IOR, not IOP, avoiding
+     * the chain re-entry. */
+    if (iop[0x6D] & 0x04) {
+        dbg_mark('j');
+        ior->IOR_status = 0;
+        IOS_BD_Command_Complete(ior);
+        dbg_mark('c');
         return;
     }
 
-    if (*(USHORT *)((UCHAR *)iop_ptr + 0x68) == 0x0026) {
-        *(USHORT *)(ior_raw + 0x06) = 0;
-        dbg_mark('S');
+    /* Use the existing DCB that D: routes through.
+     * If we haven't spliced into a real DCB, fall back to our late DCB. */
+    dcb = (PDCB)(g_existing_dcb_ptr ? g_existing_dcb_ptr : g_late_dcb_ptr);
+    if (!dcb || !is_ring0_ptr((ULONG)dcb)) {
+        dbg_mark('!');
+        ior->IOR_status = IORS_NOT_SUPPORTED;
         IOS_BD_Complete_IOP(iop_ptr);
-        dbg_mark('C');
         return;
     }
-    *(USHORT *)(ior_raw + 0x06) = 0;
-    dbg_mark('0');
-    if (*((UCHAR *)iop_ptr + 0x6D) & 0x04) {
-        dbg_mark('Q');
-        return;
-    }
-    IOS_BD_Complete_IOP(iop_ptr);
-    dbg_mark('C');
-    return;
+
+    /* Dispatch to the real IOR handler which translates to SRB */
+    ior_handler(ior, dcb);
 }
 
 static void ior_handler(PIOR ior, PDCB dcb)
 {
     PBRIDGE_DEVICE dev;
 
+    dbg_mark('!');
     if (!ior) {
         return;
     }
@@ -4445,17 +4511,7 @@ void bridge_enumerate_devices(void)
          *   Bytes 16-31:  Product ID (ASCII)
          *   Bytes 32-35:  Revision level (ASCII) */
         device_type = inquiry_buf[0] & 0x1F;
-
-        /* Determine ATAPI vs ATA from the device type.
-         * SCSI device type 0x00 (disk) on IDE is ATA, not ATAPI.
-         * CD-ROM (0x05) and other removable types are ATAPI. */
-        if (device_type == 0x00) {
-            /* ATA hard disk */
-            is_atapi = FALSE;
-        } else {
-            /* CD-ROM, tape, optical, etc. are ATAPI */
-            is_atapi = TRUE;
-        }
+        is_atapi    = TRUE; /* We're on IDE, so if it responds, it's ATAPI */
 
         /* Extract strings */
         zero_mem(vendor_id, sizeof(vendor_id));
