@@ -3930,18 +3930,26 @@ static void ior_handler(PIOR ior, PDCB dcb)
     /* Find our device tracking entry for this DCB */
     dev = find_device_for_dcb(dcb);
     if (!dev) {
-        DBGPRINT("NTMINI: IOR for unknown DCB, failing\n");
+        dbg_mark('?');
+        ios_dbg_hex32((ULONG)dcb);
+        ios_dbg_hex8((UCHAR)g_bridge.num_devices);
         complete_ior(ior, IORS_ERROR_DESIGNTR);
         return;
     }
 
-    /* ATA hard disks: bypass the miniport and use direct port I/O.
-     * The miniport (atapi.sys) handles ATAPI packet devices (CD-ROM).
-     * For ATA disks, we program the IDE registers directly. */
+    /* ATA hard disks: pass through to the next handler (ESDI_506) for now.
+     * Once we confirm the chain passes I/O correctly, we'll swap in
+     * ata_direct_ior to serve data from our own port I/O path. */
     if (dev->device_type == DCB_TYPE_DISK) {
-        ata_direct_ior(ior, dev);
+        dbg_mark('P');
+        ios_dbg_hex16(ior->IOR_func);
+        ios_dbg_hex32(ior->IOR_start_addr[0]);
+        /* Don't complete — IOS should send to next handler */
         return;
     }
+    /* Log when device lookup succeeds but type isn't disk */
+    dbg_mark('T');
+    ios_dbg_hex8(dev->device_type);
 
     /* CD-ROM and other ATAPI: use the miniport SCSI path */
     if (g_bridge.busy) {
