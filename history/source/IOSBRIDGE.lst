@@ -1,0 +1,4247 @@
+Module: /src/IOSBRIDGE.C
+GROUP: 'DGROUP' CONST,CONST2,_DATA,_BSS
+
+Segment: _TEXT BYTE USE32 00002D9F bytes
+0000  52 6F 6F 74 5C 53 43 53 49 41 64 61 70 74 65 72 Root\SCSIAdapter
+0010  5C 30 30 30 30 00                               \0000.
+0016				_ntmini_fsd_stub_common:
+0016  6A 64				push		0x00000064
+0018  E8 00 00 00 00			call		dbg_mark
+001D  83 C4 04				add		esp,0x00000004
+0020  0F B6 44 24 04			movzx		eax,byte ptr 0x4[esp]
+0025  50				push		eax
+0026  E8 00 00 00 00			call		dbg_mark
+002B  83 C4 04				add		esp,0x00000004
+002E  6A 3C				push		0x0000003c
+0030  E8 00 00 00 00			call		dbg_mark
+0035  83 C4 04				add		esp,0x00000004
+0038  FF 74 24 08			push		dword ptr 0x8[esp]
+003C  E8 2D 0D 00 00			call		ios_dbg_hex32
+0041  83 C4 04				add		esp,0x00000004
+0044  0F B6 44 24 0C			movzx		eax,byte ptr 0xc[esp]
+0049  50				push		eax
+004A  E8 00 00 00 00			call		ios_dbg_hex8
+004F  83 C4 04				add		esp,0x00000004
+0052  FF 74 24 18			push		dword ptr 0x18[esp]
+0056  E8 13 0D 00 00			call		ios_dbg_hex32
+005B  83 C4 04				add		esp,0x00000004
+005E  6A 3E				push		0x0000003e
+0060				L$1:
+0060  E8 00 00 00 00			call		dbg_mark
+0065  83 C4 04				add		esp,0x00000004
+0068  B8 FF FF FF FF			mov		eax,0xffffffff
+006D  C3				ret
+006E				_ntmini_fsd_stub_1:
+006E  FF 74 24 14			push		dword ptr 0x14[esp]
+0072  FF 74 24 14			push		dword ptr 0x14[esp]
+0076  FF 74 24 14			push		dword ptr 0x14[esp]
+007A  FF 74 24 14			push		dword ptr 0x14[esp]
+007E  FF 74 24 14			push		dword ptr 0x14[esp]
+0082  6A 31				push		0x00000031
+0084				L$2:
+0084  E8 8D FF FF FF			call		_ntmini_fsd_stub_common
+0089  83 C4 18				add		esp,0x00000018
+008C  C3				ret
+008D				_ntmini_fsd_stub_2:
+008D  53				push		ebx
+008E  6A 44				push		0x00000044
+0090  E8 00 00 00 00			call		dbg_mark
+0095  83 C4 04				add		esp,0x00000004
+0098  6A 32				push		0x00000032
+009A  E8 00 00 00 00			call		dbg_mark
+009F  83 C4 04				add		esp,0x00000004
+00A2  FF 74 24 08			push		dword ptr 0x8[esp]
+00A6  E8 28 0F 00 00			call		is_ring0_ptr
+00AB  83 C4 04				add		esp,0x00000004
+00AE  85 C0				test		eax,eax
+00B0  74 06				je		L$3
+00B2  8B 5C 24 08			mov		ebx,0x8[esp]
+00B6  EB 04				jmp		L$4
+00B8				L$3:
+00B8  8B 5C 24 18			mov		ebx,0x18[esp]
+00BC				L$4:
+00BC  53				push		ebx
+00BD  E8 11 0F 00 00			call		is_ring0_ptr
+00C2  83 C4 04				add		esp,0x00000004
+00C5  85 C0				test		eax,eax
+00C7  75 11				jne		L$5
+00C9  6A 21				push		0x00000021
+00CB  E8 00 00 00 00			call		dbg_mark
+00D0  83 C4 04				add		esp,0x00000004
+00D3  B8 FF FF FF FF			mov		eax,0xffffffff
+00D8  5B				pop		ebx
+00D9  C3				ret
+00DA				L$5:
+00DA  6A 3C				push		0x0000003c
+00DC  E8 00 00 00 00			call		dbg_mark
+00E1  83 C4 04				add		esp,0x00000004
+00E4  53				push		ebx
+00E5  E8 84 0C 00 00			call		ios_dbg_hex32
+00EA  83 C4 04				add		esp,0x00000004
+00ED  6A 3E				push		0x0000003e
+00EF  E8 00 00 00 00			call		dbg_mark
+00F4  83 C4 04				add		esp,0x00000004
+00F7  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+00FE  6A 65				push		0x00000065
+0100  E8 00 00 00 00			call		dbg_mark
+0105  83 C4 04				add		esp,0x00000004
+0108  31 C0				xor		eax,eax
+010A  5B				pop		ebx
+010B  C3				ret
+010C				_ntmini_fsd_stub_4:
+010C  FF 74 24 14			push		dword ptr 0x14[esp]
+0110  FF 74 24 14			push		dword ptr 0x14[esp]
+0114  FF 74 24 14			push		dword ptr 0x14[esp]
+0118  FF 74 24 14			push		dword ptr 0x14[esp]
+011C  FF 74 24 14			push		dword ptr 0x14[esp]
+0120  6A 34				push		0x00000034
+0122  E9 5D FF FF FF			jmp		L$2
+0127				_ntmini_fsd_stub_5:
+0127  FF 74 24 14			push		dword ptr 0x14[esp]
+012B  FF 74 24 14			push		dword ptr 0x14[esp]
+012F  FF 74 24 14			push		dword ptr 0x14[esp]
+0133  FF 74 24 14			push		dword ptr 0x14[esp]
+0137  FF 74 24 14			push		dword ptr 0x14[esp]
+013B  6A 35				push		0x00000035
+013D  E9 42 FF FF FF			jmp		L$2
+0142				_ntmini_fsd_stub_8:
+0142  53				push		ebx
+0143  FF 74 24 08			push		dword ptr 0x8[esp]
+0147  E8 87 0E 00 00			call		is_ring0_ptr
+014C  83 C4 04				add		esp,0x00000004
+014F  85 C0				test		eax,eax
+0151  74 06				je		L$6
+0153  8B 5C 24 08			mov		ebx,0x8[esp]
+0157  EB 04				jmp		L$7
+0159				L$6:
+0159  8B 5C 24 18			mov		ebx,0x18[esp]
+015D				L$7:
+015D  6A 64				push		0x00000064
+015F  E8 00 00 00 00			call		dbg_mark
+0164  83 C4 04				add		esp,0x00000004
+0167  6A 38				push		0x00000038
+0169  E8 00 00 00 00			call		dbg_mark
+016E  83 C4 04				add		esp,0x00000004
+0171  6A 3C				push		0x0000003c
+0173  E8 00 00 00 00			call		dbg_mark
+0178  83 C4 04				add		esp,0x00000004
+017B  FF 74 24 08			push		dword ptr 0x8[esp]
+017F  E8 EA 0B 00 00			call		ios_dbg_hex32
+0184  83 C4 04				add		esp,0x00000004
+0187  53				push		ebx
+0188  E8 E1 0B 00 00			call		ios_dbg_hex32
+018D  83 C4 04				add		esp,0x00000004
+0190  6A 3E				push		0x0000003e
+0192  E8 00 00 00 00			call		dbg_mark
+0197  83 C4 04				add		esp,0x00000004
+019A  B8 FF FF FF FF			mov		eax,0xffffffff
+019F  5B				pop		ebx
+01A0  C3				ret
+01A1				_ntmini_fsd_shutdown:
+01A1  6A 4B				push		0x0000004b
+01A3  E8 00 00 00 00			call		dbg_mark
+01A8  83 C4 04				add		esp,0x00000004
+01AB  6A 28				push		0x00000028
+01AD  E8 00 00 00 00			call		dbg_mark
+01B2  83 C4 04				add		esp,0x00000004
+01B5  FF 74 24 04			push		dword ptr 0x4[esp]
+01B9  E8 B0 0B 00 00			call		ios_dbg_hex32
+01BE  83 C4 04				add		esp,0x00000004
+01C1  FF 74 24 08			push		dword ptr 0x8[esp]
+01C5  E8 A4 0B 00 00			call		ios_dbg_hex32
+01CA  83 C4 04				add		esp,0x00000004
+01CD  FF 74 24 0C			push		dword ptr 0xc[esp]
+01D1  E8 98 0B 00 00			call		ios_dbg_hex32
+01D6  83 C4 04				add		esp,0x00000004
+01D9  FF 74 24 10			push		dword ptr 0x10[esp]
+01DD  E8 8C 0B 00 00			call		ios_dbg_hex32
+01E2  83 C4 04				add		esp,0x00000004
+01E5  FF 74 24 14			push		dword ptr 0x14[esp]
+01E9  E8 80 0B 00 00			call		ios_dbg_hex32
+01EE  83 C4 04				add		esp,0x00000004
+01F1  6A 29				push		0x00000029
+01F3  E9 68 FE FF FF			jmp		L$1
+01F8				_ntmini_fsd_file_attributes:
+01F8  53				push		ebx
+01F9  56				push		esi
+01FA  6A 41				push		0x00000041
+01FC  E8 00 00 00 00			call		dbg_mark
+0201  83 C4 04				add		esp,0x00000004
+0204  FF 74 24 0C			push		dword ptr 0xc[esp]
+0208  E8 C6 0D 00 00			call		is_ring0_ptr
+020D  83 C4 04				add		esp,0x00000004
+0210  85 C0				test		eax,eax
+0212  74 06				je		L$8
+0214  8B 5C 24 0C			mov		ebx,0xc[esp]
+0218  EB 04				jmp		L$9
+021A				L$8:
+021A  8B 5C 24 1C			mov		ebx,0x1c[esp]
+021E				L$9:
+021E  53				push		ebx
+021F  E8 AF 0D 00 00			call		is_ring0_ptr
+0224  83 C4 04				add		esp,0x00000004
+0227  85 C0				test		eax,eax
+0229  75 12				jne		L$10
+022B  6A 21				push		0x00000021
+022D  E8 00 00 00 00			call		dbg_mark
+0232  83 C4 04				add		esp,0x00000004
+0235  B8 FF FF FF FF			mov		eax,0xffffffff
+023A  5E				pop		esi
+023B  5B				pop		ebx
+023C  C3				ret
+023D				L$10:
+023D  89 DE				mov		esi,ebx
+023F  6A 3C				push		0x0000003c
+0241  E8 00 00 00 00			call		dbg_mark
+0246  83 C4 04				add		esp,0x00000004
+0249  53				push		ebx
+024A  E8 1F 0B 00 00			call		ios_dbg_hex32
+024F  83 C4 04				add		esp,0x00000004
+0252  31 DB				xor		ebx,ebx
+0254				L$11:
+0254  89 D8				mov		eax,ebx
+0256  FF 34 86				push		dword ptr [esi+eax*4]
+0259  E8 10 0B 00 00			call		ios_dbg_hex32
+025E  83 C4 04				add		esp,0x00000004
+0261  43				inc		ebx
+0262  83 FB 10				cmp		ebx,0x00000010
+0265  72 ED				jb		L$11
+0267  6A 3E				push		0x0000003e
+0269  E8 00 00 00 00			call		dbg_mark
+026E  83 C4 04				add		esp,0x00000004
+0271  C7 46 10 00 00 00 00		mov		dword ptr 0x10[esi],0x00000000
+0278  C7 46 18 01 00 00 00		mov		dword ptr 0x18[esi],0x00000001
+027F  6A 61				push		0x00000061
+0281  E8 00 00 00 00			call		dbg_mark
+0286  83 C4 04				add		esp,0x00000004
+0289  31 C0				xor		eax,eax
+028B  5E				pop		esi
+028C  5B				pop		ebx
+028D  C3				ret
+028E				iso_namecmp:
+028E  53				push		ebx
+028F  56				push		esi
+0290  57				push		edi
+0291  8B 7C 24 10			mov		edi,0x10[esp]
+0295  8B 5C 24 14			mov		ebx,0x14[esp]
+0299  8B 74 24 18			mov		esi,0x18[esp]
+029D  3B 5C 24 1C			cmp		ebx,0x1c[esp]
+02A1  74 06				je		L$13
+02A3				L$12:
+02A3  31 C0				xor		eax,eax
+02A5  5F				pop		edi
+02A6  5E				pop		esi
+02A7  5B				pop		ebx
+02A8  C3				ret
+02A9				L$13:
+02A9  31 D2				xor		edx,edx
+02AB				L$14:
+02AB  39 DA				cmp		edx,ebx
+02AD  73 28				jae		L$17
+02AF  8D 04 17				lea		eax,[edi+edx]
+02B2  8A 00				mov		al,[eax]
+02B4  8D 0C 16				lea		ecx,[esi+edx]
+02B7  8A 21				mov		ah,[ecx]
+02B9  3C 61				cmp		al,0x61
+02BB  72 06				jb		L$15
+02BD  3C 7A				cmp		al,0x7a
+02BF  77 02				ja		L$15
+02C1  2C 20				sub		al,0x20
+02C3				L$15:
+02C3  80 FC 61				cmp		ah,0x61
+02C6  72 08				jb		L$16
+02C8  80 FC 7A				cmp		ah,0x7a
+02CB  77 03				ja		L$16
+02CD  80 EC 20				sub		ah,0x20
+02D0				L$16:
+02D0  38 E0				cmp		al,ah
+02D2  75 CF				jne		L$12
+02D4  42				inc		edx
+02D5  EB D4				jmp		L$14
+02D7				L$17:
+02D7  B8 01 00 00 00			mov		eax,0x00000001
+02DC  5F				pop		edi
+02DD  5E				pop		esi
+02DE  5B				pop		ebx
+02DF  C3				ret
+02E0				iso9660_find_file:
+02E0  53				push		ebx
+02E1  56				push		esi
+02E2  57				push		edi
+02E3  55				push		ebp
+02E4  83 EC 0C				sub		esp,0x0000000c
+02E7  8B 6C 24 2C			mov		ebp,0x2c[esp]
+02EB  8B 44 24 24			mov		eax,0x24[esp]
+02EF  05 FF 07 00 00			add		eax,0x000007ff
+02F4  C1 E8 0B				shr		eax,0x0b
+02F7  89 04 24				mov		[esp],eax
+02FA  31 C0				xor		eax,eax
+02FC  89 44 24 04			mov		0x4[esp],eax
+0300				L$18:
+0300  8B 44 24 04			mov		eax,0x4[esp]
+0304  3B 04 24				cmp		eax,[esp]
+0307  0F 83 FA 00 00 00			jae		L$26
+030D  83 F8 10				cmp		eax,0x00000010
+0310  0F 83 F1 00 00 00			jae		L$26
+0316  8B 44 24 20			mov		eax,0x20[esp]
+031A  3B 05 00 00 00 00			cmp		eax,g_iso_root_lba
+0320  75 17				jne		L$19
+0322  83 3D 00 00 00 00 00		cmp		dword ptr g_iso_root_cached,0x00000000
+0329  74 0E				je		L$19
+032B  83 7C 24 04 00			cmp		dword ptr 0x4[esp],0x00000000
+0330  75 07				jne		L$19
+0332  BF 00 00 00 00			mov		edi,offset g_iso_enum_sector_buf
+0337  EB 25				jmp		L$20
+0339				L$19:
+0339  BF 00 00 00 00			mov		edi,offset g_iso_sector_buf
+033E  57				push		edi
+033F  8B 44 24 24			mov		eax,0x24[esp]
+0343  03 44 24 08			add		eax,0x8[esp]
+0347  50				push		eax
+0348  E8 00 00 00 00			call		nt5_read_lba
+034D  83 C4 08				add		esp,0x00000008
+0350  85 C0				test		eax,eax
+0352  74 0A				je		L$20
+0354  B8 FF FF FF FF			mov		eax,0xffffffff
+0359  E9 AE 00 00 00			jmp		L$27
+035E				L$20:
+035E  31 DB				xor		ebx,ebx
+0360				L$21:
+0360  8D 4B 21				lea		ecx,0x21[ebx]
+0363  81 F9 00 08 00 00			cmp		ecx,0x00000800
+0369  0F 83 8F 00 00 00			jae		L$25
+036F  8D 04 1F				lea		eax,[edi+ebx]
+0372  8A 10				mov		dl,[eax]
+0374  88 54 24 08			mov		0x8[esp],dl
+0378  80 FA 22				cmp		dl,0x22
+037B  0F 82 7D 00 00 00			jb		L$25
+0381  0F B6 D2				movzx		edx,dl
+0384  01 DA				add		edx,ebx
+0386  81 FA 00 08 00 00			cmp		edx,0x00000800
+038C  0F 87 6C 00 00 00			ja		L$25
+0392  8A 50 20				mov		dl,0x20[eax]
+0395  0F B6 D2				movzx		edx,dl
+0398  01 D1				add		ecx,edx
+039A  81 F9 00 08 00 00			cmp		ecx,0x00000800
+03A0  77 5C				ja		L$25
+03A2  8D 48 21				lea		ecx,0x21[eax]
+03A5  89 D0				mov		eax,edx
+03A7  83 FA 02				cmp		edx,0x00000002
+03AA  76 0C				jbe		L$22
+03AC  8D 34 11				lea		esi,[ecx+edx]
+03AF  80 7E FE 3B			cmp		byte ptr -0x2[esi],0x3b
+03B3  75 03				jne		L$22
+03B5  8D 42 FE				lea		eax,-0x2[edx]
+03B8				L$22:
+03B8  83 F8 01				cmp		eax,0x00000001
+03BB  76 0A				jbe		L$23
+03BD  8D 14 01				lea		edx,[ecx+eax]
+03C0  80 7A FF 2E			cmp		byte ptr -0x1[edx],0x2e
+03C4  75 01				jne		L$23
+03C6  48				dec		eax
+03C7				L$23:
+03C7  50				push		eax
+03C8  51				push		ecx
+03C9  55				push		ebp
+03CA  FF 74 24 34			push		dword ptr 0x34[esp]
+03CE  E8 00 00 00 00			call		iso_namecmp
+03D3  83 C4 10				add		esp,0x00000010
+03D6  85 C0				test		eax,eax
+03D8  74 18				je		L$24
+03DA  8B 44 1F 02			mov		eax,0x2[edi+ebx]
+03DE  8B 54 24 30			mov		edx,0x30[esp]
+03E2  89 02				mov		[edx],eax
+03E4  8B 44 1F 0A			mov		eax,0xa[edi+ebx]
+03E8  8B 54 24 34			mov		edx,0x34[esp]
+03EC  89 02				mov		[edx],eax
+03EE  31 C0				xor		eax,eax
+03F0  EB 1A				jmp		L$27
+03F2				L$24:
+03F2  0F B6 44 24 08			movzx		eax,byte ptr 0x8[esp]
+03F7  01 C3				add		ebx,eax
+03F9  E9 62 FF FF FF			jmp		L$21
+03FE				L$25:
+03FE  FF 44 24 04			inc		dword ptr 0x4[esp]
+0402  E9 F9 FE FF FF			jmp		L$18
+0407				L$26:
+0407  B8 FE FF FF FF			mov		eax,0xfffffffe
+040C				L$27:
+040C  83 C4 0C				add		esp,0x0000000c
+040F  5D				pop		ebp
+0410  5F				pop		edi
+0411  5E				pop		esi
+0412  5B				pop		ebx
+0413  C3				ret
+0414				iso9660_read_file:
+0414  53				push		ebx
+0415  56				push		esi
+0416  57				push		edi
+0417  8B 44 24 18			mov		eax,0x18[esp]
+041B  3B 44 24 14			cmp		eax,0x14[esp]
+041F  72 06				jb		L$28
+0421  31 C0				xor		eax,eax
+0423  5F				pop		edi
+0424  5E				pop		esi
+0425  5B				pop		ebx
+0426  C3				ret
+0427				L$28:
+0427  03 44 24 20			add		eax,0x20[esp]
+042B  3B 44 24 14			cmp		eax,0x14[esp]
+042F  76 0C				jbe		L$29
+0431  8B 44 24 14			mov		eax,0x14[esp]
+0435  2B 44 24 18			sub		eax,0x18[esp]
+0439  89 44 24 20			mov		0x20[esp],eax
+043D				L$29:
+043D  31 F6				xor		esi,esi
+043F				L$30:
+043F  83 7C 24 20 00			cmp		dword ptr 0x20[esp],0x00000000
+0444  76 66				jbe		L$34
+0446  8B 44 24 18			mov		eax,0x18[esp]
+044A  C1 E8 0B				shr		eax,0x0b
+044D  03 44 24 10			add		eax,0x10[esp]
+0451  8B 7C 24 18			mov		edi,0x18[esp]
+0455  81 E7 FF 07 00 00			and		edi,0x000007ff
+045B  BB 00 08 00 00			mov		ebx,0x00000800
+0460  29 FB				sub		ebx,edi
+0462  3B 5C 24 20			cmp		ebx,0x20[esp]
+0466  76 04				jbe		L$31
+0468  8B 5C 24 20			mov		ebx,0x20[esp]
+046C				L$31:
+046C  68 00 00 00 00			push		offset g_iso_sector_buf
+0471  50				push		eax
+0472  E8 00 00 00 00			call		nt5_read_lba
+0477  83 C4 08				add		esp,0x00000008
+047A  85 C0				test		eax,eax
+047C  74 09				je		L$32
+047E  B8 FF FF FF FF			mov		eax,0xffffffff
+0483  5F				pop		edi
+0484  5E				pop		esi
+0485  5B				pop		ebx
+0486  C3				ret
+0487				L$32:
+0487  39 D8				cmp		eax,ebx
+0489  73 15				jae		L$33
+048B  8D 14 07				lea		edx,[edi+eax]
+048E  8D 0C 06				lea		ecx,[esi+eax]
+0491  03 4C 24 1C			add		ecx,0x1c[esp]
+0495  8A 92 00 00 00 00			mov		dl,g_iso_sector_buf[edx]
+049B  88 11				mov		[ecx],dl
+049D  40				inc		eax
+049E  EB E7				jmp		L$32
+04A0				L$33:
+04A0  01 DE				add		esi,ebx
+04A2  01 5C 24 18			add		0x18[esp],ebx
+04A6  29 5C 24 20			sub		0x20[esp],ebx
+04AA  EB 93				jmp		L$30
+04AC				L$34:
+04AC  89 F0				mov		eax,esi
+04AE  5F				pop		edi
+04AF  5E				pop		esi
+04B0  5B				pop		ebx
+04B1  C3				ret
+04B2				_ntmini_fsd_getdiskinfo:
+04B2  53				push		ebx
+04B3  83 EC 04				sub		esp,0x00000004
+04B6  8B 5C 24 1C			mov		ebx,0x1c[esp]
+04BA  6A 47				push		0x00000047
+04BC  E8 00 00 00 00			call		dbg_mark
+04C1  83 C4 04				add		esp,0x00000004
+04C4  53				push		ebx
+04C5  E8 09 0B 00 00			call		is_ring0_ptr
+04CA  83 C4 04				add		esp,0x00000004
+04CD  85 C0				test		eax,eax
+04CF  0F 84 21 01 00 00			je		L$37
+04D5  8A 43 18				mov		al,0x18[ebx]
+04D8  88 04 24				mov		[esp],al
+04DB  6A 5A				push		0x0000005a
+04DD  E8 00 00 00 00			call		dbg_mark
+04E2  83 C4 04				add		esp,0x00000004
+04E5  6A 51				push		0x00000051
+04E7  E8 00 00 00 00			call		dbg_mark
+04EC  83 C4 04				add		esp,0x00000004
+04EF  6A 3C				push		0x0000003c
+04F1  E8 00 00 00 00			call		dbg_mark
+04F6  83 C4 04				add		esp,0x00000004
+04F9  53				push		ebx
+04FA  E8 6F 08 00 00			call		ios_dbg_hex32
+04FF  83 C4 04				add		esp,0x00000004
+0502  0F B6 04 24			movzx		eax,byte ptr [esp]
+0506  50				push		eax
+0507  E8 00 00 00 00			call		ios_dbg_hex8
+050C  83 C4 04				add		esp,0x00000004
+050F  6A 3E				push		0x0000003e
+0511  E8 00 00 00 00			call		dbg_mark
+0516  83 C4 04				add		esp,0x00000004
+0519  8A 04 24				mov		al,[esp]
+051C  3C 01				cmp		al,0x01
+051E  0F 85 AD 00 00 00			jne		L$36
+0524  6A 31				push		0x00000031
+0526  E8 00 00 00 00			call		dbg_mark
+052B  83 C4 04				add		esp,0x00000004
+052E  6A 54				push		0x00000054
+0530  E8 00 00 00 00			call		dbg_mark
+0535  83 C4 04				add		esp,0x00000004
+0538  FF 73 10				push		dword ptr 0x10[ebx]
+053B  E8 93 0A 00 00			call		is_ring0_ptr
+0540  83 C4 04				add		esp,0x00000004
+0543  85 C0				test		eax,eax
+0545  74 35				je		L$35
+0547  8B 43 10				mov		eax,0x10[ebx]
+054A  C7 00 00 00 00 00			mov		dword ptr [eax],offset _ntmini_gdi31_callback
+0550  C7 40 04 00 00 00 00		mov		dword ptr 0x4[eax],offset _ntmini_gdi_error5_callback
+0557  C7 40 08 0C 09 00 00		mov		dword ptr 0x8[eax],0x0000090c
+055E  6A 31				push		0x00000031
+0560  E8 00 00 00 00			call		dbg_mark
+0565  83 C4 04				add		esp,0x00000004
+0568  6A 46				push		0x00000046
+056A  E8 00 00 00 00			call		dbg_mark
+056F  83 C4 04				add		esp,0x00000004
+0572  6A 66				push		0x00000066
+0574  E8 00 00 00 00			call		dbg_mark
+0579  83 C4 04				add		esp,0x00000004
+057C				L$35:
+057C  C6 43 04 00			mov		byte ptr 0x4[ebx],0x00
+0580  C7 43 18 01 00 00 00		mov		dword ptr 0x18[ebx],0x00000001
+0587  C7 03 01 00 00 00			mov		dword ptr [ebx],0x00000001
+058D  C7 43 24 00 00 00 00		mov		dword ptr 0x24[ebx],0x00000000
+0594  C7 43 20 00 00 00 00		mov		dword ptr 0x20[ebx],offset g_fsd_table
+059B  C7 43 28 00 00 00 00		mov		dword ptr 0x28[ebx],0x00000000
+05A2  6A 31				push		0x00000031
+05A4  E8 00 00 00 00			call		dbg_mark
+05A9  83 C4 04				add		esp,0x00000004
+05AC  6A 45				push		0x00000045
+05AE  E8 00 00 00 00			call		dbg_mark
+05B3  83 C4 04				add		esp,0x00000004
+05B6  6A 65				push		0x00000065
+05B8  E8 00 00 00 00			call		dbg_mark
+05BD  83 C4 04				add		esp,0x00000004
+05C0  6A 74				push		0x00000074
+05C2  E8 00 00 00 00			call		dbg_mark
+05C7  83 C4 04				add		esp,0x00000004
+05CA  31 C0				xor		eax,eax
+05CC  83 C4 04				add		esp,0x00000004
+05CF  5B				pop		ebx
+05D0  C3				ret
+05D1				L$36:
+05D1  84 C0				test		al,al
+05D3  75 2B				jne		L$38
+05D5  FF 73 14				push		dword ptr 0x14[ebx]
+05D8  E8 F6 09 00 00			call		is_ring0_ptr
+05DD  83 C4 04				add		esp,0x00000004
+05E0  85 C0				test		eax,eax
+05E2  74 1C				je		L$38
+05E4  8B 5B 14				mov		ebx,0x14[ebx]
+05E7  C7 03 01 00 00 08			mov		dword ptr [ebx],0x08000001
+05ED  C7 43 04 00 00 FF FF		mov		dword ptr 0x4[ebx],0xffff0000
+05F4  EB 0A				jmp		L$38
+05F6				L$37:
+05F6  6A 21				push		0x00000021
+05F8  E8 00 00 00 00			call		dbg_mark
+05FD  83 C4 04				add		esp,0x00000004
+0600				L$38:
+0600  B8 FF FF FF FF			mov		eax,0xffffffff
+0605  83 C4 04				add		esp,0x00000004
+0608  5B				pop		ebx
+0609  C3				ret
+060A				_ntmini_gdi31_callback:
+060A  6A 59				push		0x00000059
+060C  E8 00 00 00 00			call		dbg_mark
+0611  83 C4 04				add		esp,0x00000004
+0614  6A 31				push		0x00000031
+0616  E8 00 00 00 00			call		dbg_mark
+061B  83 C4 04				add		esp,0x00000004
+061E  6A 3C				push		0x0000003c
+0620  E8 00 00 00 00			call		dbg_mark
+0625  83 C4 04				add		esp,0x00000004
+0628  FF 74 24 04			push		dword ptr 0x4[esp]
+062C  E8 3D 07 00 00			call		ios_dbg_hex32
+0631  83 C4 04				add		esp,0x00000004
+0634  6A 3E				push		0x0000003e
+0636  E8 00 00 00 00			call		dbg_mark
+063B  83 C4 04				add		esp,0x00000004
+063E  FF 74 24 04			push		dword ptr 0x4[esp]
+0642  E8 8C 09 00 00			call		is_ring0_ptr
+0647  83 C4 04				add		esp,0x00000004
+064A  85 C0				test		eax,eax
+064C  74 0A				je		L$39
+064E  8B 44 24 04			mov		eax,0x4[esp]
+0652  66 C7 40 1A 00 00			mov		word ptr 0x1a[eax],0x0000
+0658				L$39:
+0658  31 C0				xor		eax,eax
+065A  C3				ret
+065B				_ntmini_gdi_error5_callback:
+065B  6A 59				push		0x00000059
+065D  E8 00 00 00 00			call		dbg_mark
+0662  83 C4 04				add		esp,0x00000004
+0665  6A 35				push		0x00000035
+0667  E8 00 00 00 00			call		dbg_mark
+066C  83 C4 04				add		esp,0x00000004
+066F  6A 3C				push		0x0000003c
+0671  E8 00 00 00 00			call		dbg_mark
+0676  83 C4 04				add		esp,0x00000004
+0679  FF 74 24 04			push		dword ptr 0x4[esp]
+067D  E8 EC 06 00 00			call		ios_dbg_hex32
+0682  83 C4 04				add		esp,0x00000004
+0685  6A 3E				push		0x0000003e
+0687  E8 00 00 00 00			call		dbg_mark
+068C  83 C4 04				add		esp,0x00000004
+068F  FF 74 24 04			push		dword ptr 0x4[esp]
+0693  E8 3B 09 00 00			call		is_ring0_ptr
+0698  83 C4 04				add		esp,0x00000004
+069B  85 C0				test		eax,eax
+069D  74 0A				je		L$40
+069F  8B 44 24 04			mov		eax,0x4[esp]
+06A3  66 C7 40 1A 05 00			mov		word ptr 0x1a[eax],0x0005
+06A9				L$40:
+06A9  B8 05 00 00 00			mov		eax,0x00000005
+06AE  C3				ret
+06AF				_ntmini_fsd_open:
+06AF  53				push		ebx
+06B0  56				push		esi
+06B1  57				push		edi
+06B2  83 EC 48				sub		esp,0x00000048
+06B5  6A 55				push		0x00000055
+06B7  E8 00 00 00 00			call		dbg_mark
+06BC  83 C4 04				add		esp,0x00000004
+06BF  FF 74 24 68			push		dword ptr 0x68[esp]
+06C3  E8 0B 09 00 00			call		is_ring0_ptr
+06C8  83 C4 04				add		esp,0x00000004
+06CB  85 C0				test		eax,eax
+06CD  75 14				jne		L$43
+06CF				L$41:
+06CF  6A 21				push		0x00000021
+06D1				L$42:
+06D1  E8 00 00 00 00			call		dbg_mark
+06D6  83 C4 04				add		esp,0x00000004
+06D9  B8 02 00 00 00			mov		eax,0x00000002
+06DE  E9 A4 01 00 00			jmp		L$59
+06E3				L$43:
+06E3  8B 7C 24 68			mov		edi,0x68[esp]
+06E7  8B 77 0C				mov		esi,0xc[edi]
+06EA  56				push		esi
+06EB  E8 E3 08 00 00			call		is_ring0_ptr
+06F0  83 C4 04				add		esp,0x00000004
+06F3  85 C0				test		eax,eax
+06F5  75 09				jne		L$44
+06F7  C7 47 10 02 00 00 00		mov		dword ptr 0x10[edi],0x00000002
+06FE  EB CF				jmp		L$41
+0700				L$44:
+0700  66 8B 5E 04			mov		bx,0x4[esi]
+0704  66 85 DB				test		bx,bx
+0707  76 40				jbe		L$49
+0709  66 83 FB 7E			cmp		bx,0x007e
+070D  77 3A				ja		L$49
+070F  8D 4E 06				lea		ecx,0x6[esi]
+0712  0F B7 C3				movzx		eax,bx
+0715  99				cdq
+0716  2B C2				sub		eax,edx
+0718  D1 F8				sar		eax,0x01
+071A  89 C3				mov		ebx,eax
+071C  83 F8 3F				cmp		eax,0x0000003f
+071F  7E 05				jle		L$45
+0721  BB 3F 00 00 00			mov		ebx,0x0000003f
+0726				L$45:
+0726  31 C0				xor		eax,eax
+0728				L$46:
+0728  39 D8				cmp		eax,ebx
+072A  7D 0B				jge		L$47
+072C  89 C2				mov		edx,eax
+072E  8A 14 51				mov		dl,[ecx+edx*2]
+0731  88 14 04				mov		[esp+eax],dl
+0734  40				inc		eax
+0735  EB F1				jmp		L$46
+0737				L$47:
+0737  C6 04 1C 00			mov		byte ptr [esp+ebx],0x00
+073B				L$48:
+073B  85 DB				test		ebx,ebx
+073D  7E 0C				jle		L$50
+073F  80 7C 1C FF 00			cmp		byte ptr -0x1[esp+ebx],0x00
+0744  75 05				jne		L$50
+0746  4B				dec		ebx
+0747  EB F2				jmp		L$48
+0749				L$49:
+0749  31 DB				xor		ebx,ebx
+074B				L$50:
+074B  6A 3C				push		0x0000003c
+074D  E8 00 00 00 00			call		dbg_mark
+0752  83 C4 04				add		esp,0x00000004
+0755  FF 74 24 68			push		dword ptr 0x68[esp]
+0759  E8 10 06 00 00			call		ios_dbg_hex32
+075E  83 C4 04				add		esp,0x00000004
+0761  56				push		esi
+0762  E8 07 06 00 00			call		ios_dbg_hex32
+0767  83 C4 04				add		esp,0x00000004
+076A  0F B6 C3				movzx		eax,bl
+076D  50				push		eax
+076E  E8 00 00 00 00			call		ios_dbg_hex8
+0773  83 C4 04				add		esp,0x00000004
+0776  6A 3E				push		0x0000003e
+0778  E8 00 00 00 00			call		dbg_mark
+077D  83 C4 04				add		esp,0x00000004
+0780  85 DB				test		ebx,ebx
+0782  74 44				je		L$52
+0784  6A 0A				push		0x0000000a
+0786  68 00 00 00 00			push		offset L$334
+078B  53				push		ebx
+078C  8D 44 24 0C			lea		eax,0xc[esp]
+0790  50				push		eax
+0791  E8 00 00 00 00			call		iso_namecmp
+0796  83 C4 10				add		esp,0x00000010
+0799  85 C0				test		eax,eax
+079B  75 19				jne		L$51
+079D  6A 06				push		0x00000006
+079F  68 0B 00 00 00			push		offset L$335
+07A4  53				push		ebx
+07A5  8D 44 24 0C			lea		eax,0xc[esp]
+07A9  50				push		eax
+07AA  E8 00 00 00 00			call		iso_namecmp
+07AF  83 C4 10				add		esp,0x00000010
+07B2  85 C0				test		eax,eax
+07B4  74 12				je		L$52
+07B6				L$51:
+07B6  C7 44 24 40 19 00 00 00		mov		dword ptr 0x40[esp],0x00000019
+07BE  C7 44 24 44 13 00 00 00		mov		dword ptr 0x44[esp],0x00000013
+07C6  EB 3A				jmp		L$54
+07C8				L$52:
+07C8  85 DB				test		ebx,ebx
+07CA  74 28				je		L$53
+07CC  8D 44 24 44			lea		eax,0x44[esp]
+07D0  50				push		eax
+07D1  8D 44 24 44			lea		eax,0x44[esp]
+07D5  50				push		eax
+07D6  53				push		ebx
+07D7  8D 44 24 0C			lea		eax,0xc[esp]
+07DB  50				push		eax
+07DC  FF 35 00 00 00 00			push		dword ptr g_iso_root_size
+07E2  FF 35 00 00 00 00			push		dword ptr g_iso_root_lba
+07E8  E8 00 00 00 00			call		iso9660_find_file
+07ED  83 C4 18				add		esp,0x00000018
+07F0  85 C0				test		eax,eax
+07F2  74 0E				je		L$54
+07F4				L$53:
+07F4  C7 47 10 02 00 00 00		mov		dword ptr 0x10[edi],0x00000002
+07FB  6A 6E				push		0x0000006e
+07FD  E9 CF FE FF FF			jmp		L$42
+0802				L$54:
+0802  31 DB				xor		ebx,ebx
+0804  EB 06				jmp		L$56
+0806				L$55:
+0806  43				inc		ebx
+0807  83 FB 08				cmp		ebx,0x00000008
+080A  7D 0C				jge		L$57
+080C				L$56:
+080C  6B C3 14				imul		eax,ebx,0x00000014
+080F  83 B8 00 00 00 00 00		cmp		dword ptr g_iso_files[eax],0x00000000
+0816  75 EE				jne		L$55
+0818				L$57:
+0818  83 FB 08				cmp		ebx,0x00000008
+081B  7C 02				jl		L$58
+081D  31 DB				xor		ebx,ebx
+081F				L$58:
+081F  6B D3 14				imul		edx,ebx,0x00000014
+0822  C7 82 00 00 00 00 01 00 00 00
+					mov		dword ptr g_iso_files[edx],0x00000001
+082C  8B 44 24 40			mov		eax,0x40[esp]
+0830  89 82 04 00 00 00			mov		g_iso_files+0x4[edx],eax
+0836  8B 44 24 44			mov		eax,0x44[esp]
+083A  89 82 08 00 00 00			mov		g_iso_files+0x8[edx],eax
+0840  31 C0				xor		eax,eax
+0842  89 82 0C 00 00 00			mov		g_iso_files+0xc[edx],eax
+0848  89 82 10 00 00 00			mov		g_iso_files+0x10[edx],eax
+084E  89 1D 00 00 00 00			mov		g_last_opened_slot,ebx
+0854  89 47 10				mov		0x10[edi],eax
+0857  6A 75				push		0x00000075
+0859  E8 00 00 00 00			call		dbg_mark
+085E  83 C4 04				add		esp,0x00000004
+0861  0F B6 DB				movzx		ebx,bl
+0864  53				push		ebx
+0865  E8 00 00 00 00			call		ios_dbg_hex8
+086A  83 C4 04				add		esp,0x00000004
+086D  FF 74 24 40			push		dword ptr 0x40[esp]
+0871  E8 F8 04 00 00			call		ios_dbg_hex32
+0876  83 C4 04				add		esp,0x00000004
+0879  FF 74 24 44			push		dword ptr 0x44[esp]
+087D  E8 EC 04 00 00			call		ios_dbg_hex32
+0882  83 C4 04				add		esp,0x00000004
+0885  31 C0				xor		eax,eax
+0887				L$59:
+0887  83 C4 48				add		esp,0x00000048
+088A  5F				pop		edi
+088B  5E				pop		esi
+088C  5B				pop		ebx
+088D  C3				ret
+088E				_ntmini_fsd_search:
+088E  53				push		ebx
+088F  56				push		esi
+0890  57				push		edi
+0891  55				push		ebp
+0892  6A 5A				push		0x0000005a
+0894  E8 00 00 00 00			call		dbg_mark
+0899  83 C4 04				add		esp,0x00000004
+089C  6A 45				push		0x00000045
+089E  E8 00 00 00 00			call		dbg_mark
+08A3  83 C4 04				add		esp,0x00000004
+08A6  FF 74 24 14			push		dword ptr 0x14[esp]
+08AA  E8 24 07 00 00			call		is_ring0_ptr
+08AF  83 C4 04				add		esp,0x00000004
+08B2  85 C0				test		eax,eax
+08B4  74 06				je		L$60
+08B6  8B 5C 24 14			mov		ebx,0x14[esp]
+08BA  EB 04				jmp		L$61
+08BC				L$60:
+08BC  8B 5C 24 24			mov		ebx,0x24[esp]
+08C0				L$61:
+08C0  89 DF				mov		edi,ebx
+08C2  53				push		ebx
+08C3  E8 0B 07 00 00			call		is_ring0_ptr
+08C8  83 C4 04				add		esp,0x00000004
+08CB  85 C0				test		eax,eax
+08CD  0F 84 C9 00 00 00			je		L$68
+08D3  66 8B 73 18			mov		si,0x18[ebx]
+08D7  6A 3C				push		0x0000003c
+08D9  E8 00 00 00 00			call		dbg_mark
+08DE  83 C4 04				add		esp,0x00000004
+08E1  53				push		ebx
+08E2  E8 87 04 00 00			call		ios_dbg_hex32
+08E7  83 C4 04				add		esp,0x00000004
+08EA  0F B7 C6				movzx		eax,si
+08ED  50				push		eax
+08EE  E8 51 04 00 00			call		ios_dbg_hex16
+08F3  83 C4 04				add		esp,0x00000004
+08F6  6A 3E				push		0x0000003e
+08F8  E8 00 00 00 00			call		dbg_mark
+08FD  83 C4 04				add		esp,0x00000004
+0900  66 85 F6				test		si,si
+0903  75 23				jne		L$63
+0905  66 89 73 18			mov		0x18[ebx],si
+0909  66 89 73 1A			mov		0x1a[ebx],si
+090D  6A 53				push		0x00000053
+090F  E8 00 00 00 00			call		dbg_mark
+0914  83 C4 04				add		esp,0x00000004
+0917  6A 30				push		0x00000030
+0919				L$62:
+0919  E8 00 00 00 00			call		dbg_mark
+091E  83 C4 04				add		esp,0x00000004
+0921  31 C0				xor		eax,eax
+0923  5D				pop		ebp
+0924  5F				pop		edi
+0925  5E				pop		esi
+0926  5B				pop		ebx
+0927  C3				ret
+0928				L$63:
+0928  66 83 FE 02			cmp		si,0x0002
+092C  75 54				jne		L$67
+092E  8B 6B 14				mov		ebp,0x14[ebx]
+0931  8B 33				mov		esi,[ebx]
+0933  85 F6				test		esi,esi
+0935  76 30				jbe		L$66
+0937  55				push		ebp
+0938  E8 96 06 00 00			call		is_ring0_ptr
+093D  83 C4 04				add		esp,0x00000004
+0940  85 C0				test		eax,eax
+0942  74 23				je		L$66
+0944  89 E9				mov		ecx,ebp
+0946  31 C0				xor		eax,eax
+0948				L$64:
+0948  39 F0				cmp		eax,esi
+094A  73 13				jae		L$65
+094C  83 F8 06				cmp		eax,0x00000006
+094F  73 0E				jae		L$65
+0951  8D 14 01				lea		edx,[ecx+eax]
+0954  8A 98 00 00 00 00			mov		bl,L$384[eax]
+095A  88 1A				mov		[edx],bl
+095C  40				inc		eax
+095D  EB E9				jmp		L$64
+095F				L$65:
+095F  39 F0				cmp		eax,esi
+0961  73 04				jae		L$66
+0963  C6 04 01 00			mov		byte ptr [ecx+eax],0x00
+0967				L$66:
+0967  C7 07 DD 00 04 01			mov		dword ptr [edi],0x010400dd
+096D  C7 47 18 00 40 00 00		mov		dword ptr 0x18[edi],0x00004000
+0974  6A 53				push		0x00000053
+0976  E8 00 00 00 00			call		dbg_mark
+097B  83 C4 04				add		esp,0x00000004
+097E  6A 32				push		0x00000032
+0980  EB 97				jmp		L$62
+0982				L$67:
+0982  66 C7 43 1A 05 00			mov		word ptr 0x1a[ebx],0x0005
+0988  6A 53				push		0x00000053
+098A  E8 00 00 00 00			call		dbg_mark
+098F  83 C4 04				add		esp,0x00000004
+0992  6A 35				push		0x00000035
+0994  E8 00 00 00 00			call		dbg_mark
+0999  83 C4 04				add		esp,0x00000004
+099C				L$68:
+099C  B8 05 00 00 00			mov		eax,0x00000005
+09A1  5D				pop		ebp
+09A2  5F				pop		edi
+09A3  5E				pop		esi
+09A4  5B				pop		ebx
+09A5  C3				ret
+
+Routine Size: 2470 bytes,    Routine Base: _TEXT + 0000
+
+09A6				_ntmini_ifs_hook:
+09A6  53				push		ebx
+09A7  56				push		esi
+09A8  57				push		edi
+09A9  83 EC 04				sub		esp,0x00000004
+09AC  8B 7C 24 18			mov		edi,0x18[esp]
+09B0  8B 74 24 28			mov		esi,0x28[esp]
+09B4  8B 5C 24 14			mov		ebx,0x14[esp]
+09B8  83 7C 24 1C 04			cmp		dword ptr 0x1c[esp],0x00000004
+09BD  0F 85 8A 01 00 00			jne		L$79
+09C3  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_registered,0x00000000
+09CA  0F 84 7D 01 00 00			je		L$79
+09D0  83 3D 00 00 00 00 40		cmp		dword ptr g_fsd_log_count,0x00000040
+09D7  7D 36				jge		L$69
+09D9  6A 49				push		0x00000049
+09DB  E8 00 00 00 00			call		dbg_mark
+09E0  83 C4 04				add		esp,0x00000004
+09E3  6A 3C				push		0x0000003c
+09E5  E8 00 00 00 00			call		dbg_mark
+09EA  83 C4 04				add		esp,0x00000004
+09ED  57				push		edi
+09EE  E8 7B 03 00 00			call		ios_dbg_hex32
+09F3  83 C4 04				add		esp,0x00000004
+09F6  56				push		esi
+09F7  E8 72 03 00 00			call		ios_dbg_hex32
+09FC  83 C4 04				add		esp,0x00000004
+09FF  6A 3E				push		0x0000003e
+0A01  E8 00 00 00 00			call		dbg_mark
+0A06  83 C4 04				add		esp,0x00000004
+0A09  FF 05 00 00 00 00			inc		dword ptr g_fsd_log_count
+0A0F				L$69:
+0A0F  85 FF				test		edi,edi
+0A11  0F 85 96 00 00 00			jne		L$73
+0A17  56				push		esi
+0A18  E8 B6 05 00 00			call		is_ring0_ptr
+0A1D  83 C4 04				add		esp,0x00000004
+0A20  85 C0				test		eax,eax
+0A22  0F 84 3E 01 00 00			je		L$80
+0A28  8B 06				mov		eax,[esi]
+0A2A  89 04 24				mov		[esp],eax
+0A2D  8B 7E 14				mov		edi,0x14[esi]
+0A30  8B 1D 00 00 00 00			mov		ebx,g_last_opened_slot
+0A36  85 DB				test		ebx,ebx
+0A38  7C 1E				jl		L$70
+0A3A  83 FB 08				cmp		ebx,0x00000008
+0A3D  7D 19				jge		L$70
+0A3F  6B DB 14				imul		ebx,0x00000014
+0A42  83 BB 00 00 00 00 00		cmp		dword ptr g_iso_files[ebx],0x00000000
+0A49  74 0D				je		L$70
+0A4B  57				push		edi
+0A4C  E8 82 05 00 00			call		is_ring0_ptr
+0A51  83 C4 04				add		esp,0x00000004
+0A54  85 C0				test		eax,eax
+0A56  75 0F				jne		L$71
+0A58				L$70:
+0A58  6A 69				push		0x00000069
+0A5A  E8 00 00 00 00			call		dbg_mark
+0A5F  83 C4 04				add		esp,0x00000004
+0A62  E9 FF 00 00 00			jmp		L$80
+0A67				L$71:
+0A67  FF 34 24				push		dword ptr [esp]
+0A6A  57				push		edi
+0A6B  FF B3 0C 00 00 00			push		dword ptr g_iso_files+0xc[ebx]
+0A71  FF B3 08 00 00 00			push		dword ptr g_iso_files+0x8[ebx]
+0A77  FF B3 04 00 00 00			push		dword ptr g_iso_files+0x4[ebx]
+0A7D  E8 00 00 00 00			call		iso9660_read_file
+0A82  89 C7				mov		edi,eax
+0A84  83 C4 14				add		esp,0x00000014
+0A87  85 C0				test		eax,eax
+0A89  7C CD				jl		L$70
+0A8B  01 83 0C 00 00 00			add		g_iso_files+0xc[ebx],eax
+0A91  89 06				mov		[esi],eax
+0A93  6A 52				push		0x00000052
+0A95  E8 00 00 00 00			call		dbg_mark
+0A9A  83 C4 04				add		esp,0x00000004
+0A9D  57				push		edi
+0A9E  E8 CB 02 00 00			call		ios_dbg_hex32
+0AA3				L$72:
+0AA3  83 C4 04				add		esp,0x00000004
+0AA6  31 C0				xor		eax,eax
+0AA8  E9 BE 00 00 00			jmp		L$81
+0AAD				L$73:
+0AAD  83 FF 42				cmp		edi,0x00000042
+0AB0  75 2E				jne		L$75
+0AB2  A1 00 00 00 00			mov		eax,g_last_opened_slot
+0AB7  85 C0				test		eax,eax
+0AB9  7C 12				jl		L$74
+0ABB  83 F8 08				cmp		eax,0x00000008
+0ABE  7D 0D				jge		L$74
+0AC0  6B C0 14				imul		eax,0x00000014
+0AC3  C7 80 00 00 00 00 00 00 00 00
+					mov		dword ptr g_iso_files[eax],0x00000000
+0ACD				L$74:
+0ACD  C7 05 00 00 00 00 FF FF FF FF
+					mov		dword ptr g_last_opened_slot,0xffffffff
+0AD7  6A 51				push		0x00000051
+0AD9  E8 00 00 00 00			call		dbg_mark
+0ADE  EB C3				jmp		L$72
+0AE0				L$75:
+0AE0  85 DB				test		ebx,ebx
+0AE2  74 17				je		L$76
+0AE4  56				push		esi
+0AE5  FF 74 24 28			push		dword ptr 0x28[esp]
+0AE9  FF 74 24 28			push		dword ptr 0x28[esp]
+0AED  FF 74 24 28			push		dword ptr 0x28[esp]
+0AF1  57				push		edi
+0AF2  FF D3				call		ebx
+0AF4  83 C4 14				add		esp,0x00000014
+0AF7  89 C3				mov		ebx,eax
+0AF9  EB 05				jmp		L$77
+0AFB				L$76:
+0AFB  BB FF FF FF FF			mov		ebx,0xffffffff
+0B00				L$77:
+0B00  83 FF 24				cmp		edi,0x00000024
+0B03  75 44				jne		L$78
+0B05  85 DB				test		ebx,ebx
+0B07  75 40				jne		L$78
+0B09  A1 00 00 00 00			mov		eax,g_last_opened_slot
+0B0E  85 C0				test		eax,eax
+0B10  7C 37				jl		L$78
+0B12  83 F8 08				cmp		eax,0x00000008
+0B15  7D 32				jge		L$78
+0B17  56				push		esi
+0B18  E8 B6 04 00 00			call		is_ring0_ptr
+0B1D  83 C4 04				add		esp,0x00000004
+0B20  85 C0				test		eax,eax
+0B22  74 25				je		L$78
+0B24  6B 05 00 00 00 00 14		imul		eax,g_last_opened_slot,0x00000014
+0B2B  8B 7E 10				mov		edi,0x10[esi]
+0B2E  89 B8 10 00 00 00			mov		g_iso_files+0x10[eax],edi
+0B34  6A 57				push		0x00000057
+0B36  E8 00 00 00 00			call		dbg_mark
+0B3B  83 C4 04				add		esp,0x00000004
+0B3E  FF 76 10				push		dword ptr 0x10[esi]
+0B41  E8 28 02 00 00			call		ios_dbg_hex32
+0B46  83 C4 04				add		esp,0x00000004
+0B49				L$78:
+0B49  89 D8				mov		eax,ebx
+0B4B  EB 1E				jmp		L$81
+0B4D				L$79:
+0B4D  85 DB				test		ebx,ebx
+0B4F  74 15				je		L$80
+0B51  56				push		esi
+0B52  FF 74 24 28			push		dword ptr 0x28[esp]
+0B56  FF 74 24 28			push		dword ptr 0x28[esp]
+0B5A  FF 74 24 28			push		dword ptr 0x28[esp]
+0B5E  57				push		edi
+0B5F  FF D3				call		ebx
+0B61  83 C4 14				add		esp,0x00000014
+0B64  EB 05				jmp		L$81
+0B66				L$80:
+0B66  B8 FF FF FF FF			mov		eax,0xffffffff
+0B6B				L$81:
+0B6B  83 C4 04				add		esp,0x00000004
+0B6E  5F				pop		edi
+0B6F  5E				pop		esi
+0B70  5B				pop		ebx
+0B71  C3				ret
+0B72				init_fsd_probe_table:
+0B72  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_table_inited,0x00000000
+0B79  75 78				jne		L$82
+0B7B  C7 05 00 00 00 00 0A 00 00 00
+					mov		dword ptr g_fsd_table,0x0000000a
+0B85  C7 05 04 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x4,offset _ntmini_fsd_stub_1
+0B8F  C7 05 08 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x8,offset _ntmini_fsd_stub_2
+0B99  C7 05 0C 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0xc,offset _ntmini_fsd_file_attributes
+0BA3  C7 05 10 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x10,offset _ntmini_fsd_stub_4
+0BAD  C7 05 14 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x14,offset _ntmini_fsd_stub_5
+0BB7  C7 05 18 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x18,offset _ntmini_fsd_getdiskinfo
+0BC1  C7 05 1C 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x1c,offset _ntmini_fsd_open
+0BCB  C7 05 20 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x20,offset _ntmini_fsd_stub_8
+0BD5  C7 05 24 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x24,offset _ntmini_fsd_search
+0BDF  C7 05 28 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_table+0x28,offset _ntmini_fsd_shutdown
+0BE9  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_fsd_table_inited,0x00000001
+0BF3				L$82:
+0BF3  C3				ret
+0BF4				_ntmini_fsd_mount_probe:
+0BF4  53				push		ebx
+0BF5  56				push		esi
+0BF6  83 EC 08				sub		esp,0x00000008
+0BF9  8B 74 24 14			mov		esi,0x14[esp]
+0BFD  6A 4D				push		0x0000004d
+0BFF  E8 00 00 00 00			call		dbg_mark
+0C04  83 C4 04				add		esp,0x00000004
+0C07  56				push		esi
+0C08  E8 C6 03 00 00			call		is_ring0_ptr
+0C0D  83 C4 04				add		esp,0x00000004
+0C10  85 C0				test		eax,eax
+0C12  75 07				jne		L$83
+0C14  6A 21				push		0x00000021
+0C16  E9 C4 00 00 00			jmp		L$88
+0C1B				L$83:
+0C1B  89 F3				mov		ebx,esi
+0C1D  8A 46 28				mov		al,0x28[esi]
+0C20  88 04 24				mov		[esp],al
+0C23  8A 46 04				mov		al,0x4[esi]
+0C26  88 44 24 04			mov		0x4[esp],al
+0C2A  6A 7B				push		0x0000007b
+0C2C  E8 00 00 00 00			call		dbg_mark
+0C31  83 C4 04				add		esp,0x00000004
+0C34  0F B6 44 24 04			movzx		eax,byte ptr 0x4[esp]
+0C39  50				push		eax
+0C3A  E8 00 00 00 00			call		ios_dbg_hex8
+0C3F  83 C4 04				add		esp,0x00000004
+0C42  0F B6 04 24			movzx		eax,byte ptr [esp]
+0C46  50				push		eax
+0C47  E8 00 00 00 00			call		ios_dbg_hex8
+0C4C  83 C4 04				add		esp,0x00000004
+0C4F  56				push		esi
+0C50  E8 19 01 00 00			call		ios_dbg_hex32
+0C55  83 C4 04				add		esp,0x00000004
+0C58  6A 7D				push		0x0000007d
+0C5A  E8 00 00 00 00			call		dbg_mark
+0C5F  83 C4 04				add		esp,0x00000004
+0C62  80 3C 24 03			cmp		byte ptr [esp],0x03
+0C66  74 0B				je		L$84
+0C68  80 7C 24 04 00			cmp		byte ptr 0x4[esp],0x00
+0C6D  75 04				jne		L$84
+0C6F  6A 72				push		0x00000072
+0C71  EB 6C				jmp		L$88
+0C73				L$84:
+0C73  E8 00 00 00 00			call		init_fsd_probe_table
+0C78  8A 44 24 04			mov		al,0x4[esp]
+0C7C  84 C0				test		al,al
+0C7E  75 4E				jne		L$86
+0C80  A1 00 00 00 00			mov		eax,g_fsd_provider_id
+0C85  A3 00 00 00 00			mov		g_fsd_volume_data,eax
+0C8A  C7 05 04 00 00 00 00 00 00 00
+					mov		dword ptr g_fsd_volume_data+0x4,offset g_fsd_table
+0C94  C7 05 08 00 00 00 03 00 00 00
+					mov		dword ptr g_fsd_volume_data+0x8,0x00000003
+0C9E  A1 00 00 00 00			mov		eax,g_iso_root_lba
+0CA3  A3 0C 00 00 00			mov		g_fsd_volume_data+0xc,eax
+0CA8  A1 00 00 00 00			mov		eax,g_iso_root_size
+0CAD  A3 10 00 00 00			mov		g_fsd_volume_data+0x10,eax
+0CB2  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],offset g_fsd_table
+0CB9  C7 43 1C 00 00 00 00		mov		dword ptr 0x1c[ebx],offset g_fsd_volume_data
+0CC0  6A 6D				push		0x0000006d
+0CC2				L$85:
+0CC2  E8 00 00 00 00			call		dbg_mark
+0CC7  83 C4 04				add		esp,0x00000004
+0CCA  31 C0				xor		eax,eax
+0CCC  EB 1E				jmp		L$89
+0CCE				L$86:
+0CCE  3C 02				cmp		al,0x02
+0CD0  75 0B				jne		L$87
+0CD2  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+0CD9  6A 76				push		0x00000076
+0CDB  EB E5				jmp		L$85
+0CDD				L$87:
+0CDD  6A 58				push		0x00000058
+0CDF				L$88:
+0CDF  E8 00 00 00 00			call		dbg_mark
+0CE4  83 C4 04				add		esp,0x00000004
+0CE7  B8 FF FF FF FF			mov		eax,0xffffffff
+0CEC				L$89:
+0CEC  83 C4 08				add		esp,0x00000008
+0CEF  5E				pop		esi
+0CF0  5B				pop		ebx
+0CF1  C3				ret
+0CF2				ios_dbg_hex8:
+0CF2  53				push		ebx
+0CF3  0F B6 44 24 08			movzx		eax,byte ptr 0x8[esp]
+0CF8  C1 F8 04				sar		eax,0x04
+0CFB  83 E0 0F				and		eax,0x0000000f
+0CFE  8A 5C 24 08			mov		bl,0x8[esp]
+0D02  80 E3 0F				and		bl,0x0f
+0D05  3C 0A				cmp		al,0x0a
+0D07  73 08				jae		L$90
+0D09  0F B6 C0				movzx		eax,al
+0D0C  83 C0 30				add		eax,0x00000030
+0D0F  EB 06				jmp		L$91
+0D11				L$90:
+0D11  0F B6 C0				movzx		eax,al
+0D14  83 C0 37				add		eax,0x00000037
+0D17				L$91:
+0D17  0F B6 C0				movzx		eax,al
+0D1A  50				push		eax
+0D1B  E8 00 00 00 00			call		dbg_mark
+0D20  83 C4 04				add		esp,0x00000004
+0D23  80 FB 0A				cmp		bl,0x0a
+0D26  73 08				jae		L$92
+0D28  0F B6 C3				movzx		eax,bl
+0D2B  83 C0 30				add		eax,0x00000030
+0D2E  EB 06				jmp		L$93
+0D30				L$92:
+0D30  0F B6 C3				movzx		eax,bl
+0D33  83 C0 37				add		eax,0x00000037
+0D36				L$93:
+0D36  0F B6 C0				movzx		eax,al
+0D39  50				push		eax
+0D3A  E8 00 00 00 00			call		dbg_mark
+0D3F  83 C4 04				add		esp,0x00000004
+0D42  5B				pop		ebx
+0D43  C3				ret
+0D44				ios_dbg_hex16:
+0D44  0F B7 44 24 04			movzx		eax,word ptr 0x4[esp]
+0D49  C1 F8 08				sar		eax,0x08
+0D4C  25 FF 00 00 00			and		eax,0x000000ff
+0D51  0F B6 C0				movzx		eax,al
+0D54  50				push		eax
+0D55  E8 00 00 00 00			call		ios_dbg_hex8
+0D5A  83 C4 04				add		esp,0x00000004
+0D5D  8A 44 24 04			mov		al,0x4[esp]
+0D61  0F B6 C0				movzx		eax,al
+0D64  50				push		eax
+0D65  E8 00 00 00 00			call		ios_dbg_hex8
+0D6A  83 C4 04				add		esp,0x00000004
+0D6D  C3				ret
+0D6E				ios_dbg_hex32:
+0D6E  8B 44 24 04			mov		eax,0x4[esp]
+0D72  C1 E8 10				shr		eax,0x10
+0D75  25 FF FF 00 00			and		eax,0x0000ffff
+0D7A  0F B7 C0				movzx		eax,ax
+0D7D  50				push		eax
+0D7E  E8 C1 FF FF FF			call		ios_dbg_hex16
+0D83  83 C4 04				add		esp,0x00000004
+0D86  8B 44 24 04			mov		eax,0x4[esp]
+0D8A  0F B7 C0				movzx		eax,ax
+0D8D  50				push		eax
+0D8E  E8 B1 FF FF FF			call		ios_dbg_hex16
+0D93  83 C4 04				add		esp,0x00000004
+0D96  C3				ret
+
+Routine Size: 1009 bytes,    Routine Base: _TEXT + 09A6
+
+0D97				ntmini_device_init:
+0D97  53				push		ebx
+0D98  83 3D 00 00 00 00 00		cmp		dword ptr g_nt5_init_done,0x00000000
+0D9F  74 04				je		L$94
+0DA1  6A 64				push		0x00000064
+0DA3  EB 6B				jmp		L$97
+0DA5				L$94:
+0DA5  6A 43				push		0x00000043
+0DA7  E8 00 00 00 00			call		dbg_mark
+0DAC  83 C4 04				add		esp,0x00000004
+0DAF  68 12 00 00 00			push		offset L$336
+0DB4  E8 00 00 00 00			call		_VxD_Debug_Printf
+0DB9  83 C4 04				add		esp,0x00000004
+0DBC  6A 44				push		0x00000044
+0DBE  E8 00 00 00 00			call		dbg_mark
+0DC3  83 C4 04				add		esp,0x00000004
+0DC6  6A 00				push		0x00000000
+0DC8  E8 00 00 00 00			call		nt5_init
+0DCD  89 C3				mov		ebx,eax
+0DCF  83 C4 04				add		esp,0x00000004
+0DD2  6A 45				push		0x00000045
+0DD4  E8 00 00 00 00			call		dbg_mark
+0DD9  83 C4 04				add		esp,0x00000004
+0DDC  85 DB				test		ebx,ebx
+0DDE  74 10				je		L$95
+0DE0  53				push		ebx
+0DE1  68 30 00 00 00			push		offset L$337
+0DE6  E8 00 00 00 00			call		_VxD_Debug_Printf
+0DEB  83 C4 08				add		esp,0x00000008
+0DEE  EB 14				jmp		L$96
+0DF0				L$95:
+0DF0  6A 43				push		0x00000043
+0DF2  E8 00 00 00 00			call		dbg_mark
+0DF7  83 C4 04				add		esp,0x00000004
+0DFA  6A 53				push		0x00000053
+0DFC  E8 00 00 00 00			call		dbg_mark
+0E01  83 C4 04				add		esp,0x00000004
+0E04				L$96:
+0E04  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_nt5_init_done,0x00000001
+0E0E  6A 69				push		0x00000069
+0E10				L$97:
+0E10  E8 00 00 00 00			call		dbg_mark
+0E15  83 C4 04				add		esp,0x00000004
+0E18  31 C0				xor		eax,eax
+0E1A  5B				pop		ebx
+0E1B  C3				ret
+
+Routine Size: 133 bytes,    Routine Base: _TEXT + 0D97
+
+0E1C				ios_register_port_driver:
+0E1C  83 3D 00 00 00 00 00		cmp		dword ptr g_ios_registered,0x00000000
+0E23  74 07				je		L$98
+0E25  6A 64				push		0x00000064
+0E27  E9 9C 01 00 00			jmp		L$107
+0E2C				L$98:
+0E2C  83 3D 00 00 00 00 00		cmp		dword ptr g_nt5_init_done,0x00000000
+0E33  75 0A				jne		L$99
+0E35  E8 00 00 00 00			call		ntmini_device_init
+0E3A  85 C0				test		eax,eax
+0E3C  74 01				je		L$99
+0E3E  C3				ret
+0E3F				L$99:
+0E3F  6A 43				push		0x00000043
+0E41  E8 00 00 00 00			call		dbg_mark
+0E46  83 C4 04				add		esp,0x00000004
+0E49  68 6A 00 00 00			push		offset L$338
+0E4E  E8 00 00 00 00			call		_VxD_Debug_Printf
+0E53  83 C4 04				add		esp,0x00000004
+0E56  68 48 02 00 00			push		0x00000248
+0E5B  68 00 00 00 00			push		offset g_bridge
+0E60  E8 00 00 00 00			call		zero_mem
+0E65  83 C4 08				add		esp,0x00000008
+0E68  B0 58				mov		al,0x58
+0E6A  A2 00 00 00 00			mov		g_bridge,al
+0E6F  A2 01 00 00 00			mov		g_bridge+0x1,al
+0E74  A2 02 00 00 00			mov		g_bridge+0x2,al
+0E79  A2 03 00 00 00			mov		g_bridge+0x3,al
+0E7E  A2 04 00 00 00			mov		g_bridge+0x4,al
+0E83  A2 05 00 00 00			mov		g_bridge+0x5,al
+0E88  A2 06 00 00 00			mov		g_bridge+0x6,al
+0E8D  A2 07 00 00 00			mov		g_bridge+0x7,al
+0E92  C7 05 08 00 00 00 00 00 40 00
+					mov		dword ptr g_bridge+0x8,0x00400000
+0E9C  C7 05 0C 00 00 00 00 00 00 00
+					mov		dword ptr g_bridge+0xc,offset _aep_handler
+0EA6  31 C0				xor		eax,eax
+0EA8  A3 10 00 00 00			mov		g_bridge+0x10,eax
+0EAD  C7 05 14 00 00 00 4E 54 4D 49
+					mov		dword ptr g_bridge+0x14,0x494d544e
+0EB7  66 C7 05 18 00 00 00 4E 49	mov		word ptr g_bridge+0x18,0x494e
+0EC0  C6 05 1A 00 00 00 00		mov		byte ptr g_bridge+0x1a,0x00
+0EC7  C6 05 24 00 00 00 01		mov		byte ptr g_bridge+0x24,0x01
+0ECE  C7 05 25 00 00 00 40 00 08 00
+					mov		dword ptr g_bridge+0x25,0x00080040
+0ED8  66 C7 05 29 00 00 00 FF 00	mov		word ptr g_bridge+0x29,0x00ff
+0EE1  30 C0				xor		al,al
+0EE3  A2 2B 00 00 00			mov		g_bridge+0x2b,al
+0EE8  30 E4				xor		ah,ah
+0EEA  66 A3 2C 00 00 00			mov		g_bridge+0x2c,ax
+0EF0  31 C0				xor		eax,eax
+0EF2  A3 2E 00 00 00			mov		g_bridge+0x2e,eax
+0EF7  30 C0				xor		al,al
+0EF9  A2 32 00 00 00			mov		g_bridge+0x32,al
+0EFE  A2 33 00 00 00			mov		g_bridge+0x33,al
+0F03  31 C0				xor		eax,eax
+0F05  A3 34 00 00 00			mov		g_bridge+0x34,eax
+0F0A  C7 05 38 00 00 00 00 00 00 00
+					mov		dword ptr g_bridge+0x38,offset NTMINI_DDB
+0F14  6A 52				push		0x00000052
+0F16  E8 00 00 00 00			call		dbg_mark
+0F1B  83 C4 04				add		esp,0x00000004
+0F1E  6A 72				push		0x00000072
+0F20  E8 00 00 00 00			call		dbg_mark
+0F25  83 C4 04				add		esp,0x00000004
+0F28  6A 73				push		0x00000073
+0F2A  E8 00 00 00 00			call		dbg_mark
+0F2F  83 C4 04				add		esp,0x00000004
+0F32  68 B8 00 00 00			push		offset L$339
+0F37  E8 00 00 00 00			call		_VxD_Debug_Printf
+0F3C  83 C4 04				add		esp,0x00000004
+0F3F  66 83 3D 2C 00 00 00 01		cmp		word ptr g_bridge+0x2c,0x0001
+0F47  75 07				jne		L$100
+0F49  B8 4C 00 00 00			mov		eax,0x0000004c
+0F4E  EB 05				jmp		L$101
+0F50				L$100:
+0F50  B8 6C 00 00 00			mov		eax,0x0000006c
+0F55				L$101:
+0F55  0F B6 C0				movzx		eax,al
+0F58  50				push		eax
+0F59  E8 00 00 00 00			call		dbg_mark
+0F5E  83 C4 04				add		esp,0x00000004
+0F61  83 3D 10 00 00 00 00		cmp		dword ptr g_bridge+0x10,0x00000000
+0F68  74 07				je		L$102
+0F6A  B8 56 00 00 00			mov		eax,0x00000056
+0F6F  EB 05				jmp		L$103
+0F71				L$102:
+0F71  B8 76 00 00 00			mov		eax,0x00000076
+0F76				L$103:
+0F76  0F B6 C0				movzx		eax,al
+0F79  50				push		eax
+0F7A  E8 00 00 00 00			call		dbg_mark
+0F7F  83 C4 04				add		esp,0x00000004
+0F82  83 3D 2E 00 00 00 00		cmp		dword ptr g_bridge+0x2e,0x00000000
+0F89  74 07				je		L$104
+0F8B  B8 55 00 00 00			mov		eax,0x00000055
+0F90  EB 05				jmp		L$105
+0F92				L$104:
+0F92  B8 75 00 00 00			mov		eax,0x00000075
+0F97				L$105:
+0F97  0F B6 C0				movzx		eax,al
+0F9A  50				push		eax
+0F9B  E8 00 00 00 00			call		dbg_mark
+0FA0  83 C4 04				add		esp,0x00000004
+0FA3  E8 00 00 00 00			call		ios_late_create_device
+0FA8  85 C0				test		eax,eax
+0FAA  74 10				je		L$106
+0FAC  6A 77				push		0x00000077
+0FAE  E8 00 00 00 00			call		dbg_mark
+0FB3  83 C4 04				add		esp,0x00000004
+0FB6  B8 FF FF FF FF			mov		eax,0xffffffff
+0FBB  C3				ret
+0FBC				L$106:
+0FBC  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_ios_registered,0x00000001
+0FC6  6A 67				push		0x00000067
+0FC8				L$107:
+0FC8  E8 00 00 00 00			call		dbg_mark
+0FCD  83 C4 04				add		esp,0x00000004
+0FD0  31 C0				xor		eax,eax
+0FD2  C3				ret
+0FD3				is_ring0_ptr:
+0FD3  8B 44 24 04			mov		eax,0x4[esp]
+0FD7  3D 00 00 00 C0			cmp		eax,0xc0000000
+0FDC  72 0D				jb		L$108
+0FDE  3D 00 00 00 D0			cmp		eax,0xd0000000
+0FE3  73 06				jae		L$108
+0FE5  B8 01 00 00 00			mov		eax,0x00000001
+0FEA  C3				ret
+0FEB				L$108:
+0FEB  31 C0				xor		eax,eax
+0FED  C3				ret
+0FEE				validate_ilb:
+0FEE  FF 74 24 04			push		dword ptr 0x4[esp]
+0FF2  E8 DC FF FF FF			call		is_ring0_ptr
+0FF7  83 C4 04				add		esp,0x00000004
+0FFA  85 C0				test		eax,eax
+0FFC  75 01				jne		L$109
+0FFE  C3				ret
+0FFF				L$109:
+0FFF  8B 44 24 04			mov		eax,0x4[esp]
+1003  FF 30				push		dword ptr [eax]
+1005  E8 C9 FF FF FF			call		is_ring0_ptr
+100A  83 C4 04				add		esp,0x00000004
+100D  85 C0				test		eax,eax
+100F  75 01				jne		L$110
+1011  C3				ret
+1012				L$110:
+1012  8B 44 24 04			mov		eax,0x4[esp]
+1016  C3				ret
+1017				is_drp_eyecatcher:
+1017  8B 44 24 04			mov		eax,0x4[esp]
+101B  80 38 58				cmp		byte ptr [eax],0x58
+101E  75 30				jne		L$111
+1020  80 78 01 58			cmp		byte ptr 0x1[eax],0x58
+1024  75 2A				jne		L$111
+1026  80 78 02 58			cmp		byte ptr 0x2[eax],0x58
+102A  75 24				jne		L$111
+102C  80 78 03 58			cmp		byte ptr 0x3[eax],0x58
+1030  75 1E				jne		L$111
+1032  80 78 04 58			cmp		byte ptr 0x4[eax],0x58
+1036  75 18				jne		L$111
+1038  80 78 05 58			cmp		byte ptr 0x5[eax],0x58
+103C  75 12				jne		L$111
+103E  80 78 06 58			cmp		byte ptr 0x6[eax],0x58
+1042  75 0C				jne		L$111
+1044  80 78 07 58			cmp		byte ptr 0x7[eax],0x58
+1048  75 06				jne		L$111
+104A  B8 01 00 00 00			mov		eax,0x00000001
+104F  C3				ret
+1050				L$111:
+1050  31 C0				xor		eax,eax
+1052  C3				ret
+1053				find_existing_ilb:
+1053  53				push		ebx
+1054  56				push		esi
+1055  57				push		edi
+1056  55				push		ebp
+1057  83 EC 08				sub		esp,0x00000008
+105A  6A 4D				push		0x0000004d
+105C  E8 00 00 00 00			call		dbg_mark
+1061  83 C4 04				add		esp,0x00000004
+1064  6A 10				push		0x00000010
+1066  E8 00 00 00 00			call		_VMM_Get_DDB_Wrapper
+106B  89 C3				mov		ebx,eax
+106D  83 C4 04				add		esp,0x00000004
+1070  50				push		eax
+1071  E8 5D FF FF FF			call		is_ring0_ptr
+1076  83 C4 04				add		esp,0x00000004
+1079  85 C0				test		eax,eax
+107B  0F 84 DC 00 00 00			je		L$119
+1081  89 D8				mov		eax,ebx
+1083  89 1C 24				mov		[esp],ebx
+1086  C7 44 24 04 00 00 00 00		mov		dword ptr 0x4[esp],0x00000000
+108E  EB 11				jmp		L$113
+1090				L$112:
+1090  89 E8				mov		eax,ebp
+1092  FF 44 24 04			inc		dword ptr 0x4[esp]
+1096  83 7C 24 04 50			cmp		dword ptr 0x4[esp],0x00000050
+109B  0F 8D BA 00 00 00			jge		L$118
+10A1				L$113:
+10A1  8B 28				mov		ebp,[eax]
+10A3  8B 78 18				mov		edi,0x18[eax]
+10A6  8B 58 2C				mov		ebx,0x2c[eax]
+10A9  53				push		ebx
+10AA  E8 24 FF FF FF			call		is_ring0_ptr
+10AF  83 C4 04				add		esp,0x00000004
+10B2  85 C0				test		eax,eax
+10B4  74 2F				je		L$114
+10B6  53				push		ebx
+10B7  E8 00 00 00 00			call		is_drp_eyecatcher
+10BC  83 C4 04				add		esp,0x00000004
+10BF  85 C0				test		eax,eax
+10C1  74 22				je		L$114
+10C3  FF 73 10				push		dword ptr 0x10[ebx]
+10C6  E8 23 FF FF FF			call		validate_ilb
+10CB  89 C6				mov		esi,eax
+10CD  83 C4 04				add		esp,0x00000004
+10D0  85 C0				test		eax,eax
+10D2  74 11				je		L$114
+10D4  6A 56				push		0x00000056
+10D6  E8 00 00 00 00			call		dbg_mark
+10DB  83 C4 04				add		esp,0x00000004
+10DE  89 F0				mov		eax,esi
+10E0  E9 78 00 00 00			jmp		L$119
+10E5				L$114:
+10E5  57				push		edi
+10E6  E8 E8 FE FF FF			call		is_ring0_ptr
+10EB  83 C4 04				add		esp,0x00000004
+10EE  85 C0				test		eax,eax
+10F0  74 53				je		L$117
+10F2  81 FB 00 00 00 00			cmp		ebx,offset g_bridge
+10F8  74 4B				je		L$117
+10FA  66 81 E7 00 F0			and		di,0xf000
+10FF  31 DB				xor		ebx,ebx
+1101  EB 0B				jmp		L$116
+1103				L$115:
+1103  83 C3 04				add		ebx,0x00000004
+1106  81 FB 00 20 00 00			cmp		ebx,0x00002000
+110C  73 37				jae		L$117
+110E				L$116:
+110E  8D 34 1F				lea		esi,[edi+ebx]
+1111  81 FE 00 00 00 00			cmp		esi,offset g_bridge
+1117  74 EA				je		L$115
+1119  56				push		esi
+111A  E8 00 00 00 00			call		is_drp_eyecatcher
+111F  83 C4 04				add		esp,0x00000004
+1122  85 C0				test		eax,eax
+1124  74 DD				je		L$115
+1126  FF 76 10				push		dword ptr 0x10[esi]
+1129  E8 C0 FE FF FF			call		validate_ilb
+112E  89 C3				mov		ebx,eax
+1130  83 C4 04				add		esp,0x00000004
+1133  85 C0				test		eax,eax
+1135  74 0E				je		L$117
+1137  6A 56				push		0x00000056
+1139  E8 00 00 00 00			call		dbg_mark
+113E  83 C4 04				add		esp,0x00000004
+1141  89 D8				mov		eax,ebx
+1143  EB 18				jmp		L$119
+1145				L$117:
+1145  55				push		ebp
+1146  E8 88 FE FF FF			call		is_ring0_ptr
+114B  83 C4 04				add		esp,0x00000004
+114E  85 C0				test		eax,eax
+1150  74 09				je		L$118
+1152  3B 2C 24				cmp		ebp,[esp]
+1155  0F 85 35 FF FF FF			jne		L$112
+115B				L$118:
+115B  31 C0				xor		eax,eax
+115D				L$119:
+115D  83 C4 08				add		esp,0x00000008
+1160  5D				pop		ebp
+1161  5F				pop		edi
+1162  5E				pop		esi
+1163  5B				pop		ebx
+1164  C3				ret
+1165				ios_late_create_device:
+1165  53				push		ebx
+1166  56				push		esi
+1167  57				push		edi
+1168  83 EC 74				sub		esp,0x00000074
+116B  FF 35 10 00 00 00			push		dword ptr g_bridge+0x10
+1171  E8 78 FE FF FF			call		validate_ilb
+1176  83 C4 04				add		esp,0x00000004
+1179  89 C3				mov		ebx,eax
+117B  85 C0				test		eax,eax
+117D  75 10				jne		L$120
+117F  E8 00 00 00 00			call		find_existing_ilb
+1184  89 C3				mov		ebx,eax
+1186  85 C0				test		eax,eax
+1188  74 05				je		L$120
+118A  A3 10 00 00 00			mov		g_bridge+0x10,eax
+118F				L$120:
+118F  85 DB				test		ebx,ebx
+1191  75 14				jne		L$122
+1193  6A 65				push		0x00000065
+1195				L$121:
+1195  E8 00 00 00 00			call		dbg_mark
+119A  83 C4 04				add		esp,0x00000004
+119D  B8 FF FF FF FF			mov		eax,0xffffffff
+11A2  E9 EF 05 00 00			jmp		L$152
+11A7				L$122:
+11A7  6A 0C				push		0x0000000c
+11A9  8D 44 24 60			lea		eax,0x60[esp]
+11AD  50				push		eax
+11AE  E8 00 00 00 00			call		zero_mem
+11B3  83 C4 08				add		esp,0x00000008
+11B6  66 C7 44 24 5C 01 00		mov		word ptr 0x5c[esp],0x0001
+11BD  66 C7 44 24 60 00 01		mov		word ptr 0x60[esp],0x0100
+11C4  8D 44 24 5C			lea		eax,0x5c[esp]
+11C8  50				push		eax
+11C9  FF 33				push		dword ptr [ebx]
+11CB  E8 00 00 00 00			call		_Call_ILB_Service
+11D0  83 C4 08				add		esp,0x00000008
+11D3  66 83 7C 24 5E 00			cmp		word ptr 0x5e[esp],0x0000
+11D9  75 10				jne		L$123
+11DB  FF 74 24 62			push		dword ptr 0x62[esp]
+11DF  E8 EF FD FF FF			call		is_ring0_ptr
+11E4  83 C4 04				add		esp,0x00000004
+11E7  85 C0				test		eax,eax
+11E9  75 04				jne		L$124
+11EB				L$123:
+11EB  6A 64				push		0x00000064
+11ED  EB A6				jmp		L$121
+11EF				L$124:
+11EF  6A 44				push		0x00000044
+11F1  E8 00 00 00 00			call		dbg_mark
+11F6  83 C4 04				add		esp,0x00000004
+11F9  8B 74 24 62			mov		esi,0x62[esp]
+11FD  C7 46 20 05 80 00 00		mov		dword ptr 0x20[esi],0x00008005
+1204  C7 46 24 02 00 00 00		mov		dword ptr 0x24[esi],0x00000002
+120B  C7 46 40 05 80 00 00		mov		dword ptr 0x40[esi],0x00008005
+1212  C7 46 44 02 00 00 00		mov		dword ptr 0x44[esi],0x00000002
+1219  C7 46 4C 0B 00 00 00		mov		dword ptr 0x4c[esi],0x0000000b
+1220  C7 46 50 00 08 00 00		mov		dword ptr 0x50[esi],0x00000800
+1227  8B 44 24 62			mov		eax,0x62[esp]
+122B  A3 00 00 00 00			mov		g_late_dcb_ptr,eax
+1230  31 C0				xor		eax,eax
+1232  A3 00 00 00 00			mov		g_late_dcb_destroyed,eax
+1237  6A 70				push		0x00000070
+1239  E8 00 00 00 00			call		dbg_mark
+123E  83 C4 04				add		esp,0x00000004
+1241  6A 18				push		0x00000018
+1243  8D 44 24 04			lea		eax,0x4[esp]
+1247  50				push		eax
+1248  E8 00 00 00 00			call		zero_mem
+124D  83 C4 08				add		esp,0x00000008
+1250  66 C7 04 24 05 00			mov		word ptr [esp],0x0005
+1256  8B 44 24 62			mov		eax,0x62[esp]
+125A  89 44 24 04			mov		0x4[esp],eax
+125E  C7 44 24 08 00 00 00 00		mov		dword ptr 0x8[esp],offset _ios_wdm_ior_entry
+1266  A1 38 00 00 00			mov		eax,g_bridge+0x38
+126B  89 44 24 0C			mov		0xc[esp],eax
+126F  C7 44 24 12 09 01 00 00		mov		dword ptr 0x12[esp],0x00000109
+1277  C6 44 24 16 16			mov		byte ptr 0x16[esp],0x16
+127C  89 E0				mov		eax,esp
+127E  50				push		eax
+127F  FF 33				push		dword ptr [ebx]
+1281  E8 00 00 00 00			call		_Call_ILB_Service
+1286  83 C4 08				add		esp,0x00000008
+1289  66 83 7C 24 02 00			cmp		word ptr 0x2[esp],0x0000
+128F  74 07				je		L$125
+1291  6A 71				push		0x00000071
+1293  E9 FD FE FF FF			jmp		L$121
+1298				L$125:
+1298  6A 71				push		0x00000071
+129A  E8 00 00 00 00			call		dbg_mark
+129F  83 C4 04				add		esp,0x00000004
+12A2  6A 14				push		0x00000014
+12A4  8D 44 24 1C			lea		eax,0x1c[esp]
+12A8  50				push		eax
+12A9  E8 00 00 00 00			call		zero_mem
+12AE  83 C4 08				add		esp,0x00000008
+12B1  66 C7 44 24 18 03 00		mov		word ptr 0x18[esp],0x0003
+12B8  31 C0				xor		eax,eax
+12BA  66 89 44 24 1A			mov		0x1a[esp],ax
+12BF  A1 38 00 00 00			mov		eax,g_bridge+0x38
+12C4  89 44 24 1C			mov		0x1c[esp],eax
+12C8  C6 44 24 20 16			mov		byte ptr 0x20[esp],0x16
+12CD  8B 44 24 62			mov		eax,0x62[esp]
+12D1  89 44 24 24			mov		0x24[esp],eax
+12D5  8B 44 24 1C			mov		eax,0x1c[esp]
+12D9  89 44 24 28			mov		0x28[esp],eax
+12DD  6A 08				push		0x00000008
+12DF  8D 44 24 6C			lea		eax,0x6c[esp]
+12E3  50				push		eax
+12E4  E8 00 00 00 00			call		zero_mem
+12E9  83 C4 08				add		esp,0x00000008
+12EC  66 C7 44 24 68 14 00		mov		word ptr 0x68[esp],0x0014
+12F3  8D 44 24 18			lea		eax,0x18[esp]
+12F7  89 44 24 6C			mov		0x6c[esp],eax
+12FB  6A 42				push		0x00000042
+12FD  E8 00 00 00 00			call		dbg_mark
+1302  83 C4 04				add		esp,0x00000004
+1305  8D 44 24 68			lea		eax,0x68[esp]
+1309  50				push		eax
+130A  FF 33				push		dword ptr [ebx]
+130C  E8 00 00 00 00			call		_Call_ILB_Service
+1311  83 C4 08				add		esp,0x00000008
+1314  66 83 7C 24 6A 00			cmp		word ptr 0x6a[esp],0x0000
+131A  74 07				je		L$126
+131C  6A 62				push		0x00000062
+131E  E9 72 FE FF FF			jmp		L$121
+1323				L$126:
+1323  6A 62				push		0x00000062
+1325  E8 00 00 00 00			call		dbg_mark
+132A  83 C4 04				add		esp,0x00000004
+132D  6A 50				push		0x00000050
+132F  E8 00 00 00 00			call		dbg_mark
+1334  83 C4 04				add		esp,0x00000004
+1337  6A 0C				push		0x0000000c
+1339  8D 44 24 48			lea		eax,0x48[esp]
+133D  50				push		eax
+133E  E8 00 00 00 00			call		zero_mem
+1343  83 C4 08				add		esp,0x00000008
+1346  66 C7 44 24 44 06 00		mov		word ptr 0x44[esp],0x0006
+134D  8B 44 24 62			mov		eax,0x62[esp]
+1351  89 44 24 48			mov		0x48[esp],eax
+1355  C6 44 24 4C 03			mov		byte ptr 0x4c[esp],0x03
+135A  6A 41				push		0x00000041
+135C  E8 00 00 00 00			call		dbg_mark
+1361  83 C4 04				add		esp,0x00000004
+1364  8D 44 24 44			lea		eax,0x44[esp]
+1368  50				push		eax
+1369  FF 33				push		dword ptr [ebx]
+136B  E8 00 00 00 00			call		_Call_ILB_Service
+1370  83 C4 08				add		esp,0x00000008
+1373  66 83 7C 24 46 00			cmp		word ptr 0x46[esp],0x0000
+1379  74 07				je		L$127
+137B  6A 61				push		0x00000061
+137D  E9 13 FE FF FF			jmp		L$121
+1382				L$127:
+1382  6A 61				push		0x00000061
+1384  E8 00 00 00 00			call		dbg_mark
+1389  83 C4 04				add		esp,0x00000004
+138C  6A 0C				push		0x0000000c
+138E  8D 44 24 54			lea		eax,0x54[esp]
+1392  50				push		eax
+1393  E8 00 00 00 00			call		zero_mem
+1398  83 C4 08				add		esp,0x00000008
+139B  66 C7 44 24 50 07 00		mov		word ptr 0x50[esp],0x0007
+13A2  C7 44 24 58 03 00 00 00		mov		dword ptr 0x58[esp],0x00000003
+13AA  8D 44 24 50			lea		eax,0x50[esp]
+13AE  50				push		eax
+13AF  FF 33				push		dword ptr [ebx]
+13B1  E8 00 00 00 00			call		_Call_ILB_Service
+13B6  83 C4 08				add		esp,0x00000008
+13B9  FF 74 24 62			push		dword ptr 0x62[esp]
+13BD  FF 74 24 58			push		dword ptr 0x58[esp]
+13C1  0F B7 44 24 5A			movzx		eax,word ptr 0x5a[esp]
+13C6  50				push		eax
+13C7  68 D6 00 00 00			push		offset L$340
+13CC  E8 00 00 00 00			call		_VxD_Debug_Printf
+13D1  83 C4 10				add		esp,0x00000010
+13D4  6A 5B				push		0x0000005b
+13D6  E8 00 00 00 00			call		dbg_mark
+13DB  83 C4 04				add		esp,0x00000004
+13DE  0F B7 44 24 52			movzx		eax,word ptr 0x52[esp]
+13E3  50				push		eax
+13E4  E8 5B F9 FF FF			call		ios_dbg_hex16
+13E9  83 C4 04				add		esp,0x00000004
+13EC  FF 74 24 54			push		dword ptr 0x54[esp]
+13F0  E8 79 F9 FF FF			call		ios_dbg_hex32
+13F5  83 C4 04				add		esp,0x00000004
+13F8  FF 74 24 62			push		dword ptr 0x62[esp]
+13FC  E8 6D F9 FF FF			call		ios_dbg_hex32
+1401  83 C4 04				add		esp,0x00000004
+1404  6A 5D				push		0x0000005d
+1406  E8 00 00 00 00			call		dbg_mark
+140B  83 C4 04				add		esp,0x00000004
+140E  66 83 7C 24 52 00			cmp		word ptr 0x52[esp],0x0000
+1414  75 11				jne		L$128
+1416  8B 44 24 54			mov		eax,0x54[esp]
+141A  3B 44 24 62			cmp		eax,0x62[esp]
+141E  75 07				jne		L$128
+1420  B8 59 00 00 00			mov		eax,0x00000059
+1425  EB 05				jmp		L$129
+1427				L$128:
+1427  B8 79 00 00 00			mov		eax,0x00000079
+142C				L$129:
+142C  0F B6 C0				movzx		eax,al
+142F  50				push		eax
+1430  E8 00 00 00 00			call		dbg_mark
+1435  83 C4 04				add		esp,0x00000004
+1438  6A 0C				push		0x0000000c
+143A  8D 44 24 30			lea		eax,0x30[esp]
+143E  50				push		eax
+143F  E8 00 00 00 00			call		zero_mem
+1444  83 C4 08				add		esp,0x00000008
+1447  66 C7 44 24 2C 0B 00		mov		word ptr 0x2c[esp],0x000b
+144E  8B 44 24 62			mov		eax,0x62[esp]
+1452  89 44 24 30			mov		0x30[esp],eax
+1456  8D 44 24 2C			lea		eax,0x2c[esp]
+145A  50				push		eax
+145B  FF 33				push		dword ptr [ebx]
+145D  E8 00 00 00 00			call		_Call_ILB_Service
+1462  83 C4 08				add		esp,0x00000008
+1465  FF 74 24 34			push		dword ptr 0x34[esp]
+1469  0F B7 44 24 32			movzx		eax,word ptr 0x32[esp]
+146E  50				push		eax
+146F  68 0F 01 00 00			push		offset L$341
+1474  E8 00 00 00 00			call		_VxD_Debug_Printf
+1479  83 C4 0C				add		esp,0x0000000c
+147C  6A 28				push		0x00000028
+147E  E8 00 00 00 00			call		dbg_mark
+1483  83 C4 04				add		esp,0x00000004
+1486  0F B7 44 24 2E			movzx		eax,word ptr 0x2e[esp]
+148B  50				push		eax
+148C  E8 B3 F8 FF FF			call		ios_dbg_hex16
+1491  83 C4 04				add		esp,0x00000004
+1494  FF 74 24 34			push		dword ptr 0x34[esp]
+1498  E8 D1 F8 FF FF			call		ios_dbg_hex32
+149D  83 C4 04				add		esp,0x00000004
+14A0  6A 29				push		0x00000029
+14A2  E8 00 00 00 00			call		dbg_mark
+14A7  83 C4 04				add		esp,0x00000004
+14AA  66 83 7C 24 2E 00			cmp		word ptr 0x2e[esp],0x0000
+14B0  75 0E				jne		L$130
+14B2  F6 44 24 34 08			test		byte ptr 0x34[esp],0x08
+14B7  74 07				je		L$130
+14B9  B8 5A 00 00 00			mov		eax,0x0000005a
+14BE  EB 05				jmp		L$131
+14C0				L$130:
+14C0  B8 7A 00 00 00			mov		eax,0x0000007a
+14C5				L$131:
+14C5  0F B6 C0				movzx		eax,al
+14C8  50				push		eax
+14C9  E8 00 00 00 00			call		dbg_mark
+14CE  83 C4 04				add		esp,0x00000004
+14D1  6A 53				push		0x00000053
+14D3  E8 00 00 00 00			call		dbg_mark
+14D8  83 C4 04				add		esp,0x00000004
+14DB  6A 40				push		0x00000040
+14DD  68 00 00 00 00			push		offset g_dummy_vrp
+14E2  E8 00 00 00 00			call		zero_mem
+14E7  83 C4 08				add		esp,0x00000008
+14EA  C7 05 14 00 00 00 00 08 00 00
+					mov		dword ptr g_dummy_vrp+0x14,0x00000800
+14F4  8B 44 24 62			mov		eax,0x62[esp]
+14F8  A3 20 00 00 00			mov		g_dummy_vrp+0x20,eax
+14FD  C7 05 24 00 00 00 03 00 00 00
+					mov		dword ptr g_dummy_vrp+0x24,0x00000003
+1507  C7 46 18 00 00 00 00		mov		dword ptr 0x18[esi],offset g_dummy_vrp
+150E  6A 4A				push		0x0000004a
+1510  E8 00 00 00 00			call		dbg_mark
+1515  83 C4 04				add		esp,0x00000004
+1518  68 00 00 00 00			push		offset g_dummy_vrp
+151D  E8 4C F8 FF FF			call		ios_dbg_hex32
+1522  83 C4 04				add		esp,0x00000004
+1525  6A 0C				push		0x0000000c
+1527  8D 44 24 3C			lea		eax,0x3c[esp]
+152B  50				push		eax
+152C  E8 00 00 00 00			call		zero_mem
+1531  83 C4 08				add		esp,0x00000008
+1534  66 C7 44 24 38 0E 00		mov		word ptr 0x38[esp],0x000e
+153B  8B 44 24 62			mov		eax,0x62[esp]
+153F  89 44 24 3C			mov		0x3c[esp],eax
+1543  31 C0				xor		eax,eax
+1545  89 44 24 40			mov		0x40[esp],eax
+1549  8D 44 24 38			lea		eax,0x38[esp]
+154D  50				push		eax
+154E  FF 33				push		dword ptr [ebx]
+1550  E8 00 00 00 00			call		_Call_ILB_Service
+1555  83 C4 08				add		esp,0x00000008
+1558  66 83 7C 24 3A 00			cmp		word ptr 0x3a[esp],0x0000
+155E  74 07				je		L$132
+1560  6A 73				push		0x00000073
+1562  E9 2E FC FF FF			jmp		L$121
+1567				L$132:
+1567  6A 73				push		0x00000073
+1569  E8 00 00 00 00			call		dbg_mark
+156E  83 C4 04				add		esp,0x00000004
+1571  8B 76 08				mov		esi,0x8[esi]
+1574  31 C0				xor		eax,eax
+1576  89 44 24 70			mov		0x70[esp],eax
+157A  31 FF				xor		edi,edi
+157C				L$133:
+157C  56				push		esi
+157D  E8 51 FA FF FF			call		is_ring0_ptr
+1582  83 C4 04				add		esp,0x00000004
+1585  85 C0				test		eax,eax
+1587  0F 84 1B 01 00 00			je		L$145
+158D  83 7C 24 70 08			cmp		dword ptr 0x70[esp],0x00000008
+1592  0F 83 10 01 00 00			jae		L$145
+1598  8B 5E 08				mov		ebx,0x8[esi]
+159B  6A 23				push		0x00000023
+159D  E8 00 00 00 00			call		dbg_mark
+15A2  83 C4 04				add		esp,0x00000004
+15A5  8A 44 24 70			mov		al,0x70[esp]
+15A9  04 30				add		al,0x30
+15AB  0F B6 C0				movzx		eax,al
+15AE  50				push		eax
+15AF  E8 00 00 00 00			call		dbg_mark
+15B4  83 C4 04				add		esp,0x00000004
+15B7  6A 7B				push		0x0000007b
+15B9  E8 00 00 00 00			call		dbg_mark
+15BE  83 C4 04				add		esp,0x00000004
+15C1  FF 36				push		dword ptr [esi]
+15C3  E8 A6 F7 FF FF			call		ios_dbg_hex32
+15C8  83 C4 04				add		esp,0x00000004
+15CB  FF 76 04				push		dword ptr 0x4[esi]
+15CE  E8 9B F7 FF FF			call		ios_dbg_hex32
+15D3  83 C4 04				add		esp,0x00000004
+15D6  53				push		ebx
+15D7  E8 92 F7 FF FF			call		ios_dbg_hex32
+15DC  83 C4 04				add		esp,0x00000004
+15DF  6A 7D				push		0x0000007d
+15E1  E8 00 00 00 00			call		dbg_mark
+15E6  83 C4 04				add		esp,0x00000004
+15E9  53				push		ebx
+15EA  E8 E4 F9 FF FF			call		is_ring0_ptr
+15EF  83 C4 04				add		esp,0x00000004
+15F2  85 C0				test		eax,eax
+15F4  0F 84 86 00 00 00			je		L$142
+15FA  83 C3 0C				add		ebx,0x0000000c
+15FD  8A 03				mov		al,[ebx]
+15FF  3C 20				cmp		al,0x20
+1601  72 09				jb		L$134
+1603  3C 7F				cmp		al,0x7f
+1605  73 05				jae		L$134
+1607  0F B6 C0				movzx		eax,al
+160A  EB 05				jmp		L$135
+160C				L$134:
+160C  B8 2E 00 00 00			mov		eax,0x0000002e
+1611				L$135:
+1611  0F B6 C0				movzx		eax,al
+1614  50				push		eax
+1615  E8 00 00 00 00			call		dbg_mark
+161A  83 C4 04				add		esp,0x00000004
+161D  8A 43 01				mov		al,0x1[ebx]
+1620  3C 20				cmp		al,0x20
+1622  72 09				jb		L$136
+1624  3C 7F				cmp		al,0x7f
+1626  73 05				jae		L$136
+1628  0F B6 C0				movzx		eax,al
+162B  EB 05				jmp		L$137
+162D				L$136:
+162D  B8 2E 00 00 00			mov		eax,0x0000002e
+1632				L$137:
+1632  0F B6 C0				movzx		eax,al
+1635  50				push		eax
+1636  E8 00 00 00 00			call		dbg_mark
+163B  83 C4 04				add		esp,0x00000004
+163E  8A 43 02				mov		al,0x2[ebx]
+1641  3C 20				cmp		al,0x20
+1643  72 09				jb		L$138
+1645  3C 7F				cmp		al,0x7f
+1647  73 05				jae		L$138
+1649  0F B6 C0				movzx		eax,al
+164C  EB 05				jmp		L$139
+164E				L$138:
+164E  B8 2E 00 00 00			mov		eax,0x0000002e
+1653				L$139:
+1653  0F B6 C0				movzx		eax,al
+1656  50				push		eax
+1657  E8 00 00 00 00			call		dbg_mark
+165C  83 C4 04				add		esp,0x00000004
+165F  8A 43 03				mov		al,0x3[ebx]
+1662  3C 20				cmp		al,0x20
+1664  72 09				jb		L$140
+1666  3C 7F				cmp		al,0x7f
+1668  73 05				jae		L$140
+166A  0F B6 C0				movzx		eax,al
+166D  EB 05				jmp		L$141
+166F				L$140:
+166F  B8 2E 00 00 00			mov		eax,0x0000002e
+1674				L$141:
+1674  0F B6 C0				movzx		eax,al
+1677  50				push		eax
+1678  E8 00 00 00 00			call		dbg_mark
+167D  83 C4 04				add		esp,0x00000004
+1680				L$142:
+1680  8B 06				mov		eax,[esi]
+1682  3D 00 00 00 00			cmp		eax,offset _ios_wdm_ior_entry
+1687  74 0E				je		L$143
+1689  3D 00 00 00 00			cmp		eax,offset ios_wdm_passthru_stub
+168E  74 07				je		L$143
+1690  3D 00 00 00 00			cmp		eax,offset ios_wdm_preserve_stub
+1695  75 05				jne		L$144
+1697				L$143:
+1697  BF 01 00 00 00			mov		edi,0x00000001
+169C				L$144:
+169C  8B 76 0C				mov		esi,0xc[esi]
+169F  FF 44 24 70			inc		dword ptr 0x70[esp]
+16A3  E9 D4 FE FF FF			jmp		L$133
+16A8				L$145:
+16A8  8A 44 24 70			mov		al,0x70[esp]
+16AC  04 30				add		al,0x30
+16AE  0F B6 C0				movzx		eax,al
+16B1  50				push		eax
+16B2  E8 00 00 00 00			call		dbg_mark
+16B7  83 C4 04				add		esp,0x00000004
+16BA  85 FF				test		edi,edi
+16BC  74 07				je		L$146
+16BE  B8 46 00 00 00			mov		eax,0x00000046
+16C3  EB 05				jmp		L$147
+16C5				L$146:
+16C5  B8 66 00 00 00			mov		eax,0x00000066
+16CA				L$147:
+16CA  0F B6 C0				movzx		eax,al
+16CD  50				push		eax
+16CE  E8 00 00 00 00			call		dbg_mark
+16D3  83 C4 04				add		esp,0x00000004
+16D6  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_registered,0x00000000
+16DD  0F 85 B1 00 00 00			jne		L$151
+16E3  6A 59				push		0x00000059
+16E5  E8 00 00 00 00			call		dbg_mark
+16EA  83 C4 04				add		esp,0x00000004
+16ED  6A 00				push		0x00000000
+16EF  6A 22				push		0x00000022
+16F1  68 00 00 00 00			push		offset _ntmini_fsd_mount_probe
+16F6  E8 00 00 00 00			call		_IFSMgr_RegisterMount_Wrapper
+16FB  83 C4 0C				add		esp,0x0000000c
+16FE  A3 00 00 00 00			mov		g_fsd_provider_id,eax
+1703  6A 79				push		0x00000079
+1705  E8 00 00 00 00			call		dbg_mark
+170A  83 C4 04				add		esp,0x00000004
+170D  FF 35 00 00 00 00			push		dword ptr g_fsd_provider_id
+1713  68 49 01 00 00			push		offset L$342
+1718  E8 00 00 00 00			call		_VxD_Debug_Printf
+171D  83 C4 08				add		esp,0x00000008
+1720  6A 7B				push		0x0000007b
+1722  E8 00 00 00 00			call		dbg_mark
+1727  83 C4 04				add		esp,0x00000004
+172A  FF 35 00 00 00 00			push		dword ptr g_fsd_provider_id
+1730  E8 39 F6 FF FF			call		ios_dbg_hex32
+1735  83 C4 04				add		esp,0x00000004
+1738  6A 7D				push		0x0000007d
+173A  E8 00 00 00 00			call		dbg_mark
+173F  83 C4 04				add		esp,0x00000004
+1742  83 3D 00 00 00 00 FF		cmp		dword ptr g_fsd_provider_id,0xffffffff
+1749  74 3F				je		L$149
+174B  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_fsd_registered,0x00000001
+1755  6A 50				push		0x00000050
+1757  E8 00 00 00 00			call		dbg_mark
+175C  83 C4 04				add		esp,0x00000004
+175F  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_hook_installed,0x00000000
+1766  75 0A				jne		L$148
+1768  6A 68				push		0x00000068
+176A  E8 00 00 00 00			call		dbg_mark
+176F  83 C4 04				add		esp,0x00000004
+1772				L$148:
+1772  6A 56				push		0x00000056
+1774  E8 00 00 00 00			call		dbg_mark
+1779  83 C4 04				add		esp,0x00000004
+177C  6A 03				push		0x00000003
+177E  E8 00 00 00 00			call		_IFSMgr_NotifyVolumeArrival_Wrapper
+1783  83 C4 04				add		esp,0x00000004
+1786  6A 76				push		0x00000076
+1788  EB 02				jmp		L$150
+178A				L$149:
+178A  6A 70				push		0x00000070
+178C				L$150:
+178C  E8 00 00 00 00			call		dbg_mark
+1791  83 C4 04				add		esp,0x00000004
+1794				L$151:
+1794  31 C0				xor		eax,eax
+1796				L$152:
+1796  83 C4 74				add		esp,0x00000074
+1799  5F				pop		edi
+179A  5E				pop		esi
+179B  5B				pop		ebx
+179C  C3				ret
+
+Routine Size: 2433 bytes,    Routine Base: _TEXT + 0E1C
+
+179D				ios_late_destroy_device:
+179D  53				push		ebx
+179E  83 EC 08				sub		esp,0x00000008
+17A1  83 3D 00 00 00 00 00		cmp		dword ptr g_late_dcb_ptr,0x00000000
+17A8  74 09				je		L$153
+17AA  83 3D 00 00 00 00 00		cmp		dword ptr g_late_dcb_destroyed,0x00000000
+17B1  74 07				je		L$154
+17B3				L$153:
+17B3  6A 6F				push		0x0000006f
+17B5  E9 90 00 00 00			jmp		L$159
+17BA				L$154:
+17BA  FF 35 10 00 00 00			push		dword ptr g_bridge+0x10
+17C0  E8 29 F8 FF FF			call		validate_ilb
+17C5  83 C4 04				add		esp,0x00000004
+17C8  89 C3				mov		ebx,eax
+17CA  85 C0				test		eax,eax
+17CC  75 10				jne		L$155
+17CE  E8 00 00 00 00			call		find_existing_ilb
+17D3  89 C3				mov		ebx,eax
+17D5  85 C0				test		eax,eax
+17D7  74 05				je		L$155
+17D9  A3 10 00 00 00			mov		g_bridge+0x10,eax
+17DE				L$155:
+17DE  85 DB				test		ebx,ebx
+17E0  75 14				jne		L$157
+17E2  6A 6A				push		0x0000006a
+17E4				L$156:
+17E4  E8 00 00 00 00			call		dbg_mark
+17E9  83 C4 04				add		esp,0x00000004
+17EC  B8 FF FF FF FF			mov		eax,0xffffffff
+17F1  83 C4 08				add		esp,0x00000008
+17F4  5B				pop		ebx
+17F5  C3				ret
+17F6				L$157:
+17F6  6A 6A				push		0x0000006a
+17F8  E8 00 00 00 00			call		dbg_mark
+17FD  83 C4 04				add		esp,0x00000004
+1800  6A 08				push		0x00000008
+1802  8D 44 24 04			lea		eax,0x4[esp]
+1806  50				push		eax
+1807  E8 00 00 00 00			call		zero_mem
+180C  83 C4 08				add		esp,0x00000008
+180F  66 C7 04 24 0A 00			mov		word ptr [esp],0x000a
+1815  A1 00 00 00 00			mov		eax,g_late_dcb_ptr
+181A  89 44 24 04			mov		0x4[esp],eax
+181E  89 E0				mov		eax,esp
+1820  50				push		eax
+1821  FF 33				push		dword ptr [ebx]
+1823  E8 00 00 00 00			call		_Call_ILB_Service
+1828  83 C4 08				add		esp,0x00000008
+182B  66 83 7C 24 02 00			cmp		word ptr 0x2[esp],0x0000
+1831  74 04				je		L$158
+1833  6A 77				push		0x00000077
+1835  EB AD				jmp		L$156
+1837				L$158:
+1837  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_late_dcb_destroyed,0x00000001
+1841  31 C0				xor		eax,eax
+1843  A3 00 00 00 00			mov		g_late_dcb_ptr,eax
+1848  6A 78				push		0x00000078
+184A				L$159:
+184A  E8 00 00 00 00			call		dbg_mark
+184F  83 C4 04				add		esp,0x00000004
+1852  31 C0				xor		eax,eax
+1854  83 C4 08				add		esp,0x00000008
+1857  5B				pop		ebx
+1858  C3				ret
+1859				L$160:
+1859  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_late_attach_done,0x00000001
+1863  31 C0				xor		eax,eax
+1865  89 04 24				mov		[esp],eax
+1868  6A 54				push		0x00000054
+186A  E8 00 00 00 00			call		dbg_mark
+186F  83 C4 04				add		esp,0x00000004
+1872  89 E3				mov		ebx,esp
+1874  53				push		ebx
+1875  6A 03				push		0x00000003
+1877  E8 00 00 00 00			call		_IFSMgr_CDROM_Attach_Wrapper
+187C  89 C3				mov		ebx,eax
+187E  83 C4 08				add		esp,0x00000008
+1881  6A 74				push		0x00000074
+1883  E8 00 00 00 00			call		dbg_mark
+1888  83 C4 04				add		esp,0x00000004
+188B  53				push		ebx
+188C  E8 DD F4 FF FF			call		ios_dbg_hex32
+1891  83 C4 04				add		esp,0x00000004
+1894  FF 34 24				push		dword ptr [esp]
+1897  E8 D2 F4 FF FF			call		ios_dbg_hex32
+189C				L$161:
+189C  83 C4 04				add		esp,0x00000004
+189F  83 C4 04				add		esp,0x00000004
+18A2  5B				pop		ebx
+18A3  C3				ret
+18A4				_ios_late_cdrom_attach_timer:
+18A4  6A 5A				push		0x0000005a
+18A6  E8 00 00 00 00			call		dbg_mark
+18AB  83 C4 04				add		esp,0x00000004
+
+Routine Size: 273 bytes,    Routine Base: _TEXT + 179D
+
+18AE				_ios_late_cdrom_attach_probe:
+18AE  53				push		ebx
+18AF  83 EC 04				sub		esp,0x00000004
+18B2  83 3D 00 00 00 00 00		cmp		dword ptr g_late_attach_done,0x00000000
+18B9  75 09				jne		L$162
+18BB  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_registered,0x00000000
+18C2  75 95				jne		L$160
+18C4				L$162:
+18C4  6A 6E				push		0x0000006e
+18C6  E8 00 00 00 00			call		dbg_mark
+18CB  EB CF				jmp		L$161
+
+Routine Size: 31 bytes,    Routine Base: _TEXT + 18AE
+
+18CD				_ios_schedule_late_cdrom_attach_probe:
+18CD  53				push		ebx
+18CE  83 3D 00 00 00 00 00		cmp		dword ptr g_late_attach_done,0x00000000
+18D5  75 12				jne		L$163
+18D7  83 3D 00 00 00 00 00		cmp		dword ptr g_late_attach_scheduled,0x00000000
+18DE  75 09				jne		L$163
+18E0  83 3D 00 00 00 00 00		cmp		dword ptr g_fsd_registered,0x00000000
+18E7  75 04				jne		L$164
+18E9				L$163:
+18E9  6A 6E				push		0x0000006e
+18EB  EB 40				jmp		L$165
+18ED				L$164:
+18ED  C7 05 00 00 00 00 01 00 00 00
+					mov		dword ptr g_late_attach_scheduled,0x00000001
+18F7  6A 51				push		0x00000051
+18F9  E8 00 00 00 00			call		dbg_mark
+18FE  83 C4 04				add		esp,0x00000004
+1901  6A 00				push		0x00000000
+1903  68 00 00 00 00			push		offset _ios_late_cdrom_attach_timer
+1908  68 E8 03 00 00			push		0x000003e8
+190D  E8 00 00 00 00			call		_VxD_SetTimer
+1912  89 C3				mov		ebx,eax
+1914  83 C4 0C				add		esp,0x0000000c
+1917  50				push		eax
+1918  E8 51 F4 FF FF			call		ios_dbg_hex32
+191D  83 C4 04				add		esp,0x00000004
+1920  85 DB				test		ebx,ebx
+1922  75 11				jne		L$166
+1924  31 C0				xor		eax,eax
+1926  A3 00 00 00 00			mov		g_late_attach_scheduled,eax
+192B  6A 71				push		0x00000071
+192D				L$165:
+192D  E8 00 00 00 00			call		dbg_mark
+1932  83 C4 04				add		esp,0x00000004
+1935				L$166:
+1935  5B				pop		ebx
+1936  C3				ret
+
+Routine Size: 106 bytes,    Routine Base: _TEXT + 18CD
+
+1937				_aep_handler:
+1937  53				push		ebx
+1938  83 EC 04				sub		esp,0x00000004
+193B  8B 5C 24 0C			mov		ebx,0xc[esp]
+193F  6A 48				push		0x00000048
+1941  E8 00 00 00 00			call		dbg_mark
+1946  83 C4 04				add		esp,0x00000004
+1949  66 8B 03				mov		ax,[ebx]
+194C  66 3D 0E 00			cmp		ax,0x000e
+1950  72 54				jb		L$168
+1952  0F 86 0A 01 00 00			jbe		L$177
+1958  66 3D 12 00			cmp		ax,0x0012
+195C  72 2F				jb		L$167
+195E  0F 86 2C 01 00 00			jbe		L$184
+1964  66 3D 14 00			cmp		ax,0x0014
+1968  0F 82 26 01 00 00			jb		L$185
+196E  0F 86 24 01 00 00			jbe		L$186
+1974  66 3D 1B 00			cmp		ax,0x001b
+1978  0F 84 1E 01 00 00			je		L$187
+197E  66 3D 15 00			cmp		ax,0x0015
+1982  0F 84 BE 00 00 00			je		L$174
+1988  E9 13 01 00 00			jmp		L$188
+198D				L$167:
+198D  66 3D 11 00			cmp		ax,0x0011
+1991  0F 84 F5 00 00 00			je		L$183
+1997  66 3D 10 00			cmp		ax,0x0010
+199B  0F 84 E7 00 00 00			je		L$182
+19A1  E9 C8 00 00 00			jmp		L$179
+19A6				L$168:
+19A6  66 3D 03 00			cmp		ax,0x0003
+19AA  72 2B				jb		L$169
+19AC  76 74				jbe		L$172
+19AE  66 3D 05 00			cmp		ax,0x0005
+19B2  0F 82 7C 00 00 00			jb		L$173
+19B8  0F 86 9D 00 00 00			jbe		L$176
+19BE  66 3D 0D 00			cmp		ax,0x000d
+19C2  0F 84 BC 00 00 00			je		L$181
+19C8  66 3D 0C 00			cmp		ax,0x000c
+19CC  0F 84 AE 00 00 00			je		L$180
+19D2  E9 C9 00 00 00			jmp		L$188
+19D7				L$169:
+19D7  66 3D 02 00			cmp		ax,0x0002
+19DB  74 2F				je		L$171
+19DD  66 3D 01 00			cmp		ax,0x0001
+19E1  0F 84 7F 00 00 00			je		L$178
+19E7  66 85 C0				test		ax,ax
+19EA  0F 85 B0 00 00 00			jne		L$188
+19F0  B8 49 00 00 00			mov		eax,0x00000049
+19F5  50				push		eax
+19F6  E8 00 00 00 00			call		dbg_mark
+19FB  83 C4 04				add		esp,0x00000004
+19FE  53				push		ebx
+19FF  E8 00 00 00 00			call		aep_initialize
+1A04				L$170:
+1A04  83 C4 04				add		esp,0x00000004
+1A07  83 C4 04				add		esp,0x00000004
+1A0A  5B				pop		ebx
+1A0B  C3				ret
+1A0C				L$171:
+1A0C  B8 4F 00 00 00			mov		eax,0x0000004f
+1A11  50				push		eax
+1A12  E8 00 00 00 00			call		dbg_mark
+1A17  83 C4 04				add		esp,0x00000004
+1A1A  53				push		ebx
+1A1B  E8 19 01 00 00			call		aep_boot_complete
+1A20  EB E2				jmp		L$170
+1A22				L$172:
+1A22  6A 47				push		0x00000047
+1A24  E8 00 00 00 00			call		dbg_mark
+1A29  83 C4 04				add		esp,0x00000004
+1A2C  53				push		ebx
+1A2D  E8 00 00 00 00			call		aep_config_dcb
+1A32  EB D0				jmp		L$170
+1A34				L$173:
+1A34  6A 55				push		0x00000055
+1A36  E8 00 00 00 00			call		dbg_mark
+1A3B  83 C4 04				add		esp,0x00000004
+1A3E  53				push		ebx
+1A3F  E8 00 00 00 00			call		aep_unconfig_dcb
+1A44  EB BE				jmp		L$170
+1A46				L$174:
+1A46  6A 5A				push		0x0000005a
+1A48				L$175:
+1A48  E8 00 00 00 00			call		dbg_mark
+1A4D  83 C4 04				add		esp,0x00000004
+1A50  66 C7 43 02 00 00			mov		word ptr 0x2[ebx],0x0000
+1A56  83 C4 04				add		esp,0x00000004
+1A59  5B				pop		ebx
+1A5A  C3				ret
+1A5B				L$176:
+1A5B  6A 51				push		0x00000051
+1A5D  E9 90 00 00 00			jmp		L$193
+1A62				L$177:
+1A62  6A 54				push		0x00000054
+1A64  EB E2				jmp		L$175
+1A66				L$178:
+1A66  B8 4B 00 00 00			mov		eax,0x0000004b
+1A6B  50				push		eax
+1A6C  EB DA				jmp		L$175
+1A6E				L$179:
+1A6E  6A 4E				push		0x0000004e
+1A70  E8 00 00 00 00			call		dbg_mark
+1A75  83 C4 04				add		esp,0x00000004
+1A78  53				push		ebx
+1A79  E8 BC 02 00 00			call		aep_uninitialize
+1A7E  EB 84				jmp		L$170
+1A80				L$180:
+1A80  6A 41				push		0x00000041
+1A82  EB C4				jmp		L$175
+1A84				L$181:
+1A84  6A 4D				push		0x0000004d
+1A86  EB C0				jmp		L$175
+1A88				L$182:
+1A88  6A 4C				push		0x0000004c
+1A8A  EB BC				jmp		L$175
+1A8C				L$183:
+1A8C  6A 57				push		0x00000057
+1A8E  EB B8				jmp		L$175
+1A90				L$184:
+1A90  6A 56				push		0x00000056
+1A92  EB B4				jmp		L$175
+1A94				L$185:
+1A94  6A 59				push		0x00000059
+1A96  EB B0				jmp		L$175
+1A98				L$186:
+1A98  6A 50				push		0x00000050
+1A9A  EB AC				jmp		L$175
+1A9C				L$187:
+1A9C  6A 42				push		0x00000042
+1A9E  EB A8				jmp		L$175
+1AA0				L$188:
+1AA0  6A 3F				push		0x0000003f
+1AA2  E8 00 00 00 00			call		dbg_mark
+1AA7  83 C4 04				add		esp,0x00000004
+1AAA  0F B7 03				movzx		eax,word ptr [ebx]
+1AAD  C1 F8 04				sar		eax,0x04
+1AB0  83 E0 0F				and		eax,0x0000000f
+1AB3  8A 23				mov		ah,[ebx]
+1AB5  80 E4 0F				and		ah,0x0f
+1AB8  88 24 24				mov		[esp],ah
+1ABB  3C 0A				cmp		al,0x0a
+1ABD  73 08				jae		L$189
+1ABF  0F B6 C0				movzx		eax,al
+1AC2  8D 50 30				lea		edx,0x30[eax]
+1AC5  EB 06				jmp		L$190
+1AC7				L$189:
+1AC7  0F B6 C0				movzx		eax,al
+1ACA  8D 50 37				lea		edx,0x37[eax]
+1ACD				L$190:
+1ACD  0F B6 D2				movzx		edx,dl
+1AD0  52				push		edx
+1AD1  E8 00 00 00 00			call		dbg_mark
+1AD6  83 C4 04				add		esp,0x00000004
+1AD9  8A 04 24				mov		al,[esp]
+1ADC  3C 0A				cmp		al,0x0a
+1ADE  73 08				jae		L$191
+1AE0  0F B6 C0				movzx		eax,al
+1AE3  83 C0 30				add		eax,0x00000030
+1AE6  EB 06				jmp		L$192
+1AE8				L$191:
+1AE8  0F B6 C0				movzx		eax,al
+1AEB  83 C0 37				add		eax,0x00000037
+1AEE				L$192:
+1AEE  0F B6 C0				movzx		eax,al
+1AF1  50				push		eax
+1AF2				L$193:
+1AF2  E8 00 00 00 00			call		dbg_mark
+1AF7  83 C4 04				add		esp,0x00000004
+1AFA  66 C7 43 02 FF FF			mov		word ptr 0x2[ebx],0xffff
+1B00  83 C4 04				add		esp,0x00000004
+1B03  5B				pop		ebx
+1B04  C3				ret
+1B05				aep_initialize:
+1B05  53				push		ebx
+1B06  8B 5C 24 08			mov		ebx,0x8[esp]
+1B0A  68 76 01 00 00			push		offset L$343
+1B0F  E8 00 00 00 00			call		_VxD_Debug_Printf
+1B14  83 C4 04				add		esp,0x00000004
+1B17  8B 43 0C				mov		eax,0xc[ebx]
+1B1A  A3 40 02 00 00			mov		g_bridge+0x240,eax
+1B1F  8B 43 04				mov		eax,0x4[ebx]
+1B22  A3 38 00 00 00			mov		g_bridge+0x38,eax
+1B27  C7 05 4C 00 00 00 01 00 00 00
+					mov		dword ptr g_bridge+0x4c,0x00000001
+1B31  66 C7 43 02 00 00			mov		word ptr 0x2[ebx],0x0000
+1B37  5B				pop		ebx
+1B38  C3				ret
+1B39				aep_boot_complete:
+1B39  FF 35 D4 00 00 00			push		dword ptr g_bridge+0xd4
+1B3F  68 8E 01 00 00			push		offset L$344
+1B44  E8 00 00 00 00			call		_VxD_Debug_Printf
+1B49  83 C4 08				add		esp,0x00000008
+1B4C  C7 05 50 00 00 00 01 00 00 00
+					mov		dword ptr g_bridge+0x50,0x00000001
+1B56				L$194:
+1B56  8B 44 24 04			mov		eax,0x4[esp]
+1B5A  66 C7 40 02 00 00			mov		word ptr 0x2[eax],0x0000
+1B60  C3				ret
+1B61				aep_config_dcb:
+1B61  53				push		ebx
+1B62  56				push		esi
+1B63  57				push		edi
+1B64  8B 7C 24 10			mov		edi,0x10[esp]
+1B68  8B 5F 0C				mov		ebx,0xc[edi]
+1B6B  85 DB				test		ebx,ebx
+1B6D  75 0A				jne		L$196
+1B6F				L$195:
+1B6F  66 C7 47 02 FF FF			mov		word ptr 0x2[edi],0xffff
+1B75  5F				pop		edi
+1B76  5E				pop		esi
+1B77  5B				pop		ebx
+1B78  C3				ret
+1B79				L$196:
+1B79  3B 1D 00 00 00 00			cmp		ebx,g_late_dcb_ptr
+1B7F  75 0F				jne		L$197
+1B81  6A 63				push		0x00000063
+1B83  E8 00 00 00 00			call		dbg_mark
+1B88  83 C4 04				add		esp,0x00000004
+1B8B  E9 27 01 00 00			jmp		L$203
+1B90				L$197:
+1B90  0F B6 43 13			movzx		eax,byte ptr 0x13[ebx]
+1B94  50				push		eax
+1B95  0F B6 43 10			movzx		eax,byte ptr 0x10[ebx]
+1B99  50				push		eax
+1B9A  68 B7 01 00 00			push		offset L$345
+1B9F  E8 00 00 00 00			call		_VxD_Debug_Printf
+1BA4  83 C4 0C				add		esp,0x0000000c
+1BA7  31 C0				xor		eax,eax
+1BA9				L$198:
+1BA9  3B 05 D4 00 00 00			cmp		eax,g_bridge+0xd4
+1BAF  73 14				jae		L$199
+1BB1  89 C2				mov		edx,eax
+1BB3  C1 E2 04				shl		edx,0x04
+1BB6  3B 9A 54 00 00 00			cmp		ebx,g_bridge+0x54[edx]
+1BBC  0F 84 F5 00 00 00			je		L$203
+1BC2  40				inc		eax
+1BC3  EB E4				jmp		L$198
+1BC5				L$199:
+1BC5  80 7B 10 05			cmp		byte ptr 0x10[ebx],0x05
+1BC9  75 A4				jne		L$195
+1BCB  A1 D4 00 00 00			mov		eax,g_bridge+0xd4
+1BD0  83 F8 08				cmp		eax,0x00000008
+1BD3  72 0F				jb		L$200
+1BD5  68 E1 01 00 00			push		offset L$346
+1BDA  E8 00 00 00 00			call		_VxD_Debug_Printf
+1BDF  83 C4 04				add		esp,0x00000004
+1BE2  EB 8B				jmp		L$195
+1BE4				L$200:
+1BE4  89 C6				mov		esi,eax
+1BE6  C1 E6 04				shl		esi,0x04
+1BE9  81 C6 54 00 00 00			add		esi,offset g_bridge+0x54
+1BEF  6A 10				push		0x00000010
+1BF1  56				push		esi
+1BF2  E8 00 00 00 00			call		zero_mem
+1BF7  83 C4 08				add		esp,0x00000008
+1BFA  89 1E				mov		[esi],ebx
+1BFC  8A 43 13				mov		al,0x13[ebx]
+1BFF  88 46 04				mov		0x4[esi],al
+1C02  8A 43 14				mov		al,0x14[ebx]
+1C05  88 46 05				mov		0x5[esi],al
+1C08  8A 43 10				mov		al,0x10[ebx]
+1C0B  88 46 06				mov		0x6[esi],al
+1C0E  C6 46 07 00			mov		byte ptr 0x7[esi],0x00
+1C12  80 7B 10 05			cmp		byte ptr 0x10[ebx],0x05
+1C16  75 17				jne		L$201
+1C18  C7 46 08 00 08 00 00		mov		dword ptr 0x8[esi],0x00000800
+1C1F  C7 43 20 00 08 00 00		mov		dword ptr 0x20[ebx],0x00000800
+1C26  C7 43 1C 0B 00 00 00		mov		dword ptr 0x1c[ebx],0x0000000b
+1C2D  EB 15				jmp		L$202
+1C2F				L$201:
+1C2F  C7 46 08 00 02 00 00		mov		dword ptr 0x8[esi],0x00000200
+1C36  C7 43 20 00 02 00 00		mov		dword ptr 0x20[ebx],0x00000200
+1C3D  C7 43 1C 09 00 00 00		mov		dword ptr 0x1c[ebx],0x00000009
+1C44				L$202:
+1C44  66 81 4B 18 04 80			or		word ptr 0x18[ebx],0x8004
+1C4A  C7 43 3C 00 00 01 00		mov		dword ptr 0x3c[ebx],0x00010000
+1C51  83 3D 38 00 00 00 00		cmp		dword ptr g_bridge+0x38,0x00000000
+1C58  0F 84 11 FF FF FF			je		L$195
+1C5E  C7 05 3C 00 00 00 00 00 00 00
+					mov		dword ptr g_bridge+0x3c,offset ior_handler
+1C68  A1 38 00 00 00			mov		eax,g_bridge+0x38
+1C6D  A3 40 00 00 00			mov		g_bridge+0x40,eax
+1C72  31 C0				xor		eax,eax
+1C74  A3 44 00 00 00			mov		g_bridge+0x44,eax
+1C79  A3 48 00 00 00			mov		g_bridge+0x48,eax
+1C7E  6A 03				push		0x00000003
+1C80  FF 35 38 00 00 00			push		dword ptr g_bridge+0x38
+1C86  68 3C 00 00 00			push		offset g_bridge+0x3c
+1C8B  53				push		ebx
+1C8C  E8 00 00 00 00			call		_ISP_INSERT_CALLDOWN
+1C91  83 C4 10				add		esp,0x00000010
+1C94  FF 05 D4 00 00 00			inc		dword ptr g_bridge+0xd4
+1C9A  FF 35 D4 00 00 00			push		dword ptr g_bridge+0xd4
+1CA0  0F B6 46 06			movzx		eax,byte ptr 0x6[esi]
+1CA4  50				push		eax
+1CA5  0F B6 46 04			movzx		eax,byte ptr 0x4[esi]
+1CA9  50				push		eax
+1CAA  68 09 02 00 00			push		offset L$347
+1CAF  E8 00 00 00 00			call		_VxD_Debug_Printf
+1CB4  83 C4 10				add		esp,0x00000010
+1CB7				L$203:
+1CB7  66 C7 47 02 00 00			mov		word ptr 0x2[edi],0x0000
+1CBD  5F				pop		edi
+1CBE  5E				pop		esi
+1CBF  5B				pop		ebx
+1CC0  C3				ret
+1CC1				aep_unconfig_dcb:
+1CC1  53				push		ebx
+1CC2  56				push		esi
+1CC3  57				push		edi
+1CC4  8B 7C 24 10			mov		edi,0x10[esp]
+1CC8  8B 77 0C				mov		esi,0xc[edi]
+1CCB  85 F6				test		esi,esi
+1CCD  74 61				je		L$208
+1CCF  0F B6 46 13			movzx		eax,byte ptr 0x13[esi]
+1CD3  50				push		eax
+1CD4  68 45 02 00 00			push		offset L$348
+1CD9  E8 00 00 00 00			call		_VxD_Debug_Printf
+1CDE  83 C4 08				add		esp,0x00000008
+1CE1  31 C0				xor		eax,eax
+1CE3				L$204:
+1CE3  3B 05 D4 00 00 00			cmp		eax,g_bridge+0xd4
+1CE9  73 45				jae		L$208
+1CEB  89 C3				mov		ebx,eax
+1CED  C1 E3 04				shl		ebx,0x04
+1CF0  3B B3 54 00 00 00			cmp		esi,g_bridge+0x54[ebx]
+1CF6  75 35				jne		L$207
+1CF8  89 C3				mov		ebx,eax
+1CFA				L$205:
+1CFA  A1 D4 00 00 00			mov		eax,g_bridge+0xd4
+1CFF  48				dec		eax
+1D00  39 C3				cmp		ebx,eax
+1D02  73 22				jae		L$206
+1D04  6A 10				push		0x00000010
+1D06  89 D8				mov		eax,ebx
+1D08  C1 E0 04				shl		eax,0x04
+1D0B  8D 50 10				lea		edx,0x10[eax]
+1D0E  81 C2 54 00 00 00			add		edx,offset g_bridge+0x54
+1D14  52				push		edx
+1D15  05 54 00 00 00			add		eax,offset g_bridge+0x54
+1D1A  50				push		eax
+1D1B  E8 00 00 00 00			call		copy_mem
+1D20  83 C4 0C				add		esp,0x0000000c
+1D23  43				inc		ebx
+1D24  EB D4				jmp		L$205
+1D26				L$206:
+1D26  A3 D4 00 00 00			mov		g_bridge+0xd4,eax
+1D2B  EB 03				jmp		L$208
+1D2D				L$207:
+1D2D  40				inc		eax
+1D2E  EB B3				jmp		L$204
+1D30				L$208:
+1D30  66 C7 47 02 00 00			mov		word ptr 0x2[edi],0x0000
+1D36  5F				pop		edi
+1D37  5E				pop		esi
+1D38  5B				pop		ebx
+1D39  C3				ret
+1D3A				aep_uninitialize:
+1D3A  68 69 02 00 00			push		offset L$349
+1D3F  E8 00 00 00 00			call		_VxD_Debug_Printf
+1D44  83 C4 04				add		esp,0x00000004
+1D47  6A 10				push		0x00000010
+1D49  E8 00 00 00 00			call		ior_queue_drain
+1D4E  83 C4 04				add		esp,0x00000004
+1D51  31 C0				xor		eax,eax
+1D53  A3 D4 00 00 00			mov		g_bridge+0xd4,eax
+1D58  A3 4C 00 00 00			mov		g_bridge+0x4c,eax
+1D5D  E9 F4 FD FF FF			jmp		L$194
+
+Routine Size: 1067 bytes,    Routine Base: _TEXT + 1937
+
+1D62				_ios_wdm_log_iop:
+1D62  53				push		ebx
+1D63  83 EC 08				sub		esp,0x00000008
+1D66  8B 5C 24 10			mov		ebx,0x10[esp]
+1D6A  6A 57				push		0x00000057
+1D6C  E8 00 00 00 00			call		dbg_mark
+1D71  83 C4 04				add		esp,0x00000004
+1D74  53				push		ebx
+1D75  E8 59 F2 FF FF			call		is_ring0_ptr
+1D7A  83 C4 04				add		esp,0x00000004
+1D7D  85 C0				test		eax,eax
+1D7F  75 04				jne		L$209
+1D81  6A 21				push		0x00000021
+1D83  EB 75				jmp		L$211
+1D85				L$209:
+1D85  6A 3C				push		0x0000003c
+1D87  E8 00 00 00 00			call		dbg_mark
+1D8C  83 C4 04				add		esp,0x00000004
+1D8F  53				push		ebx
+1D90  E8 D9 EF FF FF			call		ios_dbg_hex32
+1D95  83 C4 04				add		esp,0x00000004
+1D98  6A 3E				push		0x0000003e
+1D9A  E8 00 00 00 00			call		dbg_mark
+1D9F  83 C4 04				add		esp,0x00000004
+1DA2  83 3D 00 00 00 00 08		cmp		dword ptr g_wdm_iop_dump_count,0x00000008
+1DA9  7D 4D				jge		L$210
+1DAB  66 8B 43 68			mov		ax,0x68[ebx]
+1DAF  89 44 24 04			mov		0x4[esp],eax
+1DB3  8B 43 6C				mov		eax,0x6c[ebx]
+1DB6  89 04 24				mov		[esp],eax
+1DB9  8B 5B 70				mov		ebx,0x70[ebx]
+1DBC  6A 7B				push		0x0000007b
+1DBE  E8 00 00 00 00			call		dbg_mark
+1DC3  83 C4 04				add		esp,0x00000004
+1DC6  0F B7 44 24 04			movzx		eax,word ptr 0x4[esp]
+1DCB  50				push		eax
+1DCC  E8 73 EF FF FF			call		ios_dbg_hex16
+1DD1  83 C4 04				add		esp,0x00000004
+1DD4  FF 34 24				push		dword ptr [esp]
+1DD7  E8 92 EF FF FF			call		ios_dbg_hex32
+1DDC  83 C4 04				add		esp,0x00000004
+1DDF  53				push		ebx
+1DE0  E8 89 EF FF FF			call		ios_dbg_hex32
+1DE5  83 C4 04				add		esp,0x00000004
+1DE8  6A 7D				push		0x0000007d
+1DEA  E8 00 00 00 00			call		dbg_mark
+1DEF  83 C4 04				add		esp,0x00000004
+1DF2  FF 05 00 00 00 00			inc		dword ptr g_wdm_iop_dump_count
+1DF8				L$210:
+1DF8  6A 77				push		0x00000077
+1DFA				L$211:
+1DFA  E8 00 00 00 00			call		dbg_mark
+1DFF  83 C4 04				add		esp,0x00000004
+1E02  83 C4 08				add		esp,0x00000008
+1E05  5B				pop		ebx
+1E06  C3				ret
+
+Routine Size: 165 bytes,    Routine Base: _TEXT + 1D62
+
+1E07				_ios_wdm_ior_entry:
+1E07  53				push		ebx
+1E08  56				push		esi
+1E09  57				push		edi
+1E0A  8B 74 24 10			mov		esi,0x10[esp]
+1E0E  6A 57				push		0x00000057
+1E10  E8 00 00 00 00			call		dbg_mark
+1E15  83 C4 04				add		esp,0x00000004
+1E18  85 F6				test		esi,esi
+1E1A  74 0D				je		L$212
+1E1C  56				push		esi
+1E1D  E8 B1 F1 FF FF			call		is_ring0_ptr
+1E22  83 C4 04				add		esp,0x00000004
+1E25  85 C0				test		eax,eax
+1E27  75 07				jne		L$213
+1E29				L$212:
+1E29  6A 77				push		0x00000077
+1E2B  E9 FE 00 00 00			jmp		L$218
+1E30				L$213:
+1E30  6A 3C				push		0x0000003c
+1E32  E8 00 00 00 00			call		dbg_mark
+1E37  83 C4 04				add		esp,0x00000004
+1E3A  56				push		esi
+1E3B  E8 2E EF FF FF			call		ios_dbg_hex32
+1E40  83 C4 04				add		esp,0x00000004
+1E43  6A 3E				push		0x0000003e
+1E45  E8 00 00 00 00			call		dbg_mark
+1E4A  83 C4 04				add		esp,0x00000004
+1E4D  83 3D 00 00 00 00 01		cmp		dword ptr g_wdm_iop_dump_count,0x00000001
+1E54  7D 37				jge		L$215
+1E56  8D 7E A0				lea		edi,-0x60[esi]
+1E59  6A 44				push		0x00000044
+1E5B  E8 00 00 00 00			call		dbg_mark
+1E60  83 C4 04				add		esp,0x00000004
+1E63  31 DB				xor		ebx,ebx
+1E65				L$214:
+1E65  8D 04 1F				lea		eax,[edi+ebx]
+1E68  0F B6 00				movzx		eax,byte ptr [eax]
+1E6B  50				push		eax
+1E6C  E8 00 00 00 00			call		ios_dbg_hex8
+1E71  83 C4 04				add		esp,0x00000004
+1E74  43				inc		ebx
+1E75  81 FB 00 01 00 00			cmp		ebx,0x00000100
+1E7B  72 E8				jb		L$214
+1E7D  6A 64				push		0x00000064
+1E7F  E8 00 00 00 00			call		dbg_mark
+1E84  83 C4 04				add		esp,0x00000004
+1E87  FF 05 00 00 00 00			inc		dword ptr g_wdm_iop_dump_count
+1E8D				L$215:
+1E8D  6A 52				push		0x00000052
+1E8F  E8 00 00 00 00			call		dbg_mark
+1E94  83 C4 04				add		esp,0x00000004
+1E97  0F B7 46 68			movzx		eax,word ptr 0x68[esi]
+1E9B  50				push		eax
+1E9C  E8 A3 EE FF FF			call		ios_dbg_hex16
+1EA1  83 C4 04				add		esp,0x00000004
+1EA4  0F B7 46 6A			movzx		eax,word ptr 0x6a[esi]
+1EA8  50				push		eax
+1EA9  E8 96 EE FF FF			call		ios_dbg_hex16
+1EAE  83 C4 04				add		esp,0x00000004
+1EB1  FF 76 6C				push		dword ptr 0x6c[esi]
+1EB4  E8 B5 EE FF FF			call		ios_dbg_hex32
+1EB9  83 C4 04				add		esp,0x00000004
+1EBC  FF 76 70				push		dword ptr 0x70[esi]
+1EBF  E8 AA EE FF FF			call		ios_dbg_hex32
+1EC4  83 C4 04				add		esp,0x00000004
+1EC7  6A 72				push		0x00000072
+1EC9  E8 00 00 00 00			call		dbg_mark
+1ECE  83 C4 04				add		esp,0x00000004
+1ED1  8D 5E 64				lea		ebx,0x64[esi]
+1ED4  53				push		ebx
+1ED5  E8 F9 F0 FF FF			call		is_ring0_ptr
+1EDA  83 C4 04				add		esp,0x00000004
+1EDD  85 C0				test		eax,eax
+1EDF  0F 84 44 FF FF FF			je		L$212
+1EE5  66 83 7E 68 26			cmp		word ptr 0x68[esi],0x0026
+1EEA  75 1D				jne		L$216
+1EEC  66 C7 43 06 00 00			mov		word ptr 0x6[ebx],0x0000
+1EF2  6A 53				push		0x00000053
+1EF4  E8 00 00 00 00			call		dbg_mark
+1EF9  83 C4 04				add		esp,0x00000004
+1EFC  56				push		esi
+1EFD  E8 00 00 00 00			call		_IOS_BD_Complete_IOP
+1F02  83 C4 04				add		esp,0x00000004
+1F05  6A 43				push		0x00000043
+1F07  EB 25				jmp		L$218
+1F09				L$216:
+1F09  66 C7 43 06 00 00			mov		word ptr 0x6[ebx],0x0000
+1F0F  6A 30				push		0x00000030
+1F11  E8 00 00 00 00			call		dbg_mark
+1F16  83 C4 04				add		esp,0x00000004
+1F19  F6 46 6D 04			test		byte ptr 0x6d[esi],0x04
+1F1D  74 04				je		L$217
+1F1F  6A 51				push		0x00000051
+1F21  EB 0B				jmp		L$218
+1F23				L$217:
+1F23  56				push		esi
+1F24  E8 00 00 00 00			call		_IOS_BD_Complete_IOP
+1F29  83 C4 04				add		esp,0x00000004
+1F2C  6A 43				push		0x00000043
+1F2E				L$218:
+1F2E  E8 00 00 00 00			call		dbg_mark
+1F33  83 C4 04				add		esp,0x00000004
+1F36  5F				pop		edi
+1F37  5E				pop		esi
+1F38  5B				pop		ebx
+1F39  C3				ret
+1F3A				ior_handler:
+1F3A  53				push		ebx
+1F3B  8B 5C 24 08			mov		ebx,0x8[esp]
+1F3F  85 DB				test		ebx,ebx
+1F41  0F 84 E2 00 00 00			je		L$221
+1F47  FF 74 24 0C			push		dword ptr 0xc[esp]
+1F4B  E8 00 00 00 00			call		find_device_for_dcb
+1F50  83 C4 04				add		esp,0x00000004
+1F53  85 C0				test		eax,eax
+1F55  75 1A				jne		L$219
+1F57  68 83 02 00 00			push		offset L$350
+1F5C  E8 00 00 00 00			call		_VxD_Debug_Printf
+1F61  83 C4 04				add		esp,0x00000004
+1F64  6A 01				push		0x00000001
+1F66  53				push		ebx
+1F67  E8 00 00 00 00			call		complete_ior
+1F6C  83 C4 08				add		esp,0x00000008
+1F6F  5B				pop		ebx
+1F70  C3				ret
+1F71				L$219:
+1F71  83 3D 3C 02 00 00 00		cmp		dword ptr g_bridge+0x23c,0x00000000
+1F78  74 20				je		L$220
+1F7A  0F B7 03				movzx		eax,word ptr [ebx]
+1F7D  50				push		eax
+1F7E  68 A9 02 00 00			push		offset L$351
+1F83  E8 00 00 00 00			call		_VxD_Debug_Printf
+1F88  83 C4 08				add		esp,0x00000008
+1F8B  FF 74 24 0C			push		dword ptr 0xc[esp]
+1F8F  53				push		ebx
+1F90  E8 F8 07 00 00			call		ior_queue_enqueue
+1F95  83 C4 08				add		esp,0x00000008
+1F98  5B				pop		ebx
+1F99  C3				ret
+1F9A				L$220:
+1F9A  68 E8 00 00 00			push		offset g_bridge+0xe8
+1F9F  FF 74 24 10			push		dword ptr 0x10[esp]
+1FA3  53				push		ebx
+1FA4  E8 00 00 00 00			call		build_srb_from_ior
+1FA9  83 C4 0C				add		esp,0x0000000c
+1FAC  89 1D E4 00 00 00			mov		g_bridge+0xe4,ebx
+1FB2  C7 05 3C 02 00 00 01 00 00 00
+					mov		dword ptr g_bridge+0x23c,0x00000001
+1FBC  31 C0				xor		eax,eax
+1FBE  A3 00 00 00 00			mov		g_SrbCompleted,eax
+1FC3  A3 00 00 00 00			mov		g_ReadyForNext,eax
+1FC8  0F B6 05 EE 00 00 00		movzx		eax,byte ptr g_bridge+0xee
+1FCF  50				push		eax
+1FD0  0F B6 05 18 01 00 00		movzx		eax,byte ptr g_bridge+0x118
+1FD7  50				push		eax
+1FD8  0F B6 05 EA 00 00 00		movzx		eax,byte ptr g_bridge+0xea
+1FDF  50				push		eax
+1FE0  68 D8 02 00 00			push		offset L$352
+1FE5  E8 00 00 00 00			call		_VxD_Debug_Printf
+1FEA  83 C4 10				add		esp,0x00000010
+1FED  68 E8 00 00 00			push		offset g_bridge+0xe8
+1FF2  FF 35 00 00 00 00			push		dword ptr g_DeviceExtension
+1FF8  FF 15 00 00 00 00			call		dword ptr g_HwStartIo
+1FFE  83 C4 08				add		esp,0x00000008
+2001  85 C0				test		eax,eax
+2003  75 24				jne		L$221
+2005  68 0F 03 00 00			push		offset L$353
+200A  E8 00 00 00 00			call		_VxD_Debug_Printf
+200F  83 C4 04				add		esp,0x00000004
+2012  31 C0				xor		eax,eax
+2014  A3 3C 02 00 00			mov		g_bridge+0x23c,eax
+2019  A3 E4 00 00 00			mov		g_bridge+0xe4,eax
+201E  6A 02				push		0x00000002
+2020  53				push		ebx
+2021  E8 00 00 00 00			call		complete_ior
+2026  83 C4 08				add		esp,0x00000008
+2029				L$221:
+2029  5B				pop		ebx
+202A  C3				ret
+202B				build_srb_from_ior:
+202B  53				push		ebx
+202C  56				push		esi
+202D  57				push		edi
+202E  55				push		ebp
+202F  83 EC 04				sub		esp,0x00000004
+2032  8B 74 24 18			mov		esi,0x18[esp]
+2036  8B 5C 24 20			mov		ebx,0x20[esp]
+203A  FF 74 24 1C			push		dword ptr 0x1c[esp]
+203E  E8 00 00 00 00			call		find_device_for_dcb
+2043  89 C5				mov		ebp,eax
+2045  83 C4 04				add		esp,0x00000004
+2048  89 C7				mov		edi,eax
+204A  6A 40				push		0x00000040
+204C  53				push		ebx
+204D  E8 00 00 00 00			call		zero_mem
+2052  83 C4 08				add		esp,0x00000008
+2055  66 C7 03 40 00			mov		word ptr [ebx],0x0040
+205A  C6 43 02 00			mov		byte ptr 0x2[ebx],0x00
+205E  C6 43 05 00			mov		byte ptr 0x5[ebx],0x00
+2062  85 ED				test		ebp,ebp
+2064  74 05				je		L$222
+2066  8A 45 04				mov		al,0x4[ebp]
+2069  EB 07				jmp		L$223
+206B				L$222:
+206B  8B 44 24 1C			mov		eax,0x1c[esp]
+206F  8A 40 13				mov		al,0x13[eax]
+2072				L$223:
+2072  88 43 06				mov		0x6[ebx],al
+2075  85 FF				test		edi,edi
+2077  74 05				je		L$224
+2079  8A 47 05				mov		al,0x5[edi]
+207C  EB 07				jmp		L$225
+207E				L$224:
+207E  8B 44 24 1C			mov		eax,0x1c[esp]
+2082  8A 40 14				mov		al,0x14[eax]
+2085				L$225:
+2085  88 43 07				mov		0x7[ebx],al
+2088  C6 43 03 00			mov		byte ptr 0x3[ebx],0x00
+208C  C7 43 14 0A 00 00 00		mov		dword ptr 0x14[ebx],0x0000000a
+2093  C7 43 1C 28 01 00 00		mov		dword ptr 0x1c[ebx],offset g_bridge+0x128
+209A  C6 43 0B 12			mov		byte ptr 0xb[ebx],0x12
+209E  89 73 24				mov		0x24[ebx],esi
+20A1  A1 00 00 00 00			mov		eax,g_SrbExtensionSize
+20A6  85 C0				test		eax,eax
+20A8  76 1F				jbe		L$226
+20AA  3D 00 01 00 00			cmp		eax,0x00000100
+20AF  77 18				ja		L$226
+20B1  C7 43 28 3A 01 00 00		mov		dword ptr 0x28[ebx],offset g_bridge+0x13a
+20B8  FF 35 00 00 00 00			push		dword ptr g_SrbExtensionSize
+20BE  FF 73 28				push		dword ptr 0x28[ebx]
+20C1  E8 00 00 00 00			call		zero_mem
+20C6  83 C4 08				add		esp,0x00000008
+20C9				L$226:
+20C9  66 8B 06				mov		ax,[esi]
+20CC  66 3D 0C 00			cmp		ax,0x000c
+20D0  72 58				jb		L$228
+20D2  0F 86 E6 02 00 00			jbe		L$250
+20D8  66 3D 12 00			cmp		ax,0x0012
+20DC  72 29				jb		L$227
+20DE  0F 86 56 03 00 00			jbe		L$253
+20E4  66 3D 17 00			cmp		ax,0x0017
+20E8  0F 84 FE 01 00 00			je		L$244
+20EE  66 3D 14 00			cmp		ax,0x0014
+20F2  0F 84 0F 02 00 00			je		L$246
+20F8  66 3D 13 00			cmp		ax,0x0013
+20FC  0F 84 EA 01 00 00			je		L$244
+2102  E9 64 03 00 00			jmp		L$254
+2107				L$227:
+2107  66 3D 0F 00			cmp		ax,0x000f
+210B  0F 84 C0 01 00 00			je		L$243
+2111  66 3D 0E 00			cmp		ax,0x000e
+2115  0F 84 B2 00 00 00			je		L$234
+211B  66 3D 0D 00			cmp		ax,0x000d
+211F  0F 84 67 02 00 00			je		L$249
+2125  E9 41 03 00 00			jmp		L$254
+212A				L$228:
+212A  66 3D 03 00			cmp		ax,0x0003
+212E  72 29				jb		L$229
+2130  0F 86 F0 00 00 00			jbe		L$238
+2136  66 3D 0B 00			cmp		ax,0x000b
+213A  0F 84 1A 02 00 00			je		L$248
+2140  66 3D 0A 00			cmp		ax,0x000a
+2144  0F 84 E1 01 00 00			je		L$247
+214A  66 3D 04 00			cmp		ax,0x0004
+214E  0F 84 9C 02 00 00			je		L$251
+2154  E9 12 03 00 00			jmp		L$254
+2159				L$229:
+2159  66 3D 02 00			cmp		ax,0x0002
+215D  74 6E				je		L$234
+215F  66 3D 01 00			cmp		ax,0x0001
+2163  0F 85 02 03 00 00			jne		L$254
+2169  8B 46 14				mov		eax,0x14[esi]
+216C  89 04 24				mov		[esp],eax
+216F  8B 6E 10				mov		ebp,0x10[esi]
+2172  85 FF				test		edi,edi
+2174  74 05				je		L$230
+2176  8B 7F 08				mov		edi,0x8[edi]
+2179  EB 05				jmp		L$231
+217B				L$230:
+217B  BF 00 08 00 00			mov		edi,0x00000800
+2180				L$231:
+2180  31 D2				xor		edx,edx
+2182  89 E8				mov		eax,ebp
+2184  F7 F7				div		edi
+2186  89 C1				mov		ecx,eax
+2188  66 85 C0				test		ax,ax
+218B  75 05				jne		L$232
+218D  B9 01 00 00 00			mov		ecx,0x00000001
+2192				L$232:
+2192  8B 46 0C				mov		eax,0xc[esi]
+2195  89 43 18				mov		0x18[ebx],eax
+2198  89 6B 10				mov		0x10[ebx],ebp
+219B  C7 43 0C 60 00 00 00		mov		dword ptr 0xc[ebx],0x00000060
+21A2  6A 00				push		0x00000000
+21A4  0F B7 F1				movzx		esi,cx
+21A7  56				push		esi
+21A8  FF 74 24 08			push		dword ptr 0x8[esp]
+21AC  53				push		ebx
+21AD  E8 00 00 00 00			call		build_read_write_cdb
+21B2  83 C4 10				add		esp,0x00000010
+21B5  55				push		ebp
+21B6  56				push		esi
+21B7  FF 74 24 08			push		dword ptr 0x8[esp]
+21BB  68 31 03 00 00			push		offset L$354
+21C0				L$233:
+21C0  E8 00 00 00 00			call		_VxD_Debug_Printf
+21C5  83 C4 10				add		esp,0x00000010
+21C8  E9 C6 02 00 00			jmp		L$255
+21CD				L$234:
+21CD  8B 46 14				mov		eax,0x14[esi]
+21D0  89 04 24				mov		[esp],eax
+21D3  8B 6E 10				mov		ebp,0x10[esi]
+21D6  85 FF				test		edi,edi
+21D8  74 05				je		L$235
+21DA  8B 7F 08				mov		edi,0x8[edi]
+21DD  EB 05				jmp		L$236
+21DF				L$235:
+21DF  BF 00 08 00 00			mov		edi,0x00000800
+21E4				L$236:
+21E4  31 D2				xor		edx,edx
+21E6  89 E8				mov		eax,ebp
+21E8  F7 F7				div		edi
+21EA  89 C1				mov		ecx,eax
+21EC  66 85 C0				test		ax,ax
+21EF  75 05				jne		L$237
+21F1  B9 01 00 00 00			mov		ecx,0x00000001
+21F6				L$237:
+21F6  8B 46 0C				mov		eax,0xc[esi]
+21F9  89 43 18				mov		0x18[ebx],eax
+21FC  89 6B 10				mov		0x10[ebx],ebp
+21FF  C7 43 0C A0 00 00 00		mov		dword ptr 0xc[ebx],0x000000a0
+2206  6A 01				push		0x00000001
+2208  0F B7 F1				movzx		esi,cx
+220B  56				push		esi
+220C  FF 74 24 08			push		dword ptr 0x8[esp]
+2210  53				push		ebx
+2211  E8 00 00 00 00			call		build_read_write_cdb
+2216  83 C4 10				add		esp,0x00000010
+2219  55				push		ebp
+221A  56				push		esi
+221B  FF 74 24 08			push		dword ptr 0x8[esp]
+221F  68 5A 03 00 00			push		offset L$355
+2224  EB 9A				jmp		L$233
+2226				L$238:
+2226  8B 46 14				mov		eax,0x14[esi]
+2229  89 04 24				mov		[esp],eax
+222C  8B 6E 10				mov		ebp,0x10[esi]
+222F  85 FF				test		edi,edi
+2231  74 05				je		L$239
+2233  8B 77 08				mov		esi,0x8[edi]
+2236  EB 05				jmp		L$240
+2238				L$239:
+2238  BE 00 08 00 00			mov		esi,0x00000800
+223D				L$240:
+223D  31 D2				xor		edx,edx
+223F  89 E8				mov		eax,ebp
+2241  F7 F6				div		esi
+2243  89 C1				mov		ecx,eax
+2245  66 85 C0				test		ax,ax
+2248  75 05				jne		L$241
+224A  B9 01 00 00 00			mov		ecx,0x00000001
+224F				L$241:
+224F  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+2256  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+225D  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+2264  C6 43 0A 0A			mov		byte ptr 0xa[ebx],0x0a
+2268  66 C7 43 30 2F 00			mov		word ptr 0x30[ebx],0x002f
+226E  8B 04 24				mov		eax,[esp]
+2271  C1 E8 18				shr		eax,0x18
+2274  25 FF 00 00 00			and		eax,0x000000ff
+2279  88 43 32				mov		0x32[ebx],al
+227C  8B 04 24				mov		eax,[esp]
+227F  C1 E8 10				shr		eax,0x10
+2282  25 FF 00 00 00			and		eax,0x000000ff
+2287  88 43 33				mov		0x33[ebx],al
+228A  8B 04 24				mov		eax,[esp]
+228D  C1 E8 08				shr		eax,0x08
+2290  25 FF 00 00 00			and		eax,0x000000ff
+2295  88 43 34				mov		0x34[ebx],al
+2298  8A 04 24				mov		al,[esp]
+229B  88 43 35				mov		0x35[ebx],al
+229E  C6 43 36 00			mov		byte ptr 0x36[ebx],0x00
+22A2  0F B7 C1				movzx		eax,cx
+22A5  89 C2				mov		edx,eax
+22A7  C1 FA 08				sar		edx,0x08
+22AA  81 E2 FF 00 00 00			and		edx,0x000000ff
+22B0  88 53 37				mov		0x37[ebx],dl
+22B3  88 4B 38				mov		0x38[ebx],cl
+22B6  C6 43 39 00			mov		byte ptr 0x39[ebx],0x00
+22BA  50				push		eax
+22BB  FF 74 24 04			push		dword ptr 0x4[esp]
+22BF  68 84 03 00 00			push		offset L$356
+22C4				L$242:
+22C4  E8 00 00 00 00			call		_VxD_Debug_Printf
+22C9  83 C4 0C				add		esp,0x0000000c
+22CC  E9 C2 01 00 00			jmp		L$255
+22D1				L$243:
+22D1  53				push		ebx
+22D2  56				push		esi
+22D3  E8 00 00 00 00			call		build_passthrough_srb
+22D8  83 C4 08				add		esp,0x00000008
+22DB  0F B6 43 0A			movzx		eax,byte ptr 0xa[ebx]
+22DF  50				push		eax
+22E0  0F B6 43 30			movzx		eax,byte ptr 0x30[ebx]
+22E4  50				push		eax
+22E5  68 A5 03 00 00			push		offset L$357
+22EA  EB D8				jmp		L$242
+22EC				L$244:
+22EC  53				push		ebx
+22ED  E8 00 00 00 00			call		build_test_unit_ready_cdb
+22F2  83 C4 04				add		esp,0x00000004
+22F5  68 CD 03 00 00			push		offset L$358
+22FA				L$245:
+22FA  E8 00 00 00 00			call		_VxD_Debug_Printf
+22FF  83 C4 04				add		esp,0x00000004
+2302  E9 8C 01 00 00			jmp		L$255
+2307				L$246:
+2307  C6 43 02 12			mov		byte ptr 0x2[ebx],0x12
+230B  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+2312  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+2319  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+2320  C6 43 0A 00			mov		byte ptr 0xa[ebx],0x00
+2324  68 E2 03 00 00			push		offset L$359
+2329  EB CF				jmp		L$245
+232B				L$247:
+232B  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+2332  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+2339  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+2340  C6 43 0A 06			mov		byte ptr 0xa[ebx],0x06
+2344  C6 43 30 1E			mov		byte ptr 0x30[ebx],0x1e
+2348  C6 43 34 01			mov		byte ptr 0x34[ebx],0x01
+234C  C7 43 14 05 00 00 00		mov		dword ptr 0x14[ebx],0x00000005
+2353  68 F5 03 00 00			push		offset L$360
+2358  EB A0				jmp		L$245
+235A				L$248:
+235A  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+2361  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+2368  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+236F  C6 43 0A 06			mov		byte ptr 0xa[ebx],0x06
+2373  C6 43 30 1E			mov		byte ptr 0x30[ebx],0x1e
+2377  C6 43 34 00			mov		byte ptr 0x34[ebx],0x00
+237B  C7 43 14 05 00 00 00		mov		dword ptr 0x14[ebx],0x00000005
+2382  68 09 04 00 00			push		offset L$361
+2387  E9 6E FF FF FF			jmp		L$245
+238C				L$249:
+238C  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+2393  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+239A  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+23A1  C6 43 0A 06			mov		byte ptr 0xa[ebx],0x06
+23A5  C6 43 30 1B			mov		byte ptr 0x30[ebx],0x1b
+23A9  C6 43 34 02			mov		byte ptr 0x34[ebx],0x02
+23AD  C7 43 14 0A 00 00 00		mov		dword ptr 0x14[ebx],0x0000000a
+23B4  68 1F 04 00 00			push		offset L$362
+23B9  E9 3C FF FF FF			jmp		L$245
+23BE				L$250:
+23BE  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+23C5  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+23CC  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+23D3  C6 43 0A 06			mov		byte ptr 0xa[ebx],0x06
+23D7  C6 43 30 1B			mov		byte ptr 0x30[ebx],0x1b
+23DB  C6 43 34 03			mov		byte ptr 0x34[ebx],0x03
+23DF  C7 43 14 0A 00 00 00		mov		dword ptr 0x14[ebx],0x0000000a
+23E6  68 34 04 00 00			push		offset L$363
+23EB  E9 0A FF FF FF			jmp		L$245
+23F0				L$251:
+23F0  83 3D 3C 02 00 00 00		cmp		dword ptr g_bridge+0x23c,0x00000000
+23F7  74 1A				je		L$252
+23F9  83 3D 00 00 00 00 00		cmp		dword ptr g_HwResetBus,0x00000000
+2400  74 11				je		L$252
+2402  6A 00				push		0x00000000
+2404  FF 35 00 00 00 00			push		dword ptr g_DeviceExtension
+240A  FF 15 00 00 00 00			call		dword ptr g_HwResetBus
+2410  83 C4 08				add		esp,0x00000008
+2413				L$252:
+2413  C6 43 02 10			mov		byte ptr 0x2[ebx],0x10
+2417  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+241E  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+2425  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+242C  C6 43 0A 00			mov		byte ptr 0xa[ebx],0x00
+2430  68 48 04 00 00			push		offset L$364
+2435  E9 C0 FE FF FF			jmp		L$245
+243A				L$253:
+243A  6A 10				push		0x00000010
+243C  E8 00 00 00 00			call		ior_queue_drain
+2441  83 C4 04				add		esp,0x00000004
+2444  C6 43 02 13			mov		byte ptr 0x2[ebx],0x13
+2448  C7 43 18 00 00 00 00		mov		dword ptr 0x18[ebx],0x00000000
+244F  C7 43 10 00 00 00 00		mov		dword ptr 0x10[ebx],0x00000000
+2456  C7 43 0C 00 00 00 00		mov		dword ptr 0xc[ebx],0x00000000
+245D  C6 43 0A 00			mov		byte ptr 0xa[ebx],0x00
+2461  68 58 04 00 00			push		offset L$365
+2466  E9 8F FE FF FF			jmp		L$245
+246B				L$254:
+246B  0F B7 06				movzx		eax,word ptr [esi]
+246E  50				push		eax
+246F  68 6D 04 00 00			push		offset L$366
+2474  E8 00 00 00 00			call		_VxD_Debug_Printf
+2479  83 C4 08				add		esp,0x00000008
+247C  31 C0				xor		eax,eax
+247E  A3 3C 02 00 00			mov		g_bridge+0x23c,eax
+2483  A3 E4 00 00 00			mov		g_bridge+0xe4,eax
+2488  6A 0C				push		0x0000000c
+248A  56				push		esi
+248B  E8 00 00 00 00			call		complete_ior
+2490  83 C4 08				add		esp,0x00000008
+2493				L$255:
+2493  83 C4 04				add		esp,0x00000004
+2496  5D				pop		ebp
+2497  5F				pop		edi
+2498  5E				pop		esi
+2499  5B				pop		ebx
+249A  C3				ret
+249B				build_read_write_cdb:
+249B  8B 44 24 04			mov		eax,0x4[esp]
+249F  8B 4C 24 08			mov		ecx,0x8[esp]
+24A3  C6 40 0A 0A			mov		byte ptr 0xa[eax],0x0a
+24A7  83 7C 24 10 00			cmp		dword ptr 0x10[esp],0x00000000
+24AC  74 07				je		L$256
+24AE  BA 2A 00 00 00			mov		edx,0x0000002a
+24B3  EB 05				jmp		L$257
+24B5				L$256:
+24B5  BA 28 00 00 00			mov		edx,0x00000028
+24BA				L$257:
+24BA  88 50 30				mov		0x30[eax],dl
+24BD  C6 40 31 00			mov		byte ptr 0x31[eax],0x00
+24C1  89 CA				mov		edx,ecx
+24C3  C1 EA 18				shr		edx,0x18
+24C6  81 E2 FF 00 00 00			and		edx,0x000000ff
+24CC  88 50 32				mov		0x32[eax],dl
+24CF  89 CA				mov		edx,ecx
+24D1  C1 EA 10				shr		edx,0x10
+24D4  81 E2 FF 00 00 00			and		edx,0x000000ff
+24DA  88 50 33				mov		0x33[eax],dl
+24DD  89 CA				mov		edx,ecx
+24DF  C1 EA 08				shr		edx,0x08
+24E2  81 E2 FF 00 00 00			and		edx,0x000000ff
+24E8  88 50 34				mov		0x34[eax],dl
+24EB  88 48 35				mov		0x35[eax],cl
+24EE  C6 40 36 00			mov		byte ptr 0x36[eax],0x00
+24F2  0F B7 54 24 0C			movzx		edx,word ptr 0xc[esp]
+24F7  C1 FA 08				sar		edx,0x08
+24FA  81 E2 FF 00 00 00			and		edx,0x000000ff
+2500  88 50 37				mov		0x37[eax],dl
+2503  8A 54 24 0C			mov		dl,0xc[esp]
+2507  88 50 38				mov		0x38[eax],dl
+250A  C6 40 39 00			mov		byte ptr 0x39[eax],0x00
+250E  C3				ret
+250F				build_test_unit_ready_cdb:
+250F  8B 44 24 04			mov		eax,0x4[esp]
+2513  C6 40 0A 06			mov		byte ptr 0xa[eax],0x06
+2517  C7 40 18 00 00 00 00		mov		dword ptr 0x18[eax],0x00000000
+251E  C7 40 10 00 00 00 00		mov		dword ptr 0x10[eax],0x00000000
+2525  C7 40 0C 00 00 00 00		mov		dword ptr 0xc[eax],0x00000000
+252C  C7 40 30 00 00 00 00		mov		dword ptr 0x30[eax],0x00000000
+2533  66 C7 40 34 00 00			mov		word ptr 0x34[eax],0x0000
+2539  C3				ret
+253A				build_passthrough_srb:
+253A  53				push		ebx
+253B  56				push		esi
+253C  57				push		edi
+253D  55				push		ebp
+253E  8B 6C 24 14			mov		ebp,0x14[esp]
+2542  8B 44 24 18			mov		eax,0x18[esp]
+2546  8D 7D 48				lea		edi,0x48[ebp]
+2549  8A 57 10				mov		dl,0x10[edi]
+254C  88 50 0A				mov		0xa[eax],dl
+254F  80 FA 10				cmp		dl,0x10
+2552  76 04				jbe		L$258
+2554  C6 40 0A 10			mov		byte ptr 0xa[eax],0x10
+2558				L$258:
+2558  31 D2				xor		edx,edx
+255A				L$259:
+255A  0F B6 48 0A			movzx		ecx,byte ptr 0xa[eax]
+255E  39 CA				cmp		edx,ecx
+2560  73 0E				jae		L$260
+2562  8D 34 17				lea		esi,[edi+edx]
+2565  8D 0C 10				lea		ecx,[eax+edx]
+2568  8A 1E				mov		bl,[esi]
+256A  88 59 30				mov		0x30[ecx],bl
+256D  42				inc		edx
+256E  EB EA				jmp		L$259
+2570				L$260:
+2570  F6 47 24 01			test		byte ptr 0x24[edi],0x01
+2574  74 15				je		L$262
+2576  C7 40 0C 60 00 00 00		mov		dword ptr 0xc[eax],0x00000060
+257D				L$261:
+257D  8B 55 0C				mov		edx,0xc[ebp]
+2580  89 50 18				mov		0x18[eax],edx
+2583  8B 57 28				mov		edx,0x28[edi]
+2586  89 50 10				mov		0x10[eax],edx
+2589  EB 24				jmp		L$264
+258B				L$262:
+258B  F6 47 24 02			test		byte ptr 0x24[edi],0x02
+258F  74 09				je		L$263
+2591  C7 40 0C A0 00 00 00		mov		dword ptr 0xc[eax],0x000000a0
+2598  EB E3				jmp		L$261
+259A				L$263:
+259A  C7 40 0C 00 00 00 00		mov		dword ptr 0xc[eax],0x00000000
+25A1  C7 40 18 00 00 00 00		mov		dword ptr 0x18[eax],0x00000000
+25A8  C7 40 10 00 00 00 00		mov		dword ptr 0x10[eax],0x00000000
+25AF				L$264:
+25AF  C7 40 14 1E 00 00 00		mov		dword ptr 0x14[eax],0x0000001e
+25B6  5D				pop		ebp
+25B7  5F				pop		edi
+25B8  5E				pop		esi
+25B9  5B				pop		ebx
+25BA  C3				ret
+
+Routine Size: 1972 bytes,    Routine Base: _TEXT + 1E07
+
+25BB				srb_complete:
+25BB  53				push		ebx
+25BC  56				push		esi
+25BD  57				push		edi
+25BE  83 EC 0C				sub		esp,0x0000000c
+25C1  8B 5C 24 1C			mov		ebx,0x1c[esp]
+25C5  8B 73 24				mov		esi,0x24[ebx]
+25C8  85 F6				test		esi,esi
+25CA  75 1E				jne		L$265
+25CC  68 95 04 00 00			push		offset L$367
+25D1  E8 00 00 00 00			call		_VxD_Debug_Printf
+25D6  83 C4 04				add		esp,0x00000004
+25D9  89 35 3C 02 00 00			mov		g_bridge+0x23c,esi
+25DF  89 35 E4 00 00 00			mov		g_bridge+0xe4,esi
+25E5  E9 FE 00 00 00			jmp		L$271
+25EA				L$265:
+25EA  0F B6 43 04			movzx		eax,byte ptr 0x4[ebx]
+25EE  50				push		eax
+25EF  0F B6 43 03			movzx		eax,byte ptr 0x3[ebx]
+25F3  50				push		eax
+25F4  E8 F6 00 00 00			call		srb_status_to_ior_status
+25F9  83 C4 08				add		esp,0x00000008
+25FC  89 C7				mov		edi,eax
+25FE  0F B7 C0				movzx		eax,ax
+2601  50				push		eax
+2602  0F B6 43 04			movzx		eax,byte ptr 0x4[ebx]
+2606  50				push		eax
+2607  0F B6 43 03			movzx		eax,byte ptr 0x3[ebx]
+260B  50				push		eax
+260C  68 C2 04 00 00			push		offset L$368
+2611  E8 00 00 00 00			call		_VxD_Debug_Printf
+2616  83 C4 10				add		esp,0x00000010
+2619  66 8B 06				mov		ax,[esi]
+261C  66 3D 13 00			cmp		ax,0x0013
+2620  74 06				je		L$266
+2622  66 3D 17 00			cmp		ax,0x0017
+2626  75 18				jne		L$267
+2628				L$266:
+2628  80 7B 04 02			cmp		byte ptr 0x4[ebx],0x02
+262C  75 12				jne		L$267
+262E  8B 43 1C				mov		eax,0x1c[ebx]
+2631  85 C0				test		eax,eax
+2633  74 0B				je		L$267
+2635  80 78 02 06			cmp		byte ptr 0x2[eax],0x06
+2639  75 05				jne		L$267
+263B  BF 0F 00 00 00			mov		edi,0x0000000f
+2640				L$267:
+2640  66 89 7E 02			mov		0x2[esi],di
+2644  66 85 FF				test		di,di
+2647  74 0B				je		L$268
+2649  8B 43 10				mov		eax,0x10[ebx]
+264C  3B 46 10				cmp		eax,0x10[esi]
+264F  73 03				jae		L$268
+2651  89 46 10				mov		0x10[esi],eax
+2654				L$268:
+2654  66 83 3E 0F			cmp		word ptr [esi],0x000f
+2658  75 3B				jne		L$270
+265A  80 7B 0B 00			cmp		byte ptr 0xb[ebx],0x00
+265E  76 35				jbe		L$270
+2660  83 7B 1C 00			cmp		dword ptr 0x1c[ebx],0x00000000
+2664  74 2F				je		L$270
+2666  0F B6 43 0B			movzx		eax,byte ptr 0xb[ebx]
+266A  89 44 24 08			mov		0x8[esp],eax
+266E  83 F8 12				cmp		eax,0x00000012
+2671  76 08				jbe		L$269
+2673  C7 44 24 08 12 00 00 00		mov		dword ptr 0x8[esp],0x00000012
+267B				L$269:
+267B  FF 74 24 08			push		dword ptr 0x8[esp]
+267F  FF 73 1C				push		dword ptr 0x1c[ebx]
+2682  8D 46 59				lea		eax,0x59[esi]
+2685  50				push		eax
+2686  E8 00 00 00 00			call		copy_mem
+268B  83 C4 0C				add		esp,0x0000000c
+268E  8A 44 24 08			mov		al,0x8[esp]
+2692  88 46 6B				mov		0x6b[esi],al
+2695				L$270:
+2695  31 C0				xor		eax,eax
+2697  A3 E4 00 00 00			mov		g_bridge+0xe4,eax
+269C  A3 3C 02 00 00			mov		g_bridge+0x23c,eax
+26A1  0F B7 FF				movzx		edi,di
+26A4  57				push		edi
+26A5  56				push		esi
+26A6  E8 00 00 00 00			call		complete_ior
+26AB  83 C4 08				add		esp,0x00000008
+26AE  8D 44 24 04			lea		eax,0x4[esp]
+26B2  50				push		eax
+26B3  8D 44 24 04			lea		eax,0x4[esp]
+26B7  50				push		eax
+26B8  E8 4B 01 00 00			call		ior_queue_dequeue
+26BD  83 C4 08				add		esp,0x00000008
+26C0  85 C0				test		eax,eax
+26C2  74 24				je		L$271
+26C4  8B 04 24				mov		eax,[esp]
+26C7  0F B7 00				movzx		eax,word ptr [eax]
+26CA  50				push		eax
+26CB  68 04 05 00 00			push		offset L$369
+26D0  E8 00 00 00 00			call		_VxD_Debug_Printf
+26D5  83 C4 08				add		esp,0x00000008
+26D8  FF 74 24 04			push		dword ptr 0x4[esp]
+26DC  FF 74 24 04			push		dword ptr 0x4[esp]
+26E0  E8 00 00 00 00			call		ior_handler
+26E5  83 C4 08				add		esp,0x00000008
+26E8				L$271:
+26E8  83 C4 0C				add		esp,0x0000000c
+26EB  5F				pop		edi
+26EC  5E				pop		esi
+26ED  5B				pop		ebx
+26EE  C3				ret
+26EF				srb_status_to_ior_status:
+26EF  8A 44 24 04			mov		al,0x4[esp]
+26F3  24 3F				and		al,0x3f
+26F5  3C 06				cmp		al,0x06
+26F7  72 2B				jb		L$273
+26F9  0F 86 5F 00 00 00			jbe		L$281
+26FF  3C 0A				cmp		al,0x0a
+2701  72 17				jb		L$272
+2703  0F 86 4F 00 00 00			jbe		L$280
+2709  3C 12				cmp		al,0x12
+270B  74 2D				je		L$275
+270D  3C 0E				cmp		al,0x0e
+270F  0F 84 5B 00 00 00			je		L$284
+2715  E9 5C 00 00 00			jmp		L$285
+271A				L$272:
+271A  3C 09				cmp		al,0x09
+271C  74 4C				je		L$283
+271E  3C 08				cmp		al,0x08
+2720  74 42				je		L$282
+2722  EB 52				jmp		L$285
+2724				L$273:
+2724  3C 01				cmp		al,0x01
+2726  72 0C				jb		L$274
+2728  76 10				jbe		L$275
+272A  3C 04				cmp		al,0x04
+272C  74 18				je		L$278
+272E  3C 02				cmp		al,0x02
+2730  74 0E				je		L$277
+2732  EB 42				jmp		L$285
+2734				L$274:
+2734  84 C0				test		al,al
+2736  74 05				je		L$276
+2738  EB 3C				jmp		L$285
+273A				L$275:
+273A  31 C0				xor		eax,eax
+273C  C3				ret
+273D				L$276:
+273D  30 E4				xor		ah,ah
+273F  C3				ret
+2740				L$277:
+2740  B8 10 00 00 00			mov		eax,0x00000010
+2745  C3				ret
+2746				L$278:
+2746  8A 44 24 08			mov		al,0x8[esp]
+274A  3C 02				cmp		al,0x02
+274C  75 06				jne		L$279
+274E  B8 02 00 00 00			mov		eax,0x00000002
+2753  C3				ret
+2754				L$279:
+2754  3C 08				cmp		al,0x08
+2756  75 2F				jne		L$286
+2758				L$280:
+2758  B8 08 00 00 00			mov		eax,0x00000008
+275D  C3				ret
+275E				L$281:
+275E  B8 03 00 00 00			mov		eax,0x00000003
+2763  C3				ret
+2764				L$282:
+2764  B8 01 00 00 00			mov		eax,0x00000001
+2769  C3				ret
+276A				L$283:
+276A  B8 0B 00 00 00			mov		eax,0x0000000b
+276F  C3				ret
+2770				L$284:
+2770  B8 0F 00 00 00			mov		eax,0x0000000f
+2775  C3				ret
+2776				L$285:
+2776  0F B6 C0				movzx		eax,al
+2779  50				push		eax
+277A  68 2B 05 00 00			push		offset L$370
+277F  E8 00 00 00 00			call		_VxD_Debug_Printf
+2784  83 C4 08				add		esp,0x00000008
+2787				L$286:
+2787  B8 05 00 00 00			mov		eax,0x00000005
+278C  C3				ret
+278D				ior_queue_enqueue:
+278D  6A 01				push		0x00000001
+278F  6A 0C				push		0x0000000c
+2791  E8 00 00 00 00			call		_VxD_HeapAllocate
+2796  83 C4 08				add		esp,0x00000008
+2799  89 C1				mov		ecx,eax
+279B  85 C0				test		eax,eax
+279D  75 1C				jne		L$287
+279F  68 4C 05 00 00			push		offset L$371
+27A4  E8 00 00 00 00			call		_VxD_Debug_Printf
+27A9  83 C4 04				add		esp,0x00000004
+27AC  6A 0E				push		0x0000000e
+27AE  FF 74 24 08			push		dword ptr 0x8[esp]
+27B2  E8 00 00 00 00			call		complete_ior
+27B7  83 C4 08				add		esp,0x00000008
+27BA  C3				ret
+27BB				L$287:
+27BB  8B 54 24 04			mov		edx,0x4[esp]
+27BF  89 10				mov		[eax],edx
+27C1  8B 54 24 08			mov		edx,0x8[esp]
+27C5  89 50 04				mov		0x4[eax],edx
+27C8  C7 40 08 00 00 00 00		mov		dword ptr 0x8[eax],0x00000000
+27CF  83 3D DC 00 00 00 00		cmp		dword ptr g_bridge+0xdc,0x00000000
+27D6  74 0B				je		L$288
+27D8  8B 15 DC 00 00 00			mov		edx,g_bridge+0xdc
+27DE  89 42 08				mov		0x8[edx],eax
+27E1  EB 05				jmp		L$289
+27E3				L$288:
+27E3  A3 D8 00 00 00			mov		g_bridge+0xd8,eax
+27E8				L$289:
+27E8  89 0D DC 00 00 00			mov		g_bridge+0xdc,ecx
+27EE  FF 05 E0 00 00 00			inc		dword ptr g_bridge+0xe0
+27F4  FF 35 E0 00 00 00			push		dword ptr g_bridge+0xe0
+27FA  68 75 05 00 00			push		offset L$372
+27FF  E8 00 00 00 00			call		_VxD_Debug_Printf
+2804  83 C4 08				add		esp,0x00000008
+2807  C3				ret
+2808				ior_queue_dequeue:
+2808  A1 D8 00 00 00			mov		eax,g_bridge+0xd8
+280D  85 C0				test		eax,eax
+280F  75 01				jne		L$290
+2811  C3				ret
+2812				L$290:
+2812  8B 50 08				mov		edx,0x8[eax]
+2815  89 15 D8 00 00 00			mov		g_bridge+0xd8,edx
+281B  85 D2				test		edx,edx
+281D  75 06				jne		L$291
+281F  89 15 DC 00 00 00			mov		g_bridge+0xdc,edx
+2825				L$291:
+2825  FF 0D E0 00 00 00			dec		dword ptr g_bridge+0xe0
+282B  8B 10				mov		edx,[eax]
+282D  8B 4C 24 04			mov		ecx,0x4[esp]
+2831  89 11				mov		[ecx],edx
+2833  8B 50 04				mov		edx,0x4[eax]
+2836  8B 4C 24 08			mov		ecx,0x8[esp]
+283A  89 11				mov		[ecx],edx
+283C  6A 00				push		0x00000000
+283E  50				push		eax
+283F  E8 00 00 00 00			call		_VxD_HeapFree
+2844  83 C4 08				add		esp,0x00000008
+2847  B8 01 00 00 00			mov		eax,0x00000001
+284C  C3				ret
+284D				ior_queue_drain:
+284D  53				push		ebx
+284E  56				push		esi
+284F  83 EC 08				sub		esp,0x00000008
+2852  8B 74 24 14			mov		esi,0x14[esp]
+2856  0F B7 DE				movzx		ebx,si
+2859				L$292:
+2859  8D 44 24 04			lea		eax,0x4[esp]
+285D  50				push		eax
+285E  8D 44 24 04			lea		eax,0x4[esp]
+2862  50				push		eax
+2863  E8 A0 FF FF FF			call		ior_queue_dequeue
+2868  83 C4 08				add		esp,0x00000008
+286B  85 C0				test		eax,eax
+286D  0F 84 79 E4 FF FF			je		L$89
+2873  53				push		ebx
+2874  8B 44 24 04			mov		eax,0x4[esp]
+2878  0F B7 00				movzx		eax,word ptr [eax]
+287B  50				push		eax
+287C  68 92 05 00 00			push		offset L$373
+2881  E8 00 00 00 00			call		_VxD_Debug_Printf
+2886  83 C4 0C				add		esp,0x0000000c
+2889  53				push		ebx
+288A  FF 74 24 04			push		dword ptr 0x4[esp]
+288E  E8 00 00 00 00			call		complete_ior
+2893  83 C4 08				add		esp,0x00000008
+2896  EB C1				jmp		L$292
+
+Routine Size: 733 bytes,    Routine Base: _TEXT + 25BB
+
+2898				bridge_create_dcb:
+2898  53				push		ebx
+2899  56				push		esi
+289A  57				push		edi
+289B  55				push		ebp
+289C  8B 7C 24 24			mov		edi,0x24[esp]
+28A0  8B 5C 24 28			mov		ebx,0x28[esp]
+28A4  8B 6C 24 2C			mov		ebp,0x2c[esp]
+28A8  FF 74 24 1C			push		dword ptr 0x1c[esp]
+28AC  0F B6 44 24 24			movzx		eax,byte ptr 0x24[esp]
+28B1  50				push		eax
+28B2  0F B6 44 24 1C			movzx		eax,byte ptr 0x1c[esp]
+28B7  50				push		eax
+28B8  68 C3 05 00 00			push		offset L$374
+28BD  E8 00 00 00 00			call		_VxD_Debug_Printf
+28C2  83 C4 10				add		esp,0x00000010
+28C5  6A 01				push		0x00000001
+28C7  6A 7C				push		0x0000007c
+28C9  E8 00 00 00 00			call		_VxD_HeapAllocate
+28CE  83 C4 08				add		esp,0x00000008
+28D1  89 C1				mov		ecx,eax
+28D3  85 C0				test		eax,eax
+28D5  75 14				jne		L$293
+28D7  68 F8 05 00 00			push		offset L$375
+28DC  E8 00 00 00 00			call		_VxD_Debug_Printf
+28E1  83 C4 04				add		esp,0x00000004
+28E4  31 C0				xor		eax,eax
+28E6  5D				pop		ebp
+28E7  5F				pop		edi
+28E8  5E				pop		esi
+28E9  5B				pop		ebx
+28EA  C3				ret
+28EB				L$293:
+28EB  C7 00 7C 00 00 00			mov		dword ptr [eax],0x0000007c
+28F1  C7 40 04 00 00 00 00		mov		dword ptr 0x4[eax],0x00000000
+28F8  C7 40 08 00 00 00 00		mov		dword ptr 0x8[eax],0x00000000
+28FF  8B 15 38 00 00 00			mov		edx,g_bridge+0x38
+2905  89 50 0C				mov		0xc[eax],edx
+2908  8A 54 24 20			mov		dl,0x20[esp]
+290C  88 50 10				mov		0x10[eax],dl
+290F  66 C7 40 11 00 00			mov		word ptr 0x11[eax],0x0000
+2915  8A 54 24 14			mov		dl,0x14[esp]
+2919  88 50 13				mov		0x13[eax],dl
+291C  8A 54 24 18			mov		dl,0x18[esp]
+2920  88 50 14				mov		0x14[eax],dl
+2923  C7 40 18 00 80 00 00		mov		dword ptr 0x18[eax],0x00008000
+292A  80 7C 24 20 05			cmp		byte ptr 0x20[esp],0x05
+292F  75 04				jne		L$294
+2931  80 48 18 04			or		byte ptr 0x18[eax],0x04
+2935				L$294:
+2935  80 7C 24 20 05			cmp		byte ptr 0x20[esp],0x05
+293A  75 2C				jne		L$295
+293C  C7 41 20 00 08 00 00		mov		dword ptr 0x20[ecx],0x00000800
+2943  C7 41 1C 0B 00 00 00		mov		dword ptr 0x1c[ecx],0x0000000b
+294A  C7 41 24 00 00 00 00		mov		dword ptr 0x24[ecx],0x00000000
+2951  C7 41 28 00 00 00 00		mov		dword ptr 0x28[ecx],0x00000000
+2958  C7 41 2C 00 00 00 00		mov		dword ptr 0x2c[ecx],0x00000000
+295F  C7 41 30 00 00 00 00		mov		dword ptr 0x30[ecx],0x00000000
+2966  EB 0E				jmp		L$296
+2968				L$295:
+2968  C7 41 20 00 02 00 00		mov		dword ptr 0x20[ecx],0x00000200
+296F  C7 41 1C 09 00 00 00		mov		dword ptr 0x1c[ecx],0x00000009
+2976				L$296:
+2976  C7 41 3C 00 00 01 00		mov		dword ptr 0x3c[ecx],0x00010000
+297D  85 FF				test		edi,edi
+297F  74 1A				je		L$299
+2981  31 C0				xor		eax,eax
+2983  EB 0E				jmp		L$298
+2985				L$297:
+2985  8D 34 01				lea		esi,[ecx+eax]
+2988  8A 12				mov		dl,[edx]
+298A  88 56 40				mov		0x40[esi],dl
+298D  40				inc		eax
+298E  83 F8 08				cmp		eax,0x00000008
+2991  73 08				jae		L$299
+2993				L$298:
+2993  8D 14 07				lea		edx,[edi+eax]
+2996  80 3A 00				cmp		byte ptr [edx],0x00
+2999  75 EA				jne		L$297
+299B				L$299:
+299B  85 DB				test		ebx,ebx
+299D  74 1A				je		L$302
+299F  31 C0				xor		eax,eax
+29A1  EB 0E				jmp		L$301
+29A3				L$300:
+29A3  8D 34 01				lea		esi,[ecx+eax]
+29A6  8A 12				mov		dl,[edx]
+29A8  88 56 48				mov		0x48[esi],dl
+29AB  40				inc		eax
+29AC  83 F8 10				cmp		eax,0x00000010
+29AF  73 08				jae		L$302
+29B1				L$301:
+29B1  8D 14 03				lea		edx,[ebx+eax]
+29B4  80 3A 00				cmp		byte ptr [edx],0x00
+29B7  75 EA				jne		L$300
+29B9				L$302:
+29B9  85 ED				test		ebp,ebp
+29BB  74 1A				je		L$305
+29BD  31 C0				xor		eax,eax
+29BF  EB 0E				jmp		L$304
+29C1				L$303:
+29C1  8D 34 01				lea		esi,[ecx+eax]
+29C4  8A 12				mov		dl,[edx]
+29C6  88 56 58				mov		0x58[esi],dl
+29C9  40				inc		eax
+29CA  83 F8 04				cmp		eax,0x00000004
+29CD  73 08				jae		L$305
+29CF				L$304:
+29CF  8D 14 28				lea		edx,[eax+ebp]
+29D2  80 3A 00				cmp		byte ptr [edx],0x00
+29D5  75 EA				jne		L$303
+29D7				L$305:
+29D7  89 C8				mov		eax,ecx
+29D9  5D				pop		ebp
+29DA				L$306:
+29DA  5F				pop		edi
+29DB  5E				pop		esi
+29DC  5B				pop		ebx
+29DD  C3				ret
+
+Routine Size: 326 bytes,    Routine Base: _TEXT + 2898
+
+29DE				bridge_enumerate_devices:
+29DE  53				push		ebx
+29DF  56				push		esi
+29E0  81 EC 90 00 00 00			sub		esp,0x00000090
+29E6  68 17 06 00 00			push		offset L$376
+29EB  E8 00 00 00 00			call		_VxD_Debug_Printf
+29F0  83 C4 04				add		esp,0x00000004
+29F3  C6 84 24 8C 00 00 00 00		mov		byte ptr 0x8c[esp],0x00
+29FB  BE 01 00 00 00			mov		esi,0x00000001
+2A00  E9 4F 01 00 00			jmp		L$321
+2A05				L$307:
+2A05  BB 20 A1 07 00			mov		ebx,0x0007a120
+2A0A				L$308:
+2A0A  83 3D 00 00 00 00 00		cmp		dword ptr g_SrbCompleted,0x00000000
+2A11  75 21				jne		L$310
+2A13  85 DB				test		ebx,ebx
+2A15  76 1D				jbe		L$310
+2A17  83 3D 00 00 00 00 00		cmp		dword ptr g_HwInterrupt,0x00000000
+2A1E  74 0F				je		L$309
+2A20  FF 35 00 00 00 00			push		dword ptr g_DeviceExtension
+2A26  FF 15 00 00 00 00			call		dword ptr g_HwInterrupt
+2A2C  83 C4 04				add		esp,0x00000004
+2A2F				L$309:
+2A2F  E4 80				in		al,0x80
+2A31  4B				dec		ebx
+2A32  EB D6				jmp		L$308
+2A34				L$310:
+2A34  8A 44 24 03			mov		al,0x3[esp]
+2A38  24 3F				and		al,0x3f
+2A3A  3C 01				cmp		al,0x01
+2A3C  74 21				je		L$311
+2A3E  0F B6 44 24 03			movzx		eax,byte ptr 0x3[esp]
+2A43  50				push		eax
+2A44  0F B6 84 24 90 00 00 00		movzx		eax,byte ptr 0x90[esp]
+2A4C  50				push		eax
+2A4D  68 6A 06 00 00			push		offset L$378
+2A52  E8 00 00 00 00			call		_VxD_Debug_Printf
+2A57  83 C4 0C				add		esp,0x0000000c
+2A5A  E9 E0 00 00 00			jmp		L$320
+2A5F				L$311:
+2A5F  8A 7C 24 40			mov		bh,0x40[esp]
+2A63  80 E7 1F				and		bh,0x1f
+2A66  6A 09				push		0x00000009
+2A68  8D 44 24 7C			lea		eax,0x7c[esp]
+2A6C  50				push		eax
+2A6D  E8 00 00 00 00			call		zero_mem
+2A72  83 C4 08				add		esp,0x00000008
+2A75  6A 11				push		0x00000011
+2A77  8D 44 24 68			lea		eax,0x68[esp]
+2A7B  50				push		eax
+2A7C  E8 00 00 00 00			call		zero_mem
+2A81  83 C4 08				add		esp,0x00000008
+2A84  6A 05				push		0x00000005
+2A86  8D 84 24 88 00 00 00		lea		eax,0x88[esp]
+2A8D  50				push		eax
+2A8E  E8 00 00 00 00			call		zero_mem
+2A93  83 C4 08				add		esp,0x00000008
+2A96  31 C0				xor		eax,eax
+2A98				L$312:
+2A98  8A 5C 04 48			mov		bl,0x48[esp+eax]
+2A9C  88 5C 04 78			mov		0x78[esp+eax],bl
+2AA0  40				inc		eax
+2AA1  83 F8 08				cmp		eax,0x00000008
+2AA4  72 F2				jb		L$312
+2AA6  31 C0				xor		eax,eax
+2AA8				L$313:
+2AA8  8A 5C 04 50			mov		bl,0x50[esp+eax]
+2AAC  88 5C 04 64			mov		0x64[esp+eax],bl
+2AB0  40				inc		eax
+2AB1  83 F8 10				cmp		eax,0x00000010
+2AB4  72 F2				jb		L$313
+2AB6  31 C0				xor		eax,eax
+2AB8				L$314:
+2AB8  8A 5C 04 60			mov		bl,0x60[esp+eax]
+2ABC  88 9C 04 84 00 00 00		mov		0x84[esp+eax],bl
+2AC3  40				inc		eax
+2AC4  83 F8 04				cmp		eax,0x00000004
+2AC7  72 EF				jb		L$314
+2AC9  8D 44 24 64			lea		eax,0x64[esp]
+2ACD  50				push		eax
+2ACE  8D 44 24 7C			lea		eax,0x7c[esp]
+2AD2  50				push		eax
+2AD3  0F B6 C7				movzx		eax,bh
+2AD6  50				push		eax
+2AD7  0F B6 84 24 98 00 00 00		movzx		eax,byte ptr 0x98[esp]
+2ADF  50				push		eax
+2AE0  68 A1 06 00 00			push		offset L$379
+2AE5  E8 00 00 00 00			call		_VxD_Debug_Printf
+2AEA  83 C4 14				add		esp,0x00000014
+2AED  80 FF 01				cmp		bh,0x01
+2AF0  72 0E				jb		L$315
+2AF2  76 14				jbe		L$316
+2AF4  80 FF 07				cmp		bh,0x07
+2AF7  74 13				je		L$317
+2AF9  80 FF 05				cmp		bh,0x05
+2AFC  74 0E				je		L$317
+2AFE  EB 10				jmp		L$318
+2B00				L$315:
+2B00  84 FF				test		bh,bh
+2B02  75 0C				jne		L$318
+2B04  30 C0				xor		al,al
+2B06  EB 0A				jmp		L$319
+2B08				L$316:
+2B08  B0 01				mov		al,0x01
+2B0A  EB 06				jmp		L$319
+2B0C				L$317:
+2B0C  88 F8				mov		al,bh
+2B0E  EB 02				jmp		L$319
+2B10				L$318:
+2B10  B0 05				mov		al,0x05
+2B12				L$319:
+2B12  8D 9C 24 84 00 00 00		lea		ebx,0x84[esp]
+2B19  53				push		ebx
+2B1A  8D 5C 24 68			lea		ebx,0x68[esp]
+2B1E  53				push		ebx
+2B1F  8D 9C 24 80 00 00 00		lea		ebx,0x80[esp]
+2B26  53				push		ebx
+2B27  0F B6 C0				movzx		eax,al
+2B2A  50				push		eax
+2B2B  56				push		esi
+2B2C  6A 00				push		0x00000000
+2B2E  0F B6 84 24 A4 00 00 00		movzx		eax,byte ptr 0xa4[esp]
+2B36  50				push		eax
+2B37  E8 00 00 00 00			call		bridge_create_dcb
+2B3C  83 C4 1C				add		esp,0x0000001c
+2B3F				L$320:
+2B3F  FE 84 24 8C 00 00 00		inc		byte ptr 0x8c[esp]
+2B46  80 BC 24 8C 00 00 00 02		cmp		byte ptr 0x8c[esp],0x02
+2B4E  0F 83 E3 00 00 00			jae		L$323
+2B54				L$321:
+2B54  6A 40				push		0x00000040
+2B56  8D 44 24 04			lea		eax,0x4[esp]
+2B5A  50				push		eax
+2B5B  E8 00 00 00 00			call		zero_mem
+2B60  83 C4 08				add		esp,0x00000008
+2B63  6A 24				push		0x00000024
+2B65  8D 44 24 44			lea		eax,0x44[esp]
+2B69  50				push		eax
+2B6A  E8 00 00 00 00			call		zero_mem
+2B6F  83 C4 08				add		esp,0x00000008
+2B72  66 C7 04 24 40 00			mov		word ptr [esp],0x0040
+2B78  30 C0				xor		al,al
+2B7A  88 44 24 02			mov		0x2[esp],al
+2B7E  88 44 24 05			mov		0x5[esp],al
+2B82  8A 84 24 8C 00 00 00		mov		al,0x8c[esp]
+2B89  88 44 24 06			mov		0x6[esp],al
+2B8D  30 C0				xor		al,al
+2B8F  88 44 24 07			mov		0x7[esp],al
+2B93  88 44 24 03			mov		0x3[esp],al
+2B97  C6 44 24 0A 06			mov		byte ptr 0xa[esp],0x06
+2B9C  8D 44 24 40			lea		eax,0x40[esp]
+2BA0  89 44 24 18			mov		0x18[esp],eax
+2BA4  C7 44 24 10 24 00 00 00		mov		dword ptr 0x10[esp],0x00000024
+2BAC  C7 44 24 0C 60 00 00 00		mov		dword ptr 0xc[esp],0x00000060
+2BB4  C7 44 24 14 05 00 00 00		mov		dword ptr 0x14[esp],0x00000005
+2BBC  C7 44 24 1C 28 01 00 00		mov		dword ptr 0x1c[esp],offset g_bridge+0x128
+2BC4  B0 12				mov		al,0x12
+2BC6  88 44 24 0B			mov		0xb[esp],al
+2BCA  88 44 24 30			mov		0x30[esp],al
+2BCE  C6 44 24 34 24			mov		byte ptr 0x34[esp],0x24
+2BD3  A1 00 00 00 00			mov		eax,g_SrbExtensionSize
+2BD8  85 C0				test		eax,eax
+2BDA  76 1F				jbe		L$322
+2BDC  3D 00 01 00 00			cmp		eax,0x00000100
+2BE1  77 18				ja		L$322
+2BE3  B8 3A 01 00 00			mov		eax,offset g_bridge+0x13a
+2BE8  89 44 24 28			mov		0x28[esp],eax
+2BEC  FF 35 00 00 00 00			push		dword ptr g_SrbExtensionSize
+2BF2  50				push		eax
+2BF3  E8 00 00 00 00			call		zero_mem
+2BF8  83 C4 08				add		esp,0x00000008
+2BFB				L$322:
+2BFB  31 C0				xor		eax,eax
+2BFD  A3 00 00 00 00			mov		g_SrbCompleted,eax
+2C02  89 E0				mov		eax,esp
+2C04  50				push		eax
+2C05  FF 35 00 00 00 00			push		dword ptr g_DeviceExtension
+2C0B  FF 15 00 00 00 00			call		dword ptr g_HwStartIo
+2C11  83 C4 08				add		esp,0x00000008
+2C14  85 C0				test		eax,eax
+2C16  0F 85 E9 FD FF FF			jne		L$307
+2C1C  0F B6 84 24 8C 00 00 00		movzx		eax,byte ptr 0x8c[esp]
+2C24  50				push		eax
+2C25  68 3B 06 00 00			push		offset L$377
+2C2A  E8 00 00 00 00			call		_VxD_Debug_Printf
+2C2F  83 C4 08				add		esp,0x00000008
+2C32  E9 08 FF FF FF			jmp		L$320
+2C37				L$323:
+2C37  FF 35 D4 00 00 00			push		dword ptr g_bridge+0xd4
+2C3D  68 E1 06 00 00			push		offset L$380
+2C42  E8 00 00 00 00			call		_VxD_Debug_Printf
+2C47  83 C4 08				add		esp,0x00000008
+2C4A  81 C4 90 00 00 00			add		esp,0x00000090
+2C50  5E				pop		esi
+2C51				L$324:
+2C51  5B				pop		ebx
+2C52  C3				ret
+2C53				find_device_for_dcb:
+2C53  8B 4C 24 04			mov		ecx,0x4[esp]
+2C57  31 C0				xor		eax,eax
+2C59				L$325:
+2C59  3B 05 D4 00 00 00			cmp		eax,g_bridge+0xd4
+2C5F  73 18				jae		L$327
+2C61  89 C2				mov		edx,eax
+2C63  C1 E2 04				shl		edx,0x04
+2C66  3B 8A 54 00 00 00			cmp		ecx,g_bridge+0x54[edx]
+2C6C  75 08				jne		L$326
+2C6E  B8 54 00 00 00			mov		eax,offset g_bridge+0x54
+2C73  01 D0				add		eax,edx
+2C75  C3				ret
+2C76				L$326:
+2C76  40				inc		eax
+2C77  EB E0				jmp		L$325
+2C79				L$327:
+2C79  31 C0				xor		eax,eax
+2C7B  C3				ret
+2C7C				complete_ior:
+2C7C  8B 44 24 04			mov		eax,0x4[esp]
+2C80  8B 54 24 08			mov		edx,0x8[esp]
+2C84  66 89 50 02			mov		0x2[eax],dx
+2C88  50				push		eax
+2C89  E8 00 00 00 00			call		_IOS_BD_Command_Complete
+2C8E  83 C4 04				add		esp,0x00000004
+2C91  C3				ret
+2C92				zero_mem:
+2C92  53				push		ebx
+2C93  8B 5C 24 0C			mov		ebx,0xc[esp]
+2C97  8B 4C 24 08			mov		ecx,0x8[esp]
+2C9B  31 C0				xor		eax,eax
+2C9D				L$328:
+2C9D  39 D8				cmp		eax,ebx
+2C9F  73 B0				jae		L$324
+2CA1  8D 14 01				lea		edx,[ecx+eax]
+2CA4  C6 02 00				mov		byte ptr [edx],0x00
+2CA7  40				inc		eax
+2CA8  EB F3				jmp		L$328
+2CAA				copy_mem:
+2CAA  53				push		ebx
+2CAB  56				push		esi
+2CAC  57				push		edi
+2CAD  8B 7C 24 18			mov		edi,0x18[esp]
+2CB1  8B 74 24 10			mov		esi,0x10[esp]
+2CB5  8B 5C 24 14			mov		ebx,0x14[esp]
+2CB9  31 C0				xor		eax,eax
+2CBB				L$329:
+2CBB  39 F8				cmp		eax,edi
+2CBD  0F 83 17 FD FF FF			jae		L$306
+2CC3  8D 14 03				lea		edx,[ebx+eax]
+2CC6  8D 0C 06				lea		ecx,[esi+eax]
+2CC9  8A 12				mov		dl,[edx]
+2CCB  88 11				mov		[ecx],dl
+2CCD  40				inc		eax
+2CCE  EB EB				jmp		L$329
+
+Routine Size: 754 bytes,    Routine Base: _TEXT + 29DE
+
+2CD0				bridge_isr:
+2CD0  83 EC 04				sub		esp,0x00000004
+2CD3  83 3D 4C 00 00 00 00		cmp		dword ptr g_bridge+0x4c,0x00000000
+2CDA  74 09				je		L$330
+2CDC  83 3D 00 00 00 00 00		cmp		dword ptr g_HwInterrupt,0x00000000
+2CE3  75 06				jne		L$331
+2CE5				L$330:
+2CE5  31 C0				xor		eax,eax
+2CE7  83 C4 04				add		esp,0x00000004
+2CEA  C3				ret
+2CEB				L$331:
+2CEB  FF 35 00 00 00 00			push		dword ptr g_DeviceExtension
+2CF1  FF 15 00 00 00 00			call		dword ptr g_HwInterrupt
+2CF7  83 C4 04				add		esp,0x00000004
+2CFA  89 04 24				mov		[esp],eax
+2CFD  85 C0				test		eax,eax
+2CFF  74 12				je		L$332
+2D01  A1 44 02 00 00			mov		eax,g_bridge+0x244
+2D06  85 C0				test		eax,eax
+2D08  74 09				je		L$332
+2D0A  50				push		eax
+2D0B  E8 00 00 00 00			call		_VxD_VPICD_Phys_EOI
+2D10  83 C4 04				add		esp,0x00000004
+2D13				L$332:
+2D13  8B 04 24				mov		eax,[esp]
+2D16  83 C4 04				add		esp,0x00000004
+2D19  C3				ret
+
+Routine Size: 74 bytes,    Routine Base: _TEXT + 2CD0
+
+2D1A				bridge_setup_interrupt:
+2D1A  53				push		ebx
+2D1B  83 EC 20				sub		esp,0x00000020
+2D1E  0F B7 5C 24 28			movzx		ebx,word ptr 0x28[esp]
+2D23  53				push		ebx
+2D24  68 12 07 00 00			push		offset L$381
+2D29  E8 00 00 00 00			call		_VxD_Debug_Printf
+2D2E  83 C4 08				add		esp,0x00000008
+2D31  6A 20				push		0x00000020
+2D33  8D 44 24 04			lea		eax,0x4[esp]
+2D37  50				push		eax
+2D38  E8 00 00 00 00			call		zero_mem
+2D3D  83 C4 08				add		esp,0x00000008
+2D40  8B 44 24 28			mov		eax,0x28[esp]
+2D44  66 89 04 24			mov		[esp],ax
+2D48  66 C7 44 24 02 02 00		mov		word ptr 0x2[esp],0x0002
+2D4F  8B 44 24 2C			mov		eax,0x2c[esp]
+2D53  89 44 24 04			mov		0x4[esp],eax
+2D57  31 C0				xor		eax,eax
+2D59  89 44 24 1C			mov		0x1c[esp],eax
+2D5D  89 E0				mov		eax,esp
+2D5F  50				push		eax
+2D60  E8 00 00 00 00			call		_VxD_VPICD_Virtualize_IRQ
+2D65  83 C4 04				add		esp,0x00000004
+2D68  A3 44 02 00 00			mov		g_bridge+0x244,eax
+2D6D  85 C0				test		eax,eax
+2D6F  75 18				jne		L$333
+2D71  53				push		ebx
+2D72  68 2A 07 00 00			push		offset L$382
+2D77  E8 00 00 00 00			call		_VxD_Debug_Printf
+2D7C  83 C4 08				add		esp,0x00000008
+2D7F  B8 FF FF FF FF			mov		eax,0xffffffff
+2D84  83 C4 20				add		esp,0x00000020
+2D87  5B				pop		ebx
+2D88  C3				ret
+2D89				L$333:
+2D89  50				push		eax
+2D8A  53				push		ebx
+2D8B  68 5A 07 00 00			push		offset L$383
+2D90  E8 00 00 00 00			call		_VxD_Debug_Printf
+2D95  83 C4 0C				add		esp,0x0000000c
+2D98  31 C0				xor		eax,eax
+2D9A  83 C4 20				add		esp,0x00000020
+2D9D  5B				pop		ebx
+2D9E  C3				ret
+
+Routine Size: 133 bytes,    Routine Base: _TEXT + 2D1A
+
+No disassembly errors
+
+Segment: CONST DWORD USE32 0000077E bytes
+0000				L$334:
+0000  52 45 41 44 4D 45 2E 54 58 54 00                README.TXT.
+000B				L$335:
+000B  52 45 41 44 4D 45 00                            README.
+0012				L$336:
+0012  4E 54 4D 49 4E 49 3A 20 6E 74 6D 69 6E 69 5F 64 NTMINI: ntmini_d
+0022  65 76 69 63 65 5F 69 6E 69 74 28 29 0A 00       evice_init()..
+0030				L$337:
+0030  4E 54 4D 49 4E 49 3A 20 4E 54 35 20 69 6E 69 74 NTMINI: NT5 init
+0040  20 66 61 69 6C 65 64 20 28 25 64 29 2C 20 63 6F  failed (%d), co
+0050  6E 74 69 6E 75 69 6E 67 20 77 69 74 68 20 49 4F ntinuing with IO
+0060  53 20 61 6E 79 77 61 79 0A 00                   S anyway..
+006A				L$338:
+006A  4E 54 4D 49 4E 49 3A 20 69 6F 73 5F 72 65 67 69 NTMINI: ios_regi
+007A  73 74 65 72 5F 70 6F 72 74 5F 64 72 69 76 65 72 ster_port_driver
+008A  28 29 0A 00 4E 54 4D 49 4E 49 3A 20 49 4F 53 5F ()..NTMINI: IOS_
+009A  52 65 67 69 73 74 65 72 20 46 41 49 4C 45 44 20 Register FAILED 
+00AA  28 72 65 73 75 6C 74 3D 25 6C 78 29 0A 00       (result=%lx)..
+00B8				L$339:
+00B8  4E 54 4D 49 4E 49 3A 20 49 4F 53 5F 52 65 67 69 NTMINI: IOS_Regi
+00C8  73 74 65 72 20 73 6B 69 70 70 65 64 0A 00       ster skipped..
+00D6				L$340:
+00D6  4E 54 4D 49 4E 49 3A 20 49 53 50 5F 47 45 54 5F NTMINI: ISP_GET_
+00E6  44 43 42 20 44 3A 20 72 65 73 75 6C 74 3D 25 30 DCB D: result=%0
+00F6  34 78 20 64 63 62 3D 25 30 38 6C 78 20 6F 75 72 4x dcb=%08lx our
+0106  73 3D 25 30 38 6C 78 0A 00                      s=%08lx..
+010F				L$341:
+010F  4E 54 4D 49 4E 49 3A 20 49 53 50 5F 51 55 45 52 NTMINI: ISP_QUER
+011F  59 5F 4D 41 54 43 48 49 4E 47 5F 44 43 42 53 20 Y_MATCHING_DCBS 
+012F  72 65 73 75 6C 74 3D 25 30 34 78 20 64 72 69 76 result=%04x driv
+013F  65 73 3D 25 30 38 6C 78 0A 00                   es=%08lx..
+0149				L$342:
+0149  4E 54 4D 49 4E 49 3A 20 49 46 53 4D 67 72 5F 52 NTMINI: IFSMgr_R
+0159  65 67 69 73 74 65 72 4D 6F 75 6E 74 20 70 72 6F egisterMount pro
+0169  76 69 64 65 72 3D 25 30 38 6C 78 0A 00          vider=%08lx..
+0176				L$343:
+0176  4E 54 4D 49 4E 49 3A 20 41 45 50 5F 49 4E 49 54 NTMINI: AEP_INIT
+0186  49 41 4C 49 5A 45 0A 00                         IALIZE..
+018E				L$344:
+018E  4E 54 4D 49 4E 49 3A 20 41 45 50 5F 42 4F 4F 54 NTMINI: AEP_BOOT
+019E  5F 43 4F 4D 50 4C 45 54 45 20 28 64 65 76 69 63 _COMPLETE (devic
+01AE  65 73 3D 25 6C 75 29 0A 00                      es=%lu)..
+01B7				L$345:
+01B7  4E 54 4D 49 4E 49 3A 20 41 45 50 5F 43 4F 4E 46 NTMINI: AEP_CONF
+01C7  49 47 5F 44 43 42 20 74 79 70 65 3D 25 64 20 74 IG_DCB type=%d t
+01D7  61 72 67 65 74 3D 25 64 0A 00                   arget=%d..
+01E1				L$346:
+01E1  4E 54 4D 49 4E 49 3A 20 54 6F 6F 20 6D 61 6E 79 NTMINI: Too many
+01F1  20 64 65 76 69 63 65 73 2C 20 69 67 6E 6F 72 69  devices, ignori
+0201  6E 67 20 44 43 42 0A 00                         ng DCB..
+0209				L$347:
+0209  4E 54 4D 49 4E 49 3A 20 43 6C 61 69 6D 65 64 20 NTMINI: Claimed 
+0219  64 65 76 69 63 65 20 74 61 72 67 65 74 3D 25 64 device target=%d
+0229  20 74 79 70 65 3D 25 64 20 28 6E 6F 77 20 25 6C  type=%d (now %l
+0239  75 20 64 65 76 69 63 65 73 29 0A 00             u devices)..
+0245				L$348:
+0245  4E 54 4D 49 4E 49 3A 20 41 45 50 5F 55 4E 43 4F NTMINI: AEP_UNCO
+0255  4E 46 49 47 5F 44 43 42 20 74 61 72 67 65 74 3D NFIG_DCB target=
+0265  25 64 0A 00                                     %d..
+0269				L$349:
+0269  4E 54 4D 49 4E 49 3A 20 41 45 50 5F 55 4E 49 4E NTMINI: AEP_UNIN
+0279  49 54 49 41 4C 49 5A 45 0A 00                   ITIALIZE..
+0283				L$350:
+0283  4E 54 4D 49 4E 49 3A 20 49 4F 52 20 66 6F 72 20 NTMINI: IOR for 
+0293  75 6E 6B 6E 6F 77 6E 20 44 43 42 2C 20 66 61 69 unknown DCB, fai
+02A3  6C 69 6E 67 0A 00                               ling..
+02A9				L$351:
+02A9  4E 54 4D 49 4E 49 3A 20 4D 69 6E 69 70 6F 72 74 NTMINI: Miniport
+02B9  20 62 75 73 79 2C 20 71 75 65 75 65 69 6E 67 20  busy, queueing 
+02C9  49 4F 52 20 66 75 6E 63 3D 25 30 34 78 0A 00    IOR func=%04x..
+02D8				L$352:
+02D8  4E 54 4D 49 4E 49 3A 20 48 77 53 74 61 72 74 49 NTMINI: HwStartI
+02E8  6F 20 53 52 42 20 66 75 6E 63 3D 25 30 32 78 20 o SRB func=%02x 
+02F8  43 44 42 5B 30 5D 3D 25 30 32 78 20 74 61 72 67 CDB[0]=%02x targ
+0308  65 74 3D 25 64 0A 00                            et=%d..
+030F				L$353:
+030F  4E 54 4D 49 4E 49 3A 20 48 77 53 74 61 72 74 49 NTMINI: HwStartI
+031F  6F 20 72 65 74 75 72 6E 65 64 20 46 41 4C 53 45 o returned FALSE
+032F  0A 00                                           ..
+0331				L$354:
+0331  4E 54 4D 49 4E 49 3A 20 52 45 41 44 20 4C 42 41 NTMINI: READ LBA
+0341  3D 25 6C 75 20 63 6F 75 6E 74 3D 25 75 20 62 79 =%lu count=%u by
+0351  74 65 73 3D 25 6C 75 0A 00                      tes=%lu..
+035A				L$355:
+035A  4E 54 4D 49 4E 49 3A 20 57 52 49 54 45 20 4C 42 NTMINI: WRITE LB
+036A  41 3D 25 6C 75 20 63 6F 75 6E 74 3D 25 75 20 62 A=%lu count=%u b
+037A  79 74 65 73 3D 25 6C 75 0A 00                   ytes=%lu..
+0384				L$356:
+0384  4E 54 4D 49 4E 49 3A 20 56 45 52 49 46 59 20 4C NTMINI: VERIFY L
+0394  42 41 3D 25 6C 75 20 63 6F 75 6E 74 3D 25 75 0A BA=%lu count=%u.
+03A4  00                                              .
+03A5				L$357:
+03A5  4E 54 4D 49 4E 49 3A 20 50 41 53 53 54 48 52 4F NTMINI: PASSTHRO
+03B5  55 47 48 20 43 44 42 5B 30 5D 3D 25 30 32 78 20 UGH CDB[0]=%02x 
+03C5  6C 65 6E 3D 25 64 0A 00                         len=%d..
+03CD				L$358:
+03CD  4E 54 4D 49 4E 49 3A 20 4D 45 44 49 41 5F 43 48 NTMINI: MEDIA_CH
+03DD  45 43 4B 0A 00                                  ECK..
+03E2				L$359:
+03E2  4E 54 4D 49 4E 49 3A 20 44 4F 53 5F 52 45 53 45 NTMINI: DOS_RESE
+03F2  54 0A 00                                        T..
+03F5				L$360:
+03F5  4E 54 4D 49 4E 49 3A 20 4C 4F 43 4B 5F 4D 45 44 NTMINI: LOCK_MED
+0405  49 41 0A 00                                     IA..
+0409				L$361:
+0409  4E 54 4D 49 4E 49 3A 20 55 4E 4C 4F 43 4B 5F 4D NTMINI: UNLOCK_M
+0419  45 44 49 41 0A 00                               EDIA..
+041F				L$362:
+041F  4E 54 4D 49 4E 49 3A 20 45 4A 45 43 54 5F 4D 45 NTMINI: EJECT_ME
+042F  44 49 41 0A 00                                  DIA..
+0434				L$363:
+0434  4E 54 4D 49 4E 49 3A 20 4C 4F 41 44 5F 4D 45 44 NTMINI: LOAD_MED
+0444  49 41 0A 00                                     IA..
+0448				L$364:
+0448  4E 54 4D 49 4E 49 3A 20 43 41 4E 43 45 4C 0A 00 NTMINI: CANCEL..
+0458				L$365:
+0458  4E 54 4D 49 4E 49 3A 20 43 4C 45 41 52 5F 51 55 NTMINI: CLEAR_QU
+0468  45 55 45 0A 00                                  EUE..
+046D				L$366:
+046D  4E 54 4D 49 4E 49 3A 20 55 6E 6B 6E 6F 77 6E 20 NTMINI: Unknown 
+047D  49 4F 52 20 66 75 6E 63 3D 25 30 34 78 2C 20 66 IOR func=%04x, f
+048D  61 69 6C 69 6E 67 0A 00                         ailing..
+0495				L$367:
+0495  4E 54 4D 49 4E 49 3A 20 73 72 62 5F 63 6F 6D 70 NTMINI: srb_comp
+04A5  6C 65 74 65 20 77 69 74 68 20 6E 6F 20 49 4F 52 lete with no IOR
+04B5  20 28 6F 72 70 68 61 6E 65 64 29 0A 00           (orphaned)..
+04C2				L$368:
+04C2  4E 54 4D 49 4E 49 3A 20 73 72 62 5F 63 6F 6D 70 NTMINI: srb_comp
+04D2  6C 65 74 65 20 53 72 62 53 74 61 74 75 73 3D 25 lete SrbStatus=%
+04E2  30 32 78 20 53 63 73 69 53 74 61 74 75 73 3D 25 02x ScsiStatus=%
+04F2  30 32 78 20 2D 3E 20 49 4F 52 53 3D 25 30 34 78 02x -> IORS=%04x
+0502  0A 00                                           ..
+0504				L$369:
+0504  4E 54 4D 49 4E 49 3A 20 44 65 71 75 65 75 65 69 NTMINI: Dequeuei
+0514  6E 67 20 6E 65 78 74 20 49 4F 52 20 66 75 6E 63 ng next IOR func
+0524  3D 25 30 34 78 0A 00                            =%04x..
+052B				L$370:
+052B  4E 54 4D 49 4E 49 3A 20 55 6E 6B 6E 6F 77 6E 20 NTMINI: Unknown 
+053B  53 52 42 20 73 74 61 74 75 73 20 25 30 32 78 0A SRB status %02x.
+054B  00                                              .
+054C				L$371:
+054C  4E 54 4D 49 4E 49 3A 20 51 75 65 75 65 20 61 6C NTMINI: Queue al
+055C  6C 6F 63 20 66 61 69 6C 65 64 2C 20 66 61 69 6C loc failed, fail
+056C  69 6E 67 20 49 4F 52 0A 00                      ing IOR..
+0575				L$372:
+0575  4E 54 4D 49 4E 49 3A 20 51 75 65 75 65 20 64 65 NTMINI: Queue de
+0585  70 74 68 20 6E 6F 77 20 25 6C 75 0A 00          pth now %lu..
+0592				L$373:
+0592  4E 54 4D 49 4E 49 3A 20 44 72 61 69 6E 69 6E 67 NTMINI: Draining
+05A2  20 49 4F 52 20 66 75 6E 63 3D 25 30 34 78 20 77  IOR func=%04x w
+05B2  69 74 68 20 73 74 61 74 75 73 3D 25 30 34 78 0A ith status=%04x.
+05C2  00                                              .
+05C3				L$374:
+05C3  4E 54 4D 49 4E 49 3A 20 43 72 65 61 74 69 6E 67 NTMINI: Creating
+05D3  20 44 43 42 20 66 6F 72 20 74 61 72 67 65 74 3D  DCB for target=
+05E3  25 64 20 74 79 70 65 3D 25 64 20 61 74 61 70 69 %d type=%d atapi
+05F3  3D 25 64 0A 00                                  =%d..
+05F8				L$375:
+05F8  4E 54 4D 49 4E 49 3A 20 44 43 42 20 61 6C 6C 6F NTMINI: DCB allo
+0608  63 61 74 69 6F 6E 20 66 61 69 6C 65 64 0A 00    cation failed..
+0617				L$376:
+0617  4E 54 4D 49 4E 49 3A 20 45 6E 75 6D 65 72 61 74 NTMINI: Enumerat
+0627  69 6E 67 20 64 65 76 69 63 65 73 20 6F 6E 20 62 ing devices on b
+0637  75 73 0A 00                                     us..
+063B				L$377:
+063B  4E 54 4D 49 4E 49 3A 20 49 4E 51 55 49 52 59 20 NTMINI: INQUIRY 
+064B  74 61 72 67 65 74 20 25 64 3A 20 48 77 53 74 61 target %d: HwSta
+065B  72 74 49 6F 20 72 65 6A 65 63 74 65 64 0A 00    rtIo rejected..
+066A				L$378:
+066A  4E 54 4D 49 4E 49 3A 20 49 4E 51 55 49 52 59 20 NTMINI: INQUIRY 
+067A  74 61 72 67 65 74 20 25 64 3A 20 53 72 62 53 74 target %d: SrbSt
+068A  61 74 75 73 3D 25 30 32 78 20 28 6E 6F 20 64 65 atus=%02x (no de
+069A  76 69 63 65 29 0A 00                            vice)..
+06A1				L$379:
+06A1  4E 54 4D 49 4E 49 3A 20 46 6F 75 6E 64 20 74 61 NTMINI: Found ta
+06B1  72 67 65 74 20 25 64 3A 20 74 79 70 65 3D 25 64 rget %d: type=%d
+06C1  20 76 65 6E 64 6F 72 3D 27 25 2E 38 73 27 20 70  vendor='%.8s' p
+06D1  72 6F 64 75 63 74 3D 27 25 2E 31 36 73 27 0A 00 roduct='%.16s'..
+06E1				L$380:
+06E1  4E 54 4D 49 4E 49 3A 20 45 6E 75 6D 65 72 61 74 NTMINI: Enumerat
+06F1  69 6F 6E 20 63 6F 6D 70 6C 65 74 65 2C 20 25 6C ion complete, %l
+0701  75 20 64 65 76 69 63 65 73 20 66 6F 75 6E 64 0A u devices found.
+0711  00                                              .
+0712				L$381:
+0712  4E 54 4D 49 4E 49 3A 20 48 6F 6F 6B 69 6E 67 20 NTMINI: Hooking 
+0722  49 52 51 20 25 64 0A 00                         IRQ %d..
+072A				L$382:
+072A  4E 54 4D 49 4E 49 3A 20 56 50 49 43 44 5F 56 69 NTMINI: VPICD_Vi
+073A  72 74 75 61 6C 69 7A 65 5F 49 52 51 20 46 41 49 rtualize_IRQ FAI
+074A  4C 45 44 20 66 6F 72 20 49 52 51 20 25 64 0A 00 LED for IRQ %d..
+075A				L$383:
+075A  4E 54 4D 49 4E 49 3A 20 49 52 51 20 25 64 20 68 NTMINI: IRQ %d h
+076A  6F 6F 6B 65 64 20 28 68 61 6E 64 6C 65 3D 25 6C ooked (handle=%l
+077A  78 29 0A 00                                     x)..
+
+Segment: CONST2 DWORD USE32 00000007 bytes
+0000				L$384:
+0000  4E 54 4D 49 4E 49 00                            NTMINI.
+
+Segment: _DATA DWORD USE32 00000058 bytes
+0000				g_nt5_init_done:
+0000  00 00 00 00                                     ....
+0004				g_ios_registered:
+0004  00 00 00 00                                     ....
+0008				g_late_dcb_ptr:
+0008  00 00 00 00                                     ....
+000C				g_late_delta_to_ior:
+000C  00 00 00 00                                     ....
+0010				g_late_dcb_destroyed:
+0010  00 00 00 00                                     ....
+0014				g_wdm_iop_dump_count:
+0014  00 00 00 00                                     ....
+0018				g_late_next_handler:
+0018  00 00 00 00                                     ....
+001C				g_fsd_registered:
+001C  00 00 00 00                                     ....
+0020				g_fsd_provider_id:
+0020  00 00 00 00                                     ....
+0024				g_fsd_table_inited:
+0024  00 00 00 00                                     ....
+0028				g_fsd_search_emitted:
+0028  00 00 00 00                                     ....
+002C				g_fsd_hook_installed:
+002C  00 00 00 00                                     ....
+0030				g_fsd_log_count:
+0030  00 00 00 00                                     ....
+0034				g_late_attach_done:
+0034  00 00 00 00                                     ....
+0038				g_late_attach_scheduled:
+0038  00 00 00 00                                     ....
+003C				g_last_opened_slot:
+003C  FF FF FF FF                                     ....
+0040				g_iso_pvd_valid:
+0040  00 00 00 00                                     ....
+0044				g_iso_root_lba:
+0044  00 00 00 00                                     ....
+0048				g_iso_root_size:
+0048  00 00 00 00                                     ....
+004C				g_iso_root_cached:
+004C  00 00 00 00                                     ....
+0050				g_search_dir_offset:
+0050  00 00 00 00                                     ....
+0054				g_search_active:
+0054  00 00 00 00                                     ....
+
+Segment: _BSS DWORD USE32 00001384 bytes
+0000				g_iso_enum_sector_buf:
+0800				g_vrp_calldown:
+0810				g_dummy_vrp:
+0850				g_iso_sector_buf:
+1050				g_iso_files:
+10F0				g_fsd_volume_data:
+1110				g_bridge:
+1358				g_fsd_table:
+
+BSS Size: 4996 bytes
+
+List of public symbols
+
+SYMBOL			SECTION			OFFSET
+--------------------------------------------------------
+_aep_handler		_TEXT			0x00001937
+_ios_late_cdrom_attach_probe
+			_TEXT			0x000018ae
+_ios_schedule_late_cdrom_attach_probe
+			_TEXT			0x000018cd
+_ios_wdm_ior_entry	_TEXT			0x00001e07
+_ios_wdm_log_iop	_TEXT			0x00001d62
+_ntmini_ifs_hook	_TEXT			0x000009a6
+bridge_create_dcb	_TEXT			0x00002898
+bridge_enumerate_devices_TEXT			0x000029de
+bridge_isr		_TEXT			0x00002cd0
+bridge_setup_interrupt	_TEXT			0x00002d1a
+g_late_next_handler	_DATA			0x00000018
+ios_late_destroy_device	_TEXT			0x0000179d
+ios_register_port_driver_TEXT			0x00000e1c
+ntmini_device_init	_TEXT			0x00000d97
+srb_complete		_TEXT			0x000025bb
