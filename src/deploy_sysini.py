@@ -353,12 +353,51 @@ def remove_from_iosubsys(f):
     print(f"  Deleted NECATAPI.VXD (freed {freed} clusters)")
     return True
 
+def suppress_esdi_506(f):
+    """Suppress ESDI_506.PDR from IOSUBSYS by marking its dir entry as deleted.
+
+    WARNING: This prevents Win98's built-in IDE driver from loading.
+    The boot disk (C:) uses a separate code path (INT 13h) and is not
+    affected, but any IDE hard disks that ESDI_506 would normally claim
+    will become available for our bridge driver.
+
+    Only call this when the NT5 bridge needs to own HDD devices.
+    """
+    print("\n--- Suppress ESDI_506.PDR from IOSUBSYS ---")
+    try:
+        iosubsys = fat.traverse_to_iosubsys(f)
+    except RuntimeError as e:
+        print(f"  ERROR: {e}")
+        return False
+
+    entry, offset = fat.find_entry_in_dir(f, iosubsys, b'ESDI_506PDR')
+    if entry is None:
+        print("  No ESDI_506.PDR found (already suppressed)")
+        return True
+
+    old_cluster = fat.parse_entry_cluster(entry)
+    c = old_cluster
+    freed = 0
+    while c >= 2 and c < 0x0FFFFFF8:
+        next_c = fat.read_fat_entry(f, c)
+        fat.write_fat_entry(f, c, 0)
+        freed += 1
+        c = next_c
+
+    f.seek(offset)
+    f.write(b'\xE5')
+    print(f"  Deleted ESDI_506.PDR (freed {freed} clusters)")
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 deploy_sysini.py <VXD_FILE>")
+        print("Usage: python3 deploy_sysini.py <VXD_FILE> [--suppress-esdi]")
         sys.exit(1)
 
-    vxd_path = sys.argv[1]
+    suppress_esdi = '--suppress-esdi' in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    vxd_path = args[0]
     vxd_path = resolve_vxd_input_path(vxd_path)
 
     vxd_data = open(vxd_path, 'rb').read()
@@ -372,6 +411,8 @@ def main():
         edit_system_ini(f)
         edit_msdos_sys(f)
         remove_from_iosubsys(f)
+        if suppress_esdi:
+            suppress_esdi_506(f)
 
         # Clear FAT dirty flags
         print("\n--- Clear FAT dirty flags ---")

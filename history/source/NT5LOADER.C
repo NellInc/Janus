@@ -17,6 +17,7 @@
 #include "PNPMGR.H"
 #include "WDMBRIDGE.H"
 #include "PCIBUS.H"
+#include "PORTIO.H"
 
 /* ================================================================
  * VxD wrapper externals (provided by VXDWRAP.ASM / VXDWRAP_NASM.ASM)
@@ -782,6 +783,14 @@ static NTSTATUS nt5_start_device(BOOLEAN primary)
         dbg_mark('S');
         nt5_dbg_hex8((UCHAR)(irq_status & 0xFF));
         nt5_dbg_hex32(*(ULONG *)(ext + 0xD0));
+
+        /* Deferred VPICD hook: now that ServiceRoutine is set, safe to
+         * virtualize the IRQ. Polling mode still works if this fails. */
+        if (NT_SUCCESS(irq_status)) {
+            int vpicd_result = ntk_ConnectDeferredVpicd(irq);
+            dbg_mark('V');
+            nt5_dbg_hex8((UCHAR)(vpicd_result & 0xFF));
+        }
     }
     {
         PUCHAR ext;
@@ -802,14 +811,14 @@ static NTSTATUS nt5_start_device(BOOLEAN primary)
         }
         create_unit = (PFN_ATAPI_CREATE_UNIT)(image_delta + 0x18604UL);
         dbg_mark('Z');
-        unit = create_unit(ext, 0UL);
+        unit = create_unit(ext, 0UL);             /* target 0 = master (CD-ROM) */
         nt5_dbg_hex32((ULONG)unit);
         nt5_dbg_hex8(*(UCHAR *)(ext + 0x100));
         nt5_dbg_hex8(*(UCHAR *)(ext + 0x101));
         if (*(ULONG *)(ext + 0xA0) >= 0x80000000UL) {
             PUCHAR adapter_core;
 
-            *(ULONG *)((PUCHAR)(*(ULONG *)(ext + 0xA0)) + 0x40) = 1UL;
+            *(ULONG *)((PUCHAR)(*(ULONG *)(ext + 0xA0)) + 0x40) = 2UL;
             adapter_core = (PUCHAR)(*(ULONG *)(ext + 0xA0));
             *(ULONG *)(adapter_core + 0x04) = 0x00000170UL;
             *(ULONG *)(adapter_core + 0x08) = 0x00000170UL;
@@ -1622,24 +1631,106 @@ int nt5_init(BOOLEAN use_primary)
         dbg_mark('c');
         dbg_mark('d');
     } else {
-        /* No ISO media. Try reading LBA 0 as a 512-byte sector
-         * and check for MBR signature 0x55AA. */
+        /* No ISO media. Probe each target for an MBR signature at
+         * LBA 0 with 512-byte sectors. The HDD may be on any target
+         * (e.g., target 1 = secondary slave when the CD-ROM is on
+         * target 0 = secondary master). */
         UCHAR mbr_buf[512];
         int mbr_result;
+        UCHAR mbr_target;
+        int found_mbr = 0;
 
-        mbr_result = nt5_read_lba_ex(0, mbr_buf, 512);
-        if (mbr_result == 0 &&
-            mbr_buf[510] == 0x55 && mbr_buf[511] == 0xAA) {
-            /* MBR found -- ATA hard disk */
-            g_nt5_bridge.SectorSize = 512;
-            g_nt5_bridge.DeviceType = 0x00;     /* DCB_TYPE_DISK */
-            dbg_mark('H');
-            dbg_mark('D');
-            VxD_Debug_Printf("NT5: MBR detected, device is ATA disk\n");
-        } else {
-            /* No MBR either -- default to CD-ROM (no media) */
+        for (mbr_target = 0; mbr_target < 4 && !found_mbr; mbr_target++) {
+            g_nt5_detected_target_id = mbr_target;
+            dbg_mark('M');
+            nt5_dbg_hex8(mbr_target);
+
+            mbr_result = nt5_read_lba_ex(0, mbr_buf, 512);
+            if (mbr_result == 0 &&
+                mbr_buf[510] == 0x55 && mbr_buf[511] == 0xAA) {
+                g_nt5_bridge.SectorSize = 512;
+                g_nt5_bridge.DeviceType = 0x00;     /* DCB_TYPE_DISK */
+                g_nt5_bridge.TargetId   = mbr_target;
+                dbg_mark('H');
+                dbg_mark('D');
+                VxD_Debug_Printf("NT5: MBR detected on target %d, device is ATA disk\n",
+                                 mbr_target);
+                found_mbr = 1;
+            }
+        }
+
+        if (!found_mbr) {
+            /* SCSI path failed. Try direct ATA port I/O on the secondary
+             * channel slave (0x170-0x177). The miniport may not have
+             * IDENTIFY'd this device, but it may still respond to ATA
+             * commands at the register level. */
+            UCHAR ata_status;
+            ULONG wait;
+
+            dbg_mark('A');
+            dbg_mark('T');
+
+            /* Soft-reset the secondary IDE channel */
+            PORT_OUT_BYTE(0x376, 0x04);
+            ntk_KeStallExecutionProcessor(10000);
+            PORT_OUT_BYTE(0x376, 0x00);
+            for (wait = 0; wait < 1000000; wait++) {
+                ata_status = PORT_IN_BYTE(0x376);
+                if (!(ata_status & 0x80)) break;
+                PORT_STALL_ONE();
+            }
+            nt5_dbg_hex8(ata_status);
+
+            /* Select slave (0xF0 = LBA mode, slave, head 0) */
+            PORT_OUT_BYTE(0x176, 0xF0);
+            ntk_KeStallExecutionProcessor(1000);
+            for (wait = 0; wait < 500000; wait++) {
+                ata_status = PORT_IN_BYTE(0x376);
+                if (!(ata_status & 0x80)) break;
+                PORT_STALL_ONE();
+            }
+            nt5_dbg_hex8(ata_status);
+
+            if (!(ata_status & 0x80)) {
+                /* Not BSY — device is present. Read LBA 0. */
+                PORT_OUT_BYTE(0x172, 1);        /* 1 sector */
+                PORT_OUT_BYTE(0x173, 0);        /* LBA 0 */
+                PORT_OUT_BYTE(0x174, 0);
+                PORT_OUT_BYTE(0x175, 0);
+                PORT_OUT_BYTE(0x177, 0x20);     /* READ SECTORS */
+
+                for (wait = 0; wait < 1000000; wait++) {
+                    ata_status = PORT_IN_BYTE(0x376);
+                    if (ata_status & 0x01) break;   /* ERR */
+                    if (!(ata_status & 0x80) && (ata_status & 0x08)) break; /* DRQ */
+                    PORT_STALL_ONE();
+                }
+                nt5_dbg_hex8(ata_status);
+
+                if (!(ata_status & 0x01) && (ata_status & 0x08)) {
+                    USHORT *wp = (USHORT *)mbr_buf;
+                    ULONG w;
+                    for (w = 0; w < 256; w++) {
+                        wp[w] = PORT_IN_WORD(0x170);
+                    }
+                    if (mbr_buf[510] == 0x55 && mbr_buf[511] == 0xAA) {
+                        g_nt5_bridge.SectorSize = 512;
+                        g_nt5_bridge.DeviceType = 0x00;
+                        g_nt5_bridge.TargetId   = 1;
+                        g_nt5_detected_target_id = 1;
+                        dbg_mark('H');
+                        dbg_mark('D');
+                        VxD_Debug_Printf("NT5: MBR detected via direct ATA on slave\n");
+                        found_mbr = 1;
+                    }
+                }
+            }
+        }
+
+        if (!found_mbr) {
             g_nt5_bridge.SectorSize = 2048;
             g_nt5_bridge.DeviceType = 0x05;     /* DCB_TYPE_CDROM */
+            g_nt5_detected_target_id = 0;
             dbg_mark('c');
             dbg_mark('?');
         }

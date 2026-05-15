@@ -1887,6 +1887,63 @@ VOID NTAPI ntk_IoDisconnectInterrupt(PKINTERRUPT InterruptObject)
     VxD_HeapFree(InterruptObject, 0);
 }
 
+/*
+ * ntk_ConnectDeferredVpicd - Hook VPICD after ServiceRoutine is set
+ *
+ * Called from NT5LOADER after pnp_start_device + IoConnectInterrupt.
+ * The #if 0 block in ntk_IoConnectInterrupt is disabled because stray
+ * IRQs crash before the ISR bridge is ready. This function hooks VPICD
+ * only after confirming the interrupt object has a valid ServiceRoutine.
+ */
+int CDECL ntk_ConnectDeferredVpicd(ULONG irq)
+{
+    PKINTERRUPT intObj;
+    NTK_VPICD_IRQ_DESCRIPTOR irqDesc;
+    ULONG handle;
+
+    if (irq >= 16) {
+        VxD_Debug_Printf("NTK: DeferredVPICD: invalid IRQ %lu\n", irq);
+        return -1;
+    }
+
+    intObj = g_ConnectedInterrupts[irq];
+    if (!intObj) {
+        VxD_Debug_Printf("NTK: DeferredVPICD: no interrupt object for IRQ %lu\n", irq);
+        return -2;
+    }
+
+    if (!intObj->ServiceRoutine) {
+        VxD_Debug_Printf("NTK: DeferredVPICD: ServiceRoutine NULL for IRQ %lu\n", irq);
+        return -3;
+    }
+
+    if (intObj->ShimConnected) {
+        VxD_Debug_Printf("NTK: DeferredVPICD: IRQ %lu already hooked\n", irq);
+        return 0;
+    }
+
+    RtlZeroMemory(&irqDesc, sizeof(irqDesc));
+    irqDesc.VID_IRQ_Number = (USHORT)irq;
+    irqDesc.VID_Options = intObj->ShareVector ? 0x0002 : 0;
+    irqDesc.VID_Hw_Int_Proc = (PVOID)ntk_IsrTrampoline;
+    irqDesc.VID_Hw_Int_Ref = (PVOID)irq;
+
+    handle = VxD_VPICD_Virtualize_IRQ(&irqDesc);
+    if (!handle) {
+        VxD_Debug_Printf("NTK: DeferredVPICD: VPICD_Virtualize_IRQ failed for IRQ %lu\n", irq);
+        return -4;
+    }
+
+    intObj->ShimIrqHandle = handle;
+    intObj->ShimConnected = TRUE;
+
+    VxD_Debug_Printf("NTK: DeferredVPICD: IRQ %lu hooked -> handle 0x%08lX\n",
+                     irq, handle);
+    dbg_mark('V');
+    dbg_mark('H');
+    return 0;
+}
+
 BOOLEAN NTAPI ntk_KeSynchronizeExecution(PKINTERRUPT Interrupt,
                                           PKSYNCHRONIZE_ROUTINE SyncRoutine,
                                           PVOID SyncContext)
