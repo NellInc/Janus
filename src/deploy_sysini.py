@@ -375,15 +375,33 @@ def main():
 
         # Clear FAT dirty flags
         print("\n--- Clear FAT dirty flags ---")
+        part_byte = fat.PARTITION_LBA * fat.BPS
         for fat_num in range(fat.NFATS):
             fat_base = (fat.PARTITION_LBA + fat.RESERVED + fat_num * fat.FAT32SZ) * fat.BPS
-            off = fat_base + 4
-            f.seek(off)
-            val = struct.unpack('<I', f.read(4))[0]
-            clean = val | (1 << 27) | (1 << 28)
-            if clean != val:
-                f.seek(off)
-                f.write(struct.pack('<I', clean))
+            f.seek(fat_base)
+            e0 = struct.unpack('<I', f.read(4))[0]
+            e1 = struct.unpack('<I', f.read(4))[0]
+            fixed = False
+            if e0 != 0x0FFFFFF8:
+                f.seek(fat_base)
+                f.write(struct.pack('<I', 0x0FFFFFF8))
+                fixed = True
+            if (e1 & 0x0FFFFFFF) != 0x0FFFFFFF:
+                f.seek(fat_base + 4)
+                f.write(struct.pack('<I', 0x0FFFFFFF))
+                fixed = True
+            elif (e1 & 0x0C000000) != 0x0C000000:
+                f.seek(fat_base + 4)
+                f.write(struct.pack('<I', e1 | 0x0C000000))
+                fixed = True
+            if fixed:
+                print(f"  Fixed FAT{fat_num+1} entries")
+        f.seek(part_byte + 0x41)
+        bpb_dirty = f.read(1)[0]
+        if bpb_dirty != 0x00:
+            f.seek(part_byte + 0x41)
+            f.write(bytes([0x00]))
+            print(f"  Fixed BPB dirty byte (was 0x{bpb_dirty:02x})")
 
     print("\nDone. VxD will load via SYSTEM.INI [386Enh] device= on next boot.")
 
