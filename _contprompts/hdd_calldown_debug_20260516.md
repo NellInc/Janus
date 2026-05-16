@@ -66,7 +66,24 @@ m00000006 (Sys_VM_Terminate) ← WPE
 
 No `W` markers from `ios_wdm_ior_entry` — our calldown handler was never invoked before the crash. The splice itself may corrupt IOS state.
 
-## Hypotheses
+## Bisected: Splice Into Active DCB Is The Crash
+
+**Confirmed by experiment:**
+- With test HDD + late-create + splice: crash at T+30 (QEMU exits, "Guest has not initialized display")
+- With test HDD + late-create + splice NOP'd: survives to T+85+ (60s longer)
+- Without test HDD (CD-ROM path, no HDD splice): survives indefinitely
+- Without late-create entirely: survives indefinitely, boots to desktop
+
+**The ISP_INSERT_CALLDOWN into D:'s active DCB during Init_Complete is the crash cause.**
+IOS doesn't expect calldown chain modifications on a live DCB at this point.
+
+**Potential fixes:**
+1. **Defer splice to AEP_BOOT_COMPLETE** — splice after boot is done, D: is idle
+2. **Use proper ISP flags** — the splice uses flags=0x00000100 which is DCB_dmd_not_512, not an ISP calldown flag. The proper AEP_CONFIG_DCB path (line 3544) uses ISPCDF_BOTTOM | ISPCDF_PORT_DRIVER.
+3. **Use AEP_CONFIG_DCB broadcast** — instead of manual splice, broadcast a CONFIG_DCB AEP for our DCB. The HDD path skips this (comment: "ESDI_506 probes the IDE channel"), but maybe with modified AEP parameters it can work.
+4. **Direct calldown struct write** — instead of ISP_INSERT_CALLDOWN, directly modify the DCB's calldown list (risky, requires knowing the exact memory layout)
+
+## Hypotheses (original, partially resolved)
 
 ### H1: Calldown function pointer is wrong
 The splice uses `ios_wdm_preserve_stub` as the calldown function (ASM thunk that calls `ios_wdm_ior_entry`). If the function pointer was corrupted by fixup translation or the merged-object relocation, IOS would crash trying to call through it.
