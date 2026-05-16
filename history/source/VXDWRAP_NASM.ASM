@@ -285,8 +285,9 @@ NTMINI_Control:
     mov     al, 10
     out     0xE9, al
     pop     eax
-    clc
-    ret
+    ; PDRs get Sys_Dynamic_Device_Init, not Init_Complete.
+    ; Must register with IOS here, not defer to Init_Complete.
+    jmp     .do_ios_register
 .init_fail:
     push    eax
     mov     al, 'F'

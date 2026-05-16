@@ -111,11 +111,9 @@ else:
 merged_ddb_off = obj_offsets[ddb_obj - 1] + ddb_off_in_obj
 print(f"DDB: obj{ddb_obj} off 0x{ddb_off_in_obj:X} -> merged 0x{merged_ddb_off:X}")
 
-# --- Read resident names table for the module name ---
-rnt_abs = le + struct.unpack_from('<I', data, le + 0x58)[0]
-rnt_name_len = data[rnt_abs]
-rnt_name = data[rnt_abs + 1:rnt_abs + 1 + rnt_name_len]
-print(f"Resident name: '{rnt_name.decode('ascii', errors='replace')}' (len={rnt_name_len})")
+# --- Resident name: override to match DDB name (NTMINI) ---
+rnt_name = b'NTMINI'
+print(f"Resident name: '{rnt_name.decode('ascii')}' (overridden to match DDB)")
 
 # --- Read and translate fixup records ---
 fpt = [struct.unpack_from('<I', data, fpt_abs + i * 4)[0] for i in range(num_pages + 1)]
@@ -214,7 +212,7 @@ et_off = rnt_off + rnt_size              # entry table (after resident names)
 entry = bytearray(10)
 entry[0] = 1; entry[1] = 3              # 1 entry, type 3 (32-bit)
 struct.pack_into('<H', entry, 2, 1)      # object 1
-entry[4] = 0x01                          # flags: exported (matching V5SMALL)
+entry[4] = 0x03                          # flags: exported+shared (matching ESDI_506.PDR)
 struct.pack_into('<I', entry, 5, merged_ddb_off)
 entry[9] = 0                             # end marker
 et_size = len(entry)
@@ -222,32 +220,33 @@ et_size = len(entry)
 loader_section_end = et_off + et_size
 loader_section_size = loader_section_end - obj_off
 
-# --- IOS-compatible layout: page data at ios_dp ---
-# IOS computes: dp = align_up(entry_table_offset, 32)
-# We place page data exactly there so both loaders work.
-ios_dp = (et_off + 0x1F) & ~0x1F        # IOS's formula (LE-relative)
-data_off_le_rel = ios_dp                 # page data starts at ios_dp
-data_pages_file = MZ_SIZE + ios_dp       # file-absolute
+# --- ESDI_506-compatible layout: fixups BEFORE page data ---
+# ESDI_506 layout: loader → fixups → [pad to 0x200] → pages
+# VXDLDR expects fixup tables contiguous with loader section.
 
-# NONRESIDENT NAMES TABLE (immediately after page data, file-absolute offset)
+# FIXUP SECTION (immediately after loader section)
+fpt_off = loader_section_end             # LE-relative
+frt_off = fpt_off + (NP + 1) * 4
+fixup_section_end_le = frt_off + len(new_fixup_data)
+
+# import_module_table and import_proc_table point to end of fixup data
+import_off = fixup_section_end_le
+fixup_section_size = (NP + 1) * 4 + len(new_fixup_data)
+
+# PAGE DATA: align to 512-byte sector boundary after fixup section (matching ESDI_506)
+data_off_le_rel = (fixup_section_end_le + 0x1FF) & ~0x1FF
+data_pages_file = MZ_SIZE + data_off_le_rel  # file-absolute
+
+# NONRESIDENT NAMES TABLE (after page data)
 nrn = bytearray()
 nrn.append(len(rnt_name))
 nrn.extend(rnt_name)
 nrn.extend(b'\x00\x01')  # ordinal = 1
 nrn.append(0)  # end marker
-nrn_file_off = data_pages_file + NP * page_size  # right after page data
+nrn_file_off = data_pages_file + NP * page_size
 nrn_len = len(nrn)
 
-# FIXUP SECTION (after NRN, still LE-relative offsets in header)
-fpt_off = nrn_file_off + nrn_len - MZ_SIZE  # LE-relative
-frt_off = fpt_off + (NP + 1) * 4
-fixup_section_end = frt_off + len(new_fixup_data)
-
-# import_module_table and import_proc_table point to end of fixup data
-import_off = fixup_section_end
-fixup_section_size = (NP + 1) * 4 + len(new_fixup_data)
-
-print(f"\n--- Layout (IOS-compatible) ---")
+print(f"\n--- Layout (ESDI_506-compatible: fixups before pages) ---")
 print(f"  MZ header:        0x000 - 0x07F ({MZ_SIZE} bytes)")
 print(f"  LE header:        0x080 - 0x143 ({LE_HDR_SIZE} bytes)")
 print(f"  LOADER SECTION (LE-relative offsets):")
@@ -256,16 +255,16 @@ print(f"    Page map:       0x{pm_off:03X}")
 print(f"    Resident names: 0x{rnt_off:03X} ({rnt_size} bytes)")
 print(f"    Entry table:    0x{et_off:03X} ({et_size} bytes)")
 print(f"    Loader size:    0x{loader_section_size:03X} ({loader_section_size} bytes)")
-print(f"  PAGE DATA (at ios_dp):")
-print(f"    LE-relative:    0x{data_off_le_rel:03X} (ios_dp)")
-print(f"    File-absolute:  0x{data_pages_file:03X}")
-print(f"  NONRESIDENT NAMES:")
-print(f"    File-absolute:  0x{nrn_file_off:04X} ({nrn_len} bytes)")
-print(f"  FIXUP SECTION (after pages+NRN):")
-print(f"    FPT:            0x{fpt_off:04X} (LE-rel)")
+print(f"  FIXUP SECTION (after loader, before pages):")
+print(f"    FPT:            0x{fpt_off:03X} (LE-rel)")
 print(f"    FRT:            0x{frt_off:04X} (LE-rel)")
 print(f"    Import tables:  0x{import_off:04X} (LE-rel)")
-print(f"    Fixup size:     0x{fixup_section_size:03X} ({fixup_section_size} bytes)")
+print(f"    Fixup size:     0x{fixup_section_size:04X} ({fixup_section_size} bytes)")
+print(f"  PAGE DATA (sector-aligned after fixups):")
+print(f"    LE-relative:    0x{data_off_le_rel:05X}")
+print(f"    File-absolute:  0x{data_pages_file:05X}")
+print(f"  NONRESIDENT NAMES:")
+print(f"    File-absolute:  0x{nrn_file_off:05X} ({nrn_len} bytes)")
 
 # --- Build FPT ---
 fpt_data = bytearray((NP + 1) * 4)
@@ -302,7 +301,7 @@ struct.pack_into('<I', le_hdr, 0x78, import_off)           # import proc table (
 
 # Page data - FILE ABSOLUTE (key fix!)
 struct.pack_into('<I', le_hdr, 0x80, data_pages_file)      # data_pages_off = FILE ABSOLUTE
-struct.pack_into('<I', le_hdr, 0x84, 0)                    # num_preload_pages = 0 (demand-load)
+struct.pack_into('<I', le_hdr, 0x84, NP)                   # preload ALL pages (ESDI preloads 2; we need all for merged single object)
 
 # Nonresident names - FILE ABSOLUTE (all Microsoft VxDs have this)
 struct.pack_into('<I', le_hdr, 0x88, nrn_file_off)         # nonresident_names_off
@@ -312,7 +311,7 @@ struct.pack_into('<I', le_hdr, 0x8C, nrn_len)              # nonresident_names_l
 # LE+0xB8 = end of module data (file-absolute) = end of fixup section
 # LE+0xBC = varies (~500, purpose unclear but always present)
 # LE+0xC0 = OS version info (high byte = 0x04 = Win386)
-file_end = MZ_SIZE + fixup_section_end
+file_end = nrn_file_off + nrn_len
 struct.pack_into('<I', le_hdr, 0xB8, file_end)              # end of module data
 struct.pack_into('<I', le_hdr, 0xBC, 0x000001F4)           # common value from MS VxDs
 struct.pack_into('<I', le_hdr, 0xC0, 0x04000000)           # Win386 OS type
@@ -321,7 +320,7 @@ struct.pack_into('<I', le_hdr, 0xC0, 0x04000000)           # Win386 OS type
 obj_e = bytearray(24)
 struct.pack_into('<I', obj_e, 0, merged_vsize)
 struct.pack_into('<I', obj_e, 4, 0x00000000)  # reloc base = 0, matching ESDI_506.PDR obj1
-struct.pack_into('<I', obj_e, 8, 0x2045)  # flags: readable, writable, executable, preload, 32-bit
+struct.pack_into('<I', obj_e, 8, 0x2047)  # flags: readable, writable, executable, preload, 32-bit
 struct.pack_into('<I', obj_e, 12, 1)      # page map idx (1-based)
 struct.pack_into('<I', obj_e, 16, NP)     # page count
 struct.pack_into('<I', obj_e, 20, 0x444F434C)  # reserved = 'LCOD', matching ESDI_506.PDR obj1
@@ -351,7 +350,7 @@ dos_stub = bytes([
 ]) + b'This program cannot be run in DOS mode.\r\n$'
 mz[0x40:0x40+len(dos_stub)] = dos_stub
 
-# File assembly order: MZ -> LE hdr -> loader -> pad -> pages -> NRN -> fixups
+# File assembly order: MZ -> LE hdr -> loader -> fixups -> pad -> pages -> NRN
 out = bytearray()
 out.extend(mz)           # MZ header
 out.extend(le_hdr)        # LE header
@@ -360,19 +359,19 @@ out.extend(pm)            # Page map
 out.extend(rn)            # Resident names
 out.extend(entry)         # Entry table
 
-# Pad to ios_dp (32-byte aligned boundary after entry table)
+# Fixup tables (immediately after loader, before page data — matching ESDI_506)
+out.extend(fpt_data)      # FPT
+out.extend(new_fixup_data) # FRT
+
+# Pad to sector boundary for page data
 while len(out) < data_pages_file:
     out.append(0)
 
-# Page data (at ios_dp, file-absolute = MZ_SIZE + ios_dp)
+# Page data (sector-aligned after fixup section)
 out.extend(all_pages[:NP * page_size])
 
-# Nonresident names table (immediately after page data)
+# Nonresident names table (after page data)
 out.extend(nrn)
-
-# Fixup tables (after NRN, not needed at IOS load time)
-out.extend(fpt_data)      # FPT
-out.extend(new_fixup_data) # FRT
 
 # --- Output ---
 legacy_outpath = os.path.join(SCRIPT_DIR, OUT_NAME)
@@ -406,12 +405,8 @@ print(f'  data_pages_off (file-absolute): 0x{data_pages_file:X}')
 print(f'  nonresident_names_off (file-absolute): 0x{nrn_file_off:X} ({nrn_len} bytes)')
 print(f'  object reserved field: 0x444F434C (LCOD)')
 
-# Verify the IOS loader dp formula
-print(f'\n--- IOS loader compatibility ---')
-print(f'  IOS dp = align_up(et_off=0x{et_off:X}, 32) = 0x{ios_dp:X} (LE-relative)')
-print(f'  Actual page data LE-relative: 0x{data_off_le_rel:X}')
-if ios_dp == data_off_le_rel:
-    print(f'  IOS dp matches page data: YES (works via both loaders)')
-else:
-    print(f'  IOS dp does NOT match page data (only works via SYSTEM.INI)')
-    print(f'  To make IOS-compatible too: place pages at LE+0x{ios_dp:X} (file offset 0x{MZ_SIZE + ios_dp:X})')
+# Layout verification
+print(f'\n--- Layout verification ---')
+print(f'  Fixup section: LE+0x{fpt_off:X} to LE+0x{fixup_section_end_le:X}')
+print(f'  Page data:     LE+0x{data_off_le_rel:X} (file 0x{data_pages_file:X})')
+print(f'  Layout:        loader → fixups → pages (matching ESDI_506.PDR)')
