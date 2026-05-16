@@ -212,7 +212,7 @@ et_off = rnt_off + rnt_size              # entry table (after resident names)
 entry = bytearray(10)
 entry[0] = 1; entry[1] = 3              # 1 entry, type 3 (32-bit)
 struct.pack_into('<H', entry, 2, 1)      # object 1
-entry[4] = 0x03                          # flags: exported+shared (matching ESDI_506.PDR)
+entry[4] = 0x01                          # flags: exported only (0x03 crashes VXDLDR)
 struct.pack_into('<I', entry, 5, merged_ddb_off)
 entry[9] = 0                             # end marker
 et_size = len(entry)

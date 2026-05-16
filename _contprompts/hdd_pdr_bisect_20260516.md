@@ -47,18 +47,18 @@ The NASM change (`.do_init` → `.do_ios_register` jump) also changes NT5RAW.VXD
 
 ## Two Blockers to Solve
 
-### Blocker 1: build_nt5_fixed.py changes break the binary
+### Blocker 1: SOLVED — `entry_flags=0x03` was the sole breaking change
 
-The 0f6d5a4 build script produces a working binary. The current build script produces one that crashes. Need to bisect which change(s) cause the crash.
+Bisection complete:
+- `preload_pages = NP (40)` → SAFE (T+210s, NT! confirmed)
+- `obj_flags = 0x2047` (writable) → SAFE
+- `entry_flags = 0x03` (exported+shared) → **BREAKS PDR** (0 bytes at 225s)
+- `preload + writable` together (entry_flags=0x01 kept) → SAFE (T+120s)
 
-**Test plan:** Start from the working 0f6d5a4 build script, apply changes one at a time, deploy as PDR, check for `NT!` in debug log at T+140s.
+**Fix applied:** `build_nt5_fixed.py` line 215 set back to `entry[4] = 0x01`.
+ESDI_506 uses 0x03, but VXDLDR interprets bit 1 (shared) differently for our VxD.
 
-Order (cheapest to test first):
-1. Change `resident_name` alone (NT5RAW → NTMINI)
-2. Change `entry_flags` alone (0x01 → 0x03)
-3. Change `obj_flags` alone (0x2045 → 0x2047)
-4. Change `preload_pages` alone (0 → 40, or 0 → 2)
-5. All together
+The NASM `.do_init → .do_ios_register` change was NOT tested separately (Docker was down). It changes NT5RAW.VXD code size which shifts fixup offsets. Needs testing once Docker is available.
 
 ### Blocker 2: ios_register_port_driver() never runs
 
