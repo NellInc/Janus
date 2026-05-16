@@ -72,12 +72,15 @@ b) Hook into `Create_VM` (0x1D) — runs after IOS init, may work
 c) Use `Init_Complete` (0x02) — standard path, but not received in PDR testing
 d) Use a VMM timer callback to defer registration until IOS is ready
 
-**Key question:** WHY doesn't the PDR receive `Device_Init`/`Init_Complete`? Is this because:
-- PDRs loaded by IOS genuinely don't get these messages (IOS-loaded PDRs are different from VXDLDR-loaded dynamic VxDs)?
-- The messages arrive later than T+140s (boot is still in progress)?
-- Something about our DDB suppresses these messages?
+**ANSWERED (5-min capture):** PDRs NEVER receive `Device_Init`, `Init_Complete`, or `Sys_Dynamic_Device_Init`. Full 5-min log shows only:
+- `Sys_Critical_Init` (0x00) at T+200s
+- `Create_VM` (0x1D) × 6
+- `Destroy_VM` (0x1E) × 6
+- Nothing else. 232 bytes total. Stable after T+240s.
 
-**Experiment:** Run the working binary for 5+ minutes and capture the FULL debug log. Look for `'1'` (Device_Init), `'2'` (Init_Complete), or `'J'` (Dynamic_Init) markers.
+**Implication:** `ios_register_port_driver()` cannot be called from VMM control dispatch. IOS must call the port driver's AEP handler directly — it finds the DRP at a known location (perhaps `DDB_Reference_Data` or a fixed offset after the DDB, or via `IOS_Register` called from `Sys_Critical_Init`).
+
+**Next approach:** Call `ios_register_port_driver()` from `Sys_Critical_Init` (0x00) handler instead. This IS received. But IOS may not be ready at `Sys_Critical_Init` time — need to test. Alternatively, examine how ESDI_506.PDR registers (disassemble its `Sys_Critical_Init` handler).
 
 ## ScanDisk Suppression (REQUIRED for fresh images)
 
