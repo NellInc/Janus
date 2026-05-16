@@ -62,6 +62,16 @@
 %define ISP_INSERT_CALLDOWN_svc         0x00100008
 %define IOS_BD_Command_Complete_svc     0x00100005
 
+; Additional VxD service IDs (Phase 2 — SCSI miniport support)
+%define VMM__PageAllocate       0x00010053
+%define VMM__CopyPageTable      0x00010049
+%define VMM_Get_Cur_VM_Handle   0x00010001
+%define VMM_Set_Time_Out        0x0001001C
+%define IOS_Get_Version         0x00100000
+%define IOS_Get_Device_List     0x00100003
+%define VPICD_Get_Complete_Status 0x00030004
+%define VPICD_Call_When_Hw_Int  0x00030005
+
 ; VxD control messages
 %define Sys_Critical_Init           0x0000
 %define Device_Init                 0x0001
@@ -103,6 +113,14 @@ extern _ntk_ExFreePool_cdecl        ; void helper(ptr)
 ; From IRQHOOK.C - cdecl (underscore prefix in obj)
 extern _irq_hw_isr                  ; ULONG irq_hw_isr(ULONG irq_handle)
 extern _irq_hook_remove             ; void irq_hook_remove(void)
+
+; From NTMINI_V5.C - cdecl (Phase 2 SCSI miniport support)
+extern _ntmini_timer_callback       ; void ntmini_timer_callback(ULONG refdata)
+extern sp_va_to_pa                  ; ULONG sp_va_to_pa(void *va)
+extern pe_load_image                ; PE loader (separate C source)
+extern _pe_load_image
+extern _ntmini_ior_handler          ; void ntmini_ior_handler(void *iop)
+extern _ntmini_aep_handler          ; void ntmini_aep_handler(void *aep)
 
 
 ;============================================================================
@@ -1894,6 +1912,654 @@ _ntk_InterlockedExchange_ms:
     mov     eax, [ecx]
     mov     [ecx], edx
     ret
+
+
+;============================================================================
+;   SCSI MINIPORT SUPPORT (Phase 2 — ported from VXDWRAP_V4.ASM)
+;============================================================================
+
+;----------------------------------------------------------------------------
+; Data globals (in locked code segment for VxD compatibility)
+;----------------------------------------------------------------------------
+
+; VPICD IRQ handler globals
+global _g_irq_hw_int_func
+global g_irq_hw_int_func
+global _g_irq_devext
+global g_irq_devext
+global _g_irq_handle
+global g_irq_handle
+_g_irq_hw_int_func:
+g_irq_hw_int_func:     dd 0
+_g_irq_devext:
+g_irq_devext:           dd 0
+_g_irq_handle:
+g_irq_handle:           dd 0
+
+; Exception diagnostic globals
+global _g_fault_code
+global g_fault_code
+global _g_fault_eip
+global g_fault_eip
+global _g_fault_addr
+global g_fault_addr
+_g_fault_code:
+g_fault_code:   dd 0
+_g_fault_eip:
+g_fault_eip:    dd 0
+_g_fault_addr:
+g_fault_addr:   dd 0
+
+; IOS device list register dump
+global _gdl_regs
+global gdl_regs
+_gdl_regs:
+gdl_regs:       times 6 dd 0
+
+;----------------------------------------------------------------------------
+; VxD_PageAllocateDMA - Allocate DMA-capable pages via VMM
+;   ULONG VxD_PageAllocateDMA(ULONG nPages, ULONG *pPhysAddr)
+;----------------------------------------------------------------------------
+global VxD_PageAllocateDMA
+global _VxD_PageAllocateDMA
+VxD_PageAllocateDMA:
+_VxD_PageAllocateDMA:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    ecx
+    push    esi
+    push    edi
+    sub     esp, 4
+    mov     edi, esp
+    mov     dword [edi], 0
+    push    dword 0x0D
+    push    edi
+    push    dword 0
+    push    dword 0
+    push    dword 0
+    push    dword 0
+    push    dword 1
+    push    dword [ebp+8]
+    int     0x20
+    dd      VMM__PageAllocate
+    add     esp, 32
+    test    eax, eax
+    jz      .dma_fail_cleanup
+    mov     esi, edx
+    mov     ecx, [ebp+12]
+    test    ecx, ecx
+    jz      .dma_no_phys
+    mov     ebx, [edi]
+    test    ebx, ebx
+    jnz     .dma_have_phys
+    push    ecx
+    push    edx
+    call    VxD_GetPhysAddr
+    add     esp, 4
+    mov     ebx, eax
+    pop     ecx
+    test    ebx, ebx
+    jnz     .dma_have_phys
+    mov     ebx, esi
+    cmp     ebx, 0xC0000000
+    jb      .dma_have_phys
+    sub     ebx, 0xC0000000
+.dma_have_phys:
+    mov     [ecx], ebx
+.dma_no_phys:
+    add     esp, 4
+    mov     eax, esi
+    jmp     .dma_done
+.dma_fail_cleanup:
+    add     esp, 4
+.dma_fail:
+    xor     eax, eax
+.dma_done:
+    pop     edi
+    pop     esi
+    pop     ecx
+    pop     ebx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; VxD_GetPhysAddr - Get physical address for a virtual address via CopyPageTable
+;   ULONG VxD_GetPhysAddr(ULONG virtAddr)
+;----------------------------------------------------------------------------
+global VxD_GetPhysAddr
+global _VxD_GetPhysAddr
+VxD_GetPhysAddr:
+_VxD_GetPhysAddr:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    sub     esp, 4
+    mov     eax, [ebp+8]
+    mov     esi, eax
+    shr     eax, 12
+    lea     edi, [esp]
+    mov     dword [edi], 0
+    push    dword 2
+    push    edi
+    push    dword 1
+    push    eax
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jz      .gpa_fail
+    mov     eax, [esp]
+    test    eax, 1
+    jz      .gpa_fail
+    and     eax, 0xFFFFF000
+    mov     ebx, esi
+    and     ebx, 0x00000FFF
+    or      eax, ebx
+    jmp     .gpa_done
+.gpa_fail:
+    xor     eax, eax
+.gpa_done:
+    add     esp, 4
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; VxD_Hook_IRQ - Virtualize an IRQ via VPICD
+;   ULONG VxD_Hook_IRQ(USHORT irqNum)
+;----------------------------------------------------------------------------
+global _VxD_Hook_IRQ
+global VxD_Hook_IRQ
+_VxD_Hook_IRQ:
+VxD_Hook_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+    sub     esp, 32
+    mov     edi, esp
+    xor     eax, eax
+    mov     [edi+0], eax
+    mov     [edi+4], eax
+    mov     [edi+8], eax
+    mov     [edi+12], eax
+    mov     [edi+16], eax
+    mov     [edi+20], eax
+    mov     [edi+24], eax
+    mov     [edi+28], eax
+    mov     ax, [ebp+8]
+    mov     [edi+0], ax
+    mov     word [edi+2], 0x02
+    lea     eax, [_ide_irq_handler]
+    mov     [edi+4], eax
+    int     0x20
+    dd      VPICD_Virtualize_IRQ
+    jc      .hook_fail
+    mov     [g_irq_handle], eax
+    jmp     .hook_done
+.hook_fail:
+    xor     eax, eax
+.hook_done:
+    add     esp, 32
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; VxD_Chain_IRQ - Chain onto existing IRQ via VPICD_Call_When_Hw_Int
+;   ULONG VxD_Chain_IRQ(ULONG irqHandle)
+;----------------------------------------------------------------------------
+global _VxD_Chain_IRQ
+global VxD_Chain_IRQ
+_VxD_Chain_IRQ:
+VxD_Chain_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+    push    esi
+    mov     eax, [ebp+8]
+    int     0x20
+    dd      VPICD_Get_Complete_Status
+    jc      .chain_fail
+    mov     [g_irq_handle], eax
+    lea     esi, [_ide_irq_handler]
+    int     0x20
+    dd      VPICD_Call_When_Hw_Int
+    jc      .chain_fail
+    mov     eax, 1
+    jmp     .chain_done
+.chain_fail:
+    xor     eax, eax
+.chain_done:
+    pop     esi
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; _ide_irq_handler - Internal IRQ dispatch thunk
+;----------------------------------------------------------------------------
+_ide_irq_handler:
+    pushad
+    mov ecx, [g_irq_hw_int_func]
+    test ecx, ecx
+    jz .no_handler
+    push dword [g_irq_devext]
+    call ecx
+.no_handler:
+    popad
+    int     0x20
+    dd      VPICD_Phys_EOI
+    clc
+    ret
+
+;----------------------------------------------------------------------------
+; IOS_Get_Version_Test - Test IOS availability
+;   ULONG IOS_Get_Version_Test(void)
+;----------------------------------------------------------------------------
+global _IOS_Get_Version_Test
+global IOS_Get_Version_Test
+_IOS_Get_Version_Test:
+IOS_Get_Version_Test:
+    mov     eax, 0xFEEDFACE
+    int     0x20
+    dd      IOS_Get_Version
+    ret
+
+;----------------------------------------------------------------------------
+; IOS_Register_Driver - Register port driver with IOS
+;   ULONG IOS_Register_Driver(void *drp)
+;----------------------------------------------------------------------------
+global _IOS_Register_Driver
+global IOS_Register_Driver
+_IOS_Register_Driver:
+IOS_Register_Driver:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]
+    push    eax
+    int     0x20
+    dd      IOS_Register_svc
+    add     esp, 4
+    jc      .ios_reg_fail
+    xor     eax, eax
+    jmp     .ios_reg_done
+.ios_reg_fail:
+    test    eax, eax
+    jnz     .ios_reg_done
+    mov     eax, 1
+.ios_reg_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; ISP_Insert_Calldown - Insert calldown into IOS stack
+;   ULONG ISP_Insert_Calldown(void *isp, void *handler, void *devobj, ULONG flags)
+;----------------------------------------------------------------------------
+global _ISP_Insert_Calldown
+global ISP_Insert_Calldown
+_ISP_Insert_Calldown:
+ISP_Insert_Calldown:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+20]
+    push    dword [ebp+16]
+    push    dword [ebp+12]
+    push    dword [ebp+8]
+    mov     eax, [ebp+8]
+    int     0x20
+    dd      ISP_INSERT_CALLDOWN_svc
+    add     esp, 16
+    jc      .isp_fail
+    xor     eax, eax
+    jmp     .isp_done
+.isp_fail:
+    mov     eax, 1
+.isp_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; IOS_BD_Complete - Signal block device command complete
+;   void IOS_BD_Complete(void *iop)
+;----------------------------------------------------------------------------
+global _IOS_BD_Complete
+global IOS_BD_Complete
+_IOS_BD_Complete:
+IOS_BD_Complete:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    edx
+    mov     ebx, [ebp+8]
+    int     0x20
+    dd      IOS_BD_Command_Complete_svc
+    pop     edx
+    pop     ebx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; IOS_Requestor - Call IOS requestor service
+;   void IOS_Requestor(void *ior)
+;----------------------------------------------------------------------------
+global _IOS_Requestor
+global IOS_Requestor
+_IOS_Requestor:
+IOS_Requestor:
+    push    ebp
+    mov     ebp, esp
+    push    edx
+    mov     edx, [ebp+8]
+    int     0x20
+    dd      IOS_Requestor_Service_svc
+    pop     edx
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; IOS_Get_Device_List_Wrapper - Get IOS device list and capture all regs
+;   ULONG IOS_Get_Device_List_Wrapper(void)
+;----------------------------------------------------------------------------
+global _IOS_Get_Device_List_Wrapper
+global IOS_Get_Device_List_Wrapper
+_IOS_Get_Device_List_Wrapper:
+IOS_Get_Device_List_Wrapper:
+    push    ebx
+    push    ecx
+    push    esi
+    push    edi
+    int     0x20
+    dd      IOS_Get_Device_List
+    mov     [gdl_regs+0], eax
+    mov     [gdl_regs+4], ebx
+    mov     [gdl_regs+8], ecx
+    mov     [gdl_regs+12], edx
+    mov     [gdl_regs+16], esi
+    mov     [gdl_regs+20], edi
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, edx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, esi
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, ecx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, ebx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    xor     eax, eax
+.gdl_done:
+    pop     edi
+    pop     esi
+    pop     ecx
+    pop     ebx
+    ret
+
+;----------------------------------------------------------------------------
+; Call_ILB_Internal_Request - Call ILB function pointer with args in regs
+;   ULONG Call_ILB_Internal_Request(void *func, ULONG ebx_val, ULONG edi_val, ULONG edx_val)
+;----------------------------------------------------------------------------
+global _Call_ILB_Internal_Request
+global Call_ILB_Internal_Request
+_Call_ILB_Internal_Request:
+Call_ILB_Internal_Request:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    edi
+    push    ebx
+    mov     ebx, [ebp+12]
+    mov     edi, [ebp+16]
+    mov     edx, [ebp+20]
+    mov     eax, [ebp+8]
+    call    eax
+    pop     ebx
+    pop     edi
+    pop     esi
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; Set_Global_Timeout - Set a VMM timeout with callback
+;   ULONG Set_Global_Timeout(ULONG ms, void *callback, ULONG refdata)
+;----------------------------------------------------------------------------
+global _Set_Global_Timeout
+global Set_Global_Timeout
+_Set_Global_Timeout:
+Set_Global_Timeout:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    ebx
+    int     0x20
+    dd      VMM_Get_Cur_VM_Handle
+    mov     eax, [ebp+8]
+    mov     esi, [ebp+12]
+    mov     edx, [ebp+16]
+    int     0x20
+    dd      VMM_Set_Time_Out
+    mov     eax, esi
+    pop     ebx
+    pop     esi
+    pop     ebp
+    ret
+
+;----------------------------------------------------------------------------
+; timer_callback_bridge - VxD callback thunk to C timer handler
+;----------------------------------------------------------------------------
+global _timer_callback_bridge
+global timer_callback_bridge
+_timer_callback_bridge:
+timer_callback_bridge:
+    pushad
+    push    edx
+    call    _ntmini_timer_callback
+    add     esp, 4
+    popad
+    ret
+
+;----------------------------------------------------------------------------
+; sp_ConvertUlong_asm - ScsiPortConvertUlongToPhysicalAddress (identity)
+;   PHYSICAL_ADDRESS sp_ConvertUlong_asm(ULONG value)
+;----------------------------------------------------------------------------
+global _sp_ConvertUlong_asm
+global sp_ConvertUlong_asm
+_sp_ConvertUlong_asm:
+sp_ConvertUlong_asm:
+    push    ebp
+    mov     ebp, esp
+    mov     eax, [ebp+8]
+    xor     edx, edx
+    pop     ebp
+    ret     4
+
+;----------------------------------------------------------------------------
+; sp_GetPhysAddr_asm - ScsiPortGetPhysicalAddress (va to pa)
+;   PHYSICAL_ADDRESS sp_GetPhysAddr_asm(void *ext, void *srb, void *va, ULONG *len)
+;----------------------------------------------------------------------------
+global _sp_GetPhysAddr_asm
+global sp_GetPhysAddr_asm
+_sp_GetPhysAddr_asm:
+sp_GetPhysAddr_asm:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    mov     eax, [ebp+16]
+    push    eax
+    call    sp_va_to_pa
+    add     esp, 4
+    xor     edx, edx
+    mov     ecx, [ebp+20]
+    test    ecx, ecx
+    jz      .no_len2
+    mov     ebx, [ebp+16]
+    and     ebx, 0xFFF
+    push    eax
+    mov     eax, 0x1000
+    sub     eax, ebx
+    mov     [ecx], eax
+    pop     eax
+.no_len2:
+    pop     ebx
+    pop     ebp
+    ret     16
+
+;----------------------------------------------------------------------------
+; Safe_HwFindAdapter - Call HwFindAdapter with IDT-patched exception handlers
+;   ULONG Safe_HwFindAdapter(void *func, arg1, arg2, arg3, arg4, arg5)
+;----------------------------------------------------------------------------
+global _Safe_HwFindAdapter
+global Safe_HwFindAdapter
+_Safe_HwFindAdapter:
+Safe_HwFindAdapter:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     [.saved_esp], esp
+    mov     [.saved_ebp], ebp
+    sub     esp, 8
+    sidt    [esp]
+    mov     esi, [esp+2]
+    add     esp, 8
+    mov     eax, [esi+0x70]
+    mov     [.old_idt14_lo], eax
+    mov     eax, [esi+0x74]
+    mov     [.old_idt14_hi], eax
+    mov     eax, [esi+0x68]
+    mov     [.old_idt13_lo], eax
+    mov     eax, [esi+0x6C]
+    mov     [.old_idt13_hi], eax
+    mov     eax, .pf_handler
+    mov     ebx, eax
+    and     eax, 0x0000FFFF
+    mov     cx, [esi+0x72]
+    shl     ecx, 16
+    or      eax, ecx
+    mov     [esi+0x70], eax
+    mov     eax, ebx
+    and     eax, 0xFFFF0000
+    or      eax, 0x00008E00
+    mov     [esi+0x74], eax
+    mov     eax, .gpf_handler
+    mov     ebx, eax
+    and     eax, 0x0000FFFF
+    mov     cx, [esi+0x6A]
+    shl     ecx, 16
+    or      eax, ecx
+    mov     [esi+0x68], eax
+    mov     eax, ebx
+    and     eax, 0xFFFF0000
+    or      eax, 0x00008E00
+    mov     [esi+0x6C], eax
+    mov     [.idt_base], esi
+    push    dword [ebp+32]
+    push    dword [ebp+28]
+    push    dword [ebp+24]
+    push    dword [ebp+20]
+    push    dword [ebp+16]
+    push    dword [ebp+12]
+    call    dword [ebp+8]
+    push    eax
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    jmp     .idt_done
+.pf_handler:
+    push    eax
+    mov     eax, cr2
+    mov     [_g_fault_addr], eax
+    mov     dword [_g_fault_code], 0xC0000005
+    mov     eax, [esp+8]
+    mov     [_g_fault_eip], eax
+    pop     eax
+    push    esi
+    push    eax
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+    mov     esp, [.saved_esp]
+    mov     ebp, [.saved_ebp]
+    mov     eax, 0xDEAD0001
+    jmp     .idt_done
+.gpf_handler:
+    push    eax
+    mov     dword [_g_fault_code], 0xC0000005
+    mov     eax, [esp+8]
+    mov     [_g_fault_eip], eax
+    mov     dword [_g_fault_addr], 0xDEAD0013
+    pop     eax
+    push    esi
+    push    eax
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+    mov     esp, [.saved_esp]
+    mov     ebp, [.saved_ebp]
+    mov     eax, 0xDEAD0001
+    jmp     .idt_done
+.idt_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+    align 4
+.saved_esp:     dd 0
+.saved_ebp:     dd 0
+.idt_base:      dd 0
+.old_idt14_lo:  dd 0
+.old_idt14_hi:  dd 0
+.old_idt13_lo:  dd 0
+.old_idt13_hi:  dd 0
 
 
 ;============================================================================

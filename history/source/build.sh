@@ -63,4 +63,12 @@ else
         cp "$SCRIPT_DIR/V5SMALL.VXD" "$REPO_ROOT/binaries/V5SMALL.VXD"
         echo "Copied to binaries/V5SMALL.VXD"
     fi
+
+    if [ "$TARGET" = "v5scsi" ] && [ -f "$SCRIPT_DIR/V5SCSI.VXD" ]; then
+        SIZE=$(stat -f%z "$SCRIPT_DIR/V5SCSI.VXD" 2>/dev/null || stat -c%s "$SCRIPT_DIR/V5SCSI.VXD" 2>/dev/null)
+        echo ""
+        echo "=== SUCCESS: V5SCSI.VXD ($SIZE bytes) ==="
+        cp "$SCRIPT_DIR/V5SCSI.VXD" "$REPO_ROOT/binaries/V5SCSI.VXD"
+        echo "Copied to binaries/V5SCSI.VXD"
+    fi
 fi

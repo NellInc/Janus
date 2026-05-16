@@ -72,16 +72,27 @@ V5S_C_PE_OBJ = V5S_pe.obj
 V5SMALL_LNK = v5small_1obj.lnk
 
 # ============================================================
+# V5SCSI PATH (SCSI miniport: sym_hi.sys on LSI53C895A)
+# ============================================================
+
+V5SCSI_VXD = V5SCSI.VXD
+V5SCSI_C_OBJ = V5SCSI_c.obj
+V5SCSI_PE_OBJ = V5SCSI_pe.obj
+V5SCSI_LNK = link_v5scsi.lnk
+V5SCSI_CFLAGS = $(CFLAGS) -dNTMINI_USE_SCSI=1
+
+# ============================================================
 # Targets
 # ============================================================
 
-.PHONY: all nt5 v5 v5small clean
+.PHONY: all nt5 v5 v5small v5scsi clean
 
 all: nt5
 
 nt5: $(NT5_VXD)
 v5: $(NT4_VXD)
 v5small: $(V5SMALL_VXD)
+v5scsi: $(V5SCSI_VXD)
 
 # Assemble VXDWRAP
 $(NT5_ASM_OBJ): $(NT5_ASM_SRC)
@@ -119,6 +130,16 @@ $(NT4_VXD): $(V5_ASM_OBJ) $(V5_C_MAIN_OBJ) $(V5_C_PE_OBJ) $(V5_LNK)
 $(V5SMALL_VXD): $(V5S_ASM_OBJ) $(V5S_C_MAIN_OBJ) $(V5S_C_PE_OBJ) $(V5SMALL_LNK)
 	$(WLINK) @$(V5SMALL_LNK)
 	cp V5SMALL_1OBJ.VXD $(V5SMALL_VXD)
+
+# V5SCSI: SCSI miniport variant (sym_hi.sys on LSI53C895A)
+$(V5SCSI_C_OBJ): $(V5_C_MAIN_SRC)
+	$(WCC) $(V5SCSI_CFLAGS) -fo=$@ $<
+
+$(V5SCSI_PE_OBJ): $(V5_C_PE_SRC)
+	$(WCC) $(V5SCSI_CFLAGS) -fo=$@ $<
+
+$(V5SCSI_VXD): $(NT5_ASM_OBJ) $(V5SCSI_C_OBJ) $(V5SCSI_PE_OBJ) $(V5SCSI_LNK)
+	$(WLINK) @$(V5SCSI_LNK)
 
 # ============================================================
 # Convenience: compile individual files for debugging
