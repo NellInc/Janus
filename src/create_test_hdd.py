@@ -55,7 +55,7 @@ mbr[510] = 0x55
 mbr[511] = 0xAA
 
 # Build FAT16 boot sector (BPB)
-CLUSTER_SIZE = 4096  # 8 sectors per cluster
+CLUSTER_SIZE = 2048  # 4 sectors per cluster (must yield >= 4085 clusters for FAT16)
 RESERVED = 1
 NUM_FATS = 2
 ROOT_ENTRIES = 512
