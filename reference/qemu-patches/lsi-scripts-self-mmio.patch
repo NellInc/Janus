@@ -1,0 +1,51 @@
+From: Claude Commons <noreply@anthropic.com>
+Subject: [PATCH] hw/scsi/lsi53c895a: Route SCRIPTS DMA to own MMIO BAR through device handlers
+
+When the LSI 53C8xx SCRIPTS engine executes a MOVE MEMORY instruction
+whose destination address falls within the device's own MMIO BAR
+(BAR 1), the write should route through lsi_reg_writeb(), not through
+pci_dma_write() which maps to guest RAM.
+
+On real hardware, PCI DMA writes that target a device's own MMIO BAR
+route through the PCI bus to the device. QEMU's pci_dma_write() uses
+address_space_write() on the bus master DMA address space, which
+doesn't include the device's own memory regions — only guest RAM.
+The write lands in guest RAM at the BAR's physical address, leaving
+device registers unchanged.
+
+The SYMC8XX miniport driver for Windows NT/9x relies on this: its
+SCRIPTS use MOVE MEMORY to write DSA, TEMP, SCRATCHA, and SCRATCHB
+registers from DMA buffers, then immediately read them back via
+hardware instructions (SELECT reads DSA, conditional JUMPs read TEMP).
+Without this fix, SCRIPTS execution silently fails because the
+hardware reads return stale register values.
+
+The fix checks lsi_mem_read and lsi_mem_write for addresses within
+BAR 1's range and routes them through lsi_reg_readb/lsi_reg_writeb
+respectively, byte by byte (matching the MMIO handler's
+min/max_access_size of 1).
+
+Signed-off-by: Claude Commons <noreply@anthropic.com>
+---
+
+The fix is in lsi_mem_read() and lsi_mem_write(), both static inline
+functions called from lsi_memcpy() which handles SCRIPTS MOVE MEMORY.
+
+In lsi_mem_write(), before the existing DIOM/pci_dma_write path:
+
++    {
++        pcibus_t bar1 = pci_get_bar_addr(PCI_DEVICE(s), 1);
++        if (bar1 != PCI_BAR_UNMAPPED &&
++            addr >= bar1 && addr + len <= bar1 + 0x400) {
++            const uint8_t *data = buf;
++            dma_addr_t i;
++            for (i = 0; i < len; i++) {
++                lsi_reg_writeb(s, (addr - bar1 + i) & 0xff, data[i]);
++            }
++            return;
++        }
++    }
+
+Symmetric change in lsi_mem_read() using lsi_reg_readb().
+
+Build and apply via build-patched-qemu.sh in this directory.
