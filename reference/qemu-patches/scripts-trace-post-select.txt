@@ -1,0 +1,288 @@
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6
+LSI SELECT: id=0 CON=0 found=0x108c05910
+LSI PS[1]: dsp=0x0b9c8178 insn=0x7c07fe00 type=1 sub=7
+LSI PS[2]: dsp=0x0b9c8180 insn=0xc0000004 type=3 sub=0
+LSI PS[3]: dsp=0x0b9c818c insn=0xc0000004 type=3 sub=0
+LSI PS[4]: dsp=0x0b9c8198 insn=0xc0000008 type=3 sub=0
+LSI PS[5]: dsp=0x0b9c81a4 insn=0x7a382000 type=1 sub=7
+LSI PS[6]: dsp=0x0b9c81ac insn=0xc0000004 type=3 sub=0
+LSI PS[7]: dsp=0x0b9c81b8 insn=0x7c38df00 type=1 sub=7
+LSI PS[8]: dsp=0x0b9c81c0 insn=0x1e000000 type=0 sub=3
+LSI PS[9]: dsp=0x0b9c81c8 insn=0x828b0000 type=2 sub=0
+LSI PS[10]: dsp=0x0b9c81d0 insn=0x838a0000 type=2 sub=0
+LSI PS[11]: dsp=0x0b9c81d8 insn=0x878a0000 type=2 sub=0
+LSI PS[12]: dsp=0x0b9c81e0 insn=0x80880000 type=2 sub=0
+LSI PS[13]: dsp=0x0b9c8a48 insn=0x58000008 type=1 sub=3
+LSI PS[14]: dsp=0x0b9c8a50 insn=0x60000040 type=1 sub=4
+LSI PS[15]: dsp=0x0b9c8a58 insn=0x9e030000 type=2 sub=3
+LSI PS[16]: dsp=0x0b9c8a60 insn=0x7c027f00 type=1 sub=7
+LSI PS[17]: dsp=0x0b9c8a68 insn=0x0e000001 type=0 sub=1
+LSI PS[18]: dsp=0x0b9c8a70 insn=0x7a070100 type=1 sub=7
+LSI PS[19]: dsp=0x0b9c8a78 insn=0x48000000 type=1 sub=1
+LSI PS[20]: dsp=0x0b9c8a80 insn=0x98080000 type=2 sub=3
+LSI PS[21]: dsp=0x0b9c8108 insn=0xc0000004 type=3 sub=0
+LSI PS[22]: dsp=0x0b9c8114 insn=0x7a381000 type=1 sub=7
+LSI PS[23]: dsp=0x0b9c811c insn=0xc0000004 type=3 sub=0
+LSI PS[24]: dsp=0x0b9c8128 insn=0x7c38ef00 type=1 sub=7
+LSI PS[25]: dsp=0x0b9c8130 insn=0x72100000 type=1 sub=6
+LSI BAD-SEL: id=1
+LSI BAD-SEL: id=2
+LSI BAD-SEL: id=3
+LSI BAD-SEL: id=4
+LSI BAD-SEL: id=5
+LSI BAD-SEL: id=6

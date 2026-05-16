@@ -1,0 +1,284 @@
+--- a/hw/scsi/lsi53c895a.c
++++ b/hw/scsi/lsi53c895a.c
+@@ -18,8 +18,10 @@
+ #include "hw/irq.h"
+ #include "hw/pci/pci_device.h"
+ #include "hw/scsi/scsi.h"
++#include "hw/core/cpu.h"
+ #include "migration/vmstate.h"
+ #include "system/dma.h"
++#include "system/address-spaces.h"
+ #include "qemu/log.h"
+ #include "qemu/module.h"
+ #include "trace.h"
+@@ -445,10 +447,98 @@
+ static void lsi_reg_writeb(LSIState *s, int offset, uint8_t val);
+ static void lsi_execute_script(LSIState *s);
+ static void lsi_reselect(LSIState *s, lsi_request *p);
++
++/*
++ * NTMINI_PA_FIXUP: Win98's VxD_PageAllocateDMA reports
++ * PA = VA - 0xC0000000 when VMM _PageAllocate/_CopyPageTable fail
++ * to fill PhysAddr. For pages not identity-mapped in kernel space,
++ * the reported PA is wrong and PCI DMA reads return zero.
++ *
++ * Strategy: Reconstruct VA by adding 0xC0000000 back, then walk
++ * guest page tables via cpu_get_phys_page_debug() to get the real
++ * physical page. Cache 64 entries direct-mapped. Only attempt for
++ * DMA below 1GB (the VxD identity-map range).
++ *
++ * Translated addresses go through system address_space_memory
++ * (not PCI DMA) because pci_dma_read on translated PAs returns zero.
++ */
++#define LSI_FIXUP_CACHE_SZ 64
++static hwaddr lsi_fixup_cache_tag[LSI_FIXUP_CACHE_SZ];
++static hwaddr lsi_fixup_cache_pa[LSI_FIXUP_CACHE_SZ];
++static bool lsi_fixup_cache_inited;
++
++static hwaddr lsi_fixup_addr(dma_addr_t addr, bool *translated)
++{
++    hwaddr page_tag;
++    unsigned int idx;
++    vaddr va;
++    hwaddr real_pa;
+ 
++    *translated = false;
++    if (addr >= 0x40000000) {
++        return addr;
++    }
++    if (!current_cpu) {
++        return addr;
++    }
++    if (!lsi_fixup_cache_inited) {
++        memset(lsi_fixup_cache_tag, 0xff, sizeof(lsi_fixup_cache_tag));
++        memset(lsi_fixup_cache_pa, 0, sizeof(lsi_fixup_cache_pa));
++        lsi_fixup_cache_inited = true;
++    }
++
++    page_tag = addr & ~(hwaddr)0xfff;
++    idx = (unsigned int)(page_tag >> 12) & (LSI_FIXUP_CACHE_SZ - 1);
++    if (lsi_fixup_cache_tag[idx] == page_tag) {
++        if (lsi_fixup_cache_pa[idx] == page_tag) {
++            return addr; /* identity */
++        }
++        *translated = true;
++        return lsi_fixup_cache_pa[idx] | (addr & 0xfff);
++    }
++
++    va = (vaddr)addr + 0xC0000000;
++    real_pa = cpu_get_phys_page_debug(current_cpu, va);
++    if (real_pa == (hwaddr)-1) {
++        return addr; /* walk failed: leave as-is */
++    }
++
++    lsi_fixup_cache_tag[idx] = page_tag;
++    lsi_fixup_cache_pa[idx] = real_pa;
++    if (real_pa == page_tag) {
++        return addr;
++    }
++    *translated = true;
++    return real_pa | (addr & 0xfff);
++}
++
+ static inline void lsi_mem_read(LSIState *s, dma_addr_t addr,
+                                void *buf, dma_addr_t len)
+ {
++    /* lsi_bar1_self_check: Route reads from device's own MMIO BAR through
++     * the register read handler instead of guest RAM. SCRIPTS MOVE MEMORY
++     * reads from MMIO BAR PA would otherwise get stale guest RAM content. */
++    {
++        pcibus_t bar1 = pci_get_bar_addr(PCI_DEVICE(s), 1);
++        if (bar1 != PCI_BAR_UNMAPPED &&
++            addr >= bar1 && addr + len <= bar1 + 0x400) {
++            uint8_t *dst = buf;
++            dma_addr_t i;
++            for (i = 0; i < len; i++) {
++                dst[i] = lsi_reg_readb(s, (addr - bar1 + i) & 0xff);
++            }
++            return;
++        }
++    }
++    {
++        bool translated;
++        hwaddr fixed = lsi_fixup_addr(addr, &translated);
++        if (translated) {
++            address_space_read(&address_space_memory, fixed,
++                               MEMTXATTRS_UNSPECIFIED, buf, len);
++            return;
++        }
++    }
+     if (s->dmode & LSI_DMODE_SIOM) {
+         address_space_read(&s->pci_io_as, addr, MEMTXATTRS_UNSPECIFIED,
+                            buf, len);
+@@ -460,6 +550,32 @@
+ static inline void lsi_mem_write(LSIState *s, dma_addr_t addr,
+                                 const void *buf, dma_addr_t len)
+ {
++    /* lsi_bar1_self_check: Route writes to device's own MMIO BAR through
++     * the register write handler instead of guest RAM. SCRIPTS MOVE MEMORY
++     * writes DSA, TEMP, SCRATCHA, SCRATCHB to MMIO BAR PA, but
++     * pci_dma_write() sends them to guest RAM, leaving device registers
++     * stale. The SCRIPTS engine then reads stale values and fails. */
++    {
++        pcibus_t bar1 = pci_get_bar_addr(PCI_DEVICE(s), 1);
++        if (bar1 != PCI_BAR_UNMAPPED &&
++            addr >= bar1 && addr + len <= bar1 + 0x400) {
++            const uint8_t *data = buf;
++            dma_addr_t i;
++            for (i = 0; i < len; i++) {
++                lsi_reg_writeb(s, (addr - bar1 + i) & 0xff, data[i]);
++            }
++            return;
++        }
++    }
++    {
++        bool translated;
++        hwaddr fixed = lsi_fixup_addr(addr, &translated);
++        if (translated) {
++            address_space_write(&address_space_memory, fixed,
++                                MEMTXATTRS_UNSPECIFIED, buf, len);
++            return;
++        }
++    }
+     if (s->dmode & LSI_DMODE_DIOM) {
+         address_space_write(&s->pci_io_as, addr, MEMTXATTRS_UNSPECIFIED,
+                             buf, len);
+@@ -471,8 +587,21 @@
+ static inline uint32_t read_dword(LSIState *s, uint32_t addr)
+ {
+     uint32_t buf;
++    bool translated;
++    hwaddr fixed;
+ 
+-    pci_dma_read(PCI_DEVICE(s), addr, &buf, 4);
++    /* NTMINI: SCRIPTS instruction fetches come through here. The PA
++     * reported by the VxD is wrong, so run it through lsi_fixup_addr
++     * just like the main mem_read path does. Without this, instruction
++     * fetches read zeros from the unmapped PA and SCRIPTS marches
++     * through 500 empty opcodes per batch. */
++    fixed = lsi_fixup_addr(addr, &translated);
++    if (translated) {
++        address_space_read(&address_space_memory, fixed,
++                           MEMTXATTRS_UNSPECIFIED, &buf, 4);
++    } else {
++        pci_dma_read(PCI_DEVICE(s), addr, &buf, 4);
++    }
+     return cpu_to_le32(buf);
+ }
+ 
+@@ -860,10 +989,15 @@
+     trace_lsi_do_command(s->dbc);
+     if (s->dbc > 16)
+         s->dbc = 16;
+-    pci_dma_read(PCI_DEVICE(s), s->dnad, buf, s->dbc);
++    /*
++     * NTMINI_PA_FIXUP: command buffers come from the guest DMA arena and can
++     * carry the same translated pseudo-physical addresses as data moves.
++     */
++    lsi_mem_read(s, s->dnad, buf, s->dbc);
+     s->sfbr = buf[0];
+     s->command_complete = 0;
+ 
++
+     id = (s->select_tag >> 8) & 0xf;
+     dev = scsi_device_find(&s->bus, 0, id, s->current_lun);
+     if (!dev) {
+@@ -912,7 +1046,7 @@
+     s->dbc = 1;
+     status = s->status;
+     s->sfbr = status;
+-    pci_dma_write(PCI_DEVICE(s), s->dnad, &status, 1);
++    lsi_mem_write(s, s->dnad, &status, 1);
+     lsi_set_phase(s, PHASE_MI);
+     s->msg_action = LSI_MSG_ACTION_DISCONNECT;
+     lsi_add_msg_byte(s, 0); /* COMMAND COMPLETE */
+@@ -929,7 +1063,7 @@
+         len = s->dbc;
+ 
+     if (len) {
+-        pci_dma_write(PCI_DEVICE(s), s->dnad, s->msg, len);
++        lsi_mem_write(s, s->dnad, s->msg, len);
+         /* Linux drivers rely on the last byte being in the SIDL.  */
+         s->sidl = s->msg[len - 1];
+         s->msg_len -= len;
+@@ -964,7 +1098,7 @@
+ static uint8_t lsi_get_msgbyte(LSIState *s)
+ {
+     uint8_t data;
+-    pci_dma_read(PCI_DEVICE(s), s->dnad, &data, 1);
++    lsi_mem_read(s, s->dnad, &data, 1);
+     s->dnad++;
+     s->dbc--;
+     return data;
+@@ -1151,7 +1285,6 @@
+ 
+ static void lsi_execute_script(LSIState *s)
+ {
+-    PCIDevice *pci_dev = PCI_DEVICE(s);
+     uint32_t insn;
+     uint32_t addr, addr_high;
+     int opcode;
+@@ -1218,7 +1351,13 @@
+ 
+             /* 32-bit Table indirect */
+             offset = sextract32(addr, 0, 24);
+-            pci_dma_read(pci_dev, s->dsa + offset, buf, 8);
++            /*
++             * NTMINI_PA_FIXUP: table-indirect descriptors live in the guest
++             * DMA block pointed to by DSA. On Win98 NTMINI that address can
++             * require the same PA translation as regular data moves, so fetch
++             * it through lsi_mem_read instead of raw pci_dma_read.
++             */
++            lsi_mem_read(s, s->dsa + offset, buf, 8);
+             /* byte count is stored in bits 0:23 only */
+             s->dbc = cpu_to_le32(buf[0]) & 0xffffff;
+             s->rbc = s->dbc;
+@@ -1606,7 +1745,7 @@
+             n = (insn & 7);
+             reg = (insn >> 16) & 0xff;
+             if (insn & (1 << 24)) {
+-                pci_dma_read(pci_dev, addr, data, n);
++                lsi_mem_read(s, addr, data, n);
+                 trace_lsi_execute_script_mm_load(reg, n, addr, *(int *)data);
+                 for (i = 0; i < n; i++) {
+                     lsi_reg_writeb(s, reg + i, data[i]);
+@@ -1616,7 +1755,7 @@
+                 for (i = 0; i < n; i++) {
+                     data[i] = lsi_reg_readb(s, reg + i);
+                 }
+-                pci_dma_write(pci_dev, addr, data, n);
++                lsi_mem_write(s, addr, data, n);
+             }
+         }
+     }
+@@ -1895,7 +2034,11 @@
+         }
+         break;
+     case 0x01: /* SCNTL1 */
+-        s->scntl1 = val & ~LSI_SCNTL1_SST;
++        /* NTMINI_SCNTL1_CON */
++        {
++            s->scntl1 = (val & ~(LSI_SCNTL1_SST | LSI_SCNTL1_CON))
++                      | (s->scntl1 & LSI_SCNTL1_CON);
++        }
+         if (val & LSI_SCNTL1_IARB) {
+             qemu_log_mask(LOG_UNIMP,
+                       "lsi_scsi: Immediate Arbritration not implemented\n");
+@@ -2053,12 +2196,14 @@
+         s->stime0 = val;
+         break;
+     case 0x49: /* STIME1 */
++        /* NTMINI_STIME1_NOGEN: Do NOT fire LSI_SIST1_GEN immediately.
++         * The "immediately raise interrupt" hack was for FreeBSD; SYMC8XX
++         * programs STIME1 before SELECT and relies on the real timer
++         * expiring only if nothing happens. Firing GEN immediately causes
++         * premature SRB_STATUS_SELECTION_TIMEOUT (0x0E). */
+         if (val & 0xf) {
+             qemu_log_mask(LOG_UNIMP,
+                           "lsi_scsi: General purpose timer not implemented\n");
+-            /* ??? Raising the interrupt immediately seems to be sufficient
+-               to keep the FreeBSD driver happy.  */
+-            lsi_script_scsi_interrupt(s, 0, LSI_SIST1_GEN);
+         }
+         break;
+     case 0x4a: /* RESPID0 */
