@@ -2003,10 +2003,29 @@ static ULONG __stdcall sp_Initialize(
        Try VPICD_Virtualize_IRQ first (exclusive ownership). If that fails
        (PCI IRQ steering VxD already virtualized the shared PCI interrupt),
        fall back to VPICD_Call_When_Hw_Int which chains onto the existing
-       handler. This is how Win98's own SCSIPORT.PDR hooks shared PCI IRQs. */
+       handler. This is how Win98's own SCSIPORT.PDR hooks shared PCI IRQs.
+
+       IMPORTANT: When multiple SCSI targets are on the bus (e.g. CD-ROM +
+       HDD), the controller may have a pending UNIT ATTENTION interrupt from
+       newly-attached devices. If that interrupt fires into our handler before
+       the miniport is fully initialized (DMA buffer, SCRIPTS), the miniport's
+       HwInterrupt will access uninitialized memory and hang. Solution: mask
+       the physical IRQ at the PIC before hooking, then unmask after init. */
     g_irq_hw_int_func = (PVOID)g_state.HwInterrupt;
     g_irq_devext = g_state.DeviceExtension;
     if (configInfo.BusInterruptLevel != 0) {
+        /* Mask the IRQ at the PIC before hooking to prevent premature delivery.
+           PIC1 mask = port 0x21 (IRQ 0-7), PIC2 mask = port 0xA1 (IRQ 8-15). */
+        {
+            ULONG irq = configInfo.BusInterruptLevel;
+            USHORT mask_port = (irq < 8) ? 0x21 : 0xA1;
+            UCHAR irq_bit = (UCHAR)(1 << (irq & 7));
+            UCHAR old_mask = PORT_IN_BYTE(mask_port);
+            PORT_OUT_BYTE(mask_port, old_mask | irq_bit);
+            log_hex("SP: Masked IRQ ", irq, " before hook\r\n");
+        }
+
+        {
         ULONG irq_handle = VxD_Hook_IRQ(configInfo.BusInterruptLevel);
         if (irq_handle) {
             g_irq_active = TRUE;
@@ -2021,6 +2040,7 @@ static ULONG __stdcall sp_Initialize(
                 g_irq_active = FALSE;
                 log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " hook FAILED (both methods)\r\n");
             }
+        }
         }
     }
 
@@ -2166,6 +2186,18 @@ static ULONG __stdcall sp_Initialize(
     }
 
     VxD_Debug_Printf("SP: HwInitialize OK!\r\n");
+
+    /* Unmask the IRQ now that the miniport is fully initialized.
+       DMA buffer is allocated, SCRIPTS are patched, HwInterrupt can safely
+       process pending interrupts (e.g. UNIT ATTENTION from newly-attached disks). */
+    if (configInfo.BusInterruptLevel != 0 && g_irq_active) {
+        ULONG irq = configInfo.BusInterruptLevel;
+        USHORT mask_port = (irq < 8) ? 0x21 : 0xA1;
+        UCHAR irq_bit = (UCHAR)(1 << (irq & 7));
+        UCHAR cur_mask = PORT_IN_BYTE(mask_port);
+        PORT_OUT_BYTE(mask_port, cur_mask & ~irq_bit);
+        log_hex("SP: Unmasked IRQ ", irq, " (miniport ready)\r\n");
+    }
 
 #if NTMINI_USE_SCSI
     /* Verify SCSI controller state after HwInitialize.
