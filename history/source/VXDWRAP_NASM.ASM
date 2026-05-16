@@ -253,7 +253,23 @@ NTMINI_Control:
     mov     al, 10
     out     0xE9, al
     pop     eax
-    jmp     .do_early_ok
+    ; PDRs only receive Sys_Critical_Init, not Init_Complete.
+    ; Try IOS registration here. If IOS isn't ready yet,
+    ; ios_register_port_driver returns nonzero but we still
+    ; return success so VMM doesn't unload us.
+    pushad
+    call    ios_register_port_driver
+    test    eax, eax
+    jz      .syscrit_reg_ok
+    ; Registration failed (IOS not ready?) — mark for retry
+    mov     al, '!'
+    out     0xE9, al
+    mov     al, 10
+    out     0xE9, al
+.syscrit_reg_ok:
+    popad
+    clc
+    ret
 .do_early_ok:
     clc
     ret
@@ -285,9 +301,8 @@ NTMINI_Control:
     mov     al, 10
     out     0xE9, al
     pop     eax
-    ; PDRs get Sys_Dynamic_Device_Init, not Init_Complete.
-    ; Must register with IOS here, not defer to Init_Complete.
-    jmp     .do_ios_register
+    clc
+    ret
 .init_fail:
     push    eax
     mov     al, 'F'
