@@ -113,6 +113,9 @@ fat[5] = 0xFF
 # Cluster 3 = SECOND.TXT (single cluster, end-of-chain)
 fat[6] = 0xFF
 fat[7] = 0xFF
+# Cluster 4 = WDMTEST.TXT (single cluster, end-of-chain)
+fat[8] = 0xFF
+fat[9] = 0xFF
 
 # Build root directory
 rootdir = bytearray(ROOT_SECTORS * SECTOR)
@@ -142,6 +145,17 @@ entry3[11] = 0x20  # archive attribute
 struct.pack_into("<H", entry3, 26, 3)  # start cluster = 3
 struct.pack_into("<I", entry3, 28, len(second_content))  # file size
 rootdir[64:96] = entry3
+# WDMTEST.TXT entry (for WREAD.EXE test)
+wdm_content = (
+    b"WDM_TEST_FILE: Written to FAT16 test HDD for WREAD validation.\r\n"
+    b"If you can read this through the IOS calldown chain, writes work too.\r\n"
+)
+entry4 = bytearray(32)
+entry4[0:11] = b'WDMTEST TXT'  # 8.3 name
+entry4[11] = 0x20  # archive attribute
+struct.pack_into("<H", entry4, 26, 4)  # start cluster = 4
+struct.pack_into("<I", entry4, 28, len(wdm_content))  # file size
+rootdir[96:128] = entry4
 
 # Assemble image
 img = bytearray(TOTAL_SECTORS * SECTOR)
@@ -166,6 +180,9 @@ img[data_off:data_off+len(test_content)] = test_content
 # Cluster 3 data (one cluster after cluster 2)
 cluster3_off = data_off + CLUSTER_SIZE
 img[cluster3_off:cluster3_off+len(second_content)] = second_content
+# Cluster 4 data (WDMTEST.TXT)
+cluster4_off = data_off + 2 * CLUSTER_SIZE
+img[cluster4_off:cluster4_off+len(wdm_content)] = wdm_content
 
 with open(OUT, "wb") as f:
     f.write(img)
@@ -177,3 +194,4 @@ print(f"  Partition: LBA {PART_START_LBA}-{PART_START_LBA+PART_SECTORS-1} (type 
 print(f"  FAT16: {total_clusters} clusters, {CLUSTER_SIZE}-byte clusters")
 print(f"  TESTFILE.TXT: {len(test_content)} bytes at cluster 2")
 print(f"  SECOND.TXT:  {len(second_content)} bytes at cluster 3")
+print(f"  WDMTEST.TXT: {len(wdm_content)} bytes at cluster 4")
