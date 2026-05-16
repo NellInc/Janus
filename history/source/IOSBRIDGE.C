@@ -2486,43 +2486,13 @@ int ios_register_port_driver(void)
     g_bridge.drp.reserved2 = 0;
     g_bridge.ios_ddb = (ULONG)&NTMINI_DDB;
 
+    /* Skip IOS_Register — it hangs the boot by claiming disk DCBs from
+     * ESDI_506. Go straight to late-create using ESDI_506's ILB. */
     dbg_mark('R');
-    /* Approach 3: Enable real IOS_Register so IOS calls our AEP handler
-     * for DCB configuration. With ESDI_506 suppressed, we must claim
-     * all IDE disk DCBs ourselves. */
-    result = IOS_Register((PDDB)&g_bridge.drp);
-    dbg_mark('r');
-
-    if (result != 0) {
-        dbg_mark('f');
-        DBGPRINT("NTMINI: IOS_Register FAILED (result=%lx)\n", result);
-        /* Fall back: continue without IOS registration.
-         * C: may still work via INT 13h real-mode fallback. */
-        DBGPRINT("NTMINI: Falling back to unregistered mode\n");
-        /* IOS_Register failed. Late-create path is our only option. */
-        result = 0; /* don't abort; late-create path may still work */
-
-        dbg_mark('s');
-        DBGPRINT("NTMINI: IOS_Register FAILED, using late-create fallback\n");
-        dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
-        dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
-        dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
-        if (ios_late_create_device() != 0) {
-            dbg_mark('w');
-            return -1;
-        }
-    } else {
-        /* IOS_Register succeeded but we registered too late for
-         * AEP_CONFIG_DCB. Run late-create to manually set up DCBs
-         * and splice into the existing D: calldown chain. */
-        dbg_mark('s');
-        DBGPRINT("NTMINI: IOS_Register OK, running late-create for HDD splice\n");
-        dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
-        dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
-        dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
-        if (ios_late_create_device() != 0) {
-            dbg_mark('w');
-        }
+    DBGPRINT("NTMINI: Skipping IOS_Register, using direct ILB splice\n");
+    g_bridge.drp.ilb = 0;
+    if (ios_late_create_device() != 0) {
+        dbg_mark('w');
     }
     g_ios_registered = 1;
     dbg_mark('g');
@@ -2892,7 +2862,7 @@ static int ios_late_create_device(void)
             isp_hdd_cd.dcb = isp_get.dcb;
             isp_hdd_cd.req = (ULONG)ios_wdm_ior_entry;
             isp_hdd_cd.ddb = g_bridge.ios_ddb;
-            isp_hdd_cd.flags = ISPCDF_BOTTOM | ISPCDF_PORT_DRIVER;
+            isp_hdd_cd.flags = ISPCDF_PORT_DRIVER;  /* non-BOTTOM: above ESDI_506 */
             isp_hdd_cd.lgn = 0x15;
             Call_ILB_Service(ilb->service_rtn, &isp_hdd_cd);
             dbg_mark('s');
@@ -2920,10 +2890,12 @@ static int ios_late_create_device(void)
                              dev3->target_id, (ULONG)isp_get.dcb);
                 }
 
-                /* Walk chain to verify position */
+                /* Walk chain to find next handler below us (ESDI_506).
+                 * Save it to g_late_next_handler for passthrough. */
                 {
                     ULONG cd;
                     ULONG depth;
+                    int found_us = 0;
                     cd = *(ULONG *)((UCHAR *)isp_get.dcb + 0x08);
                     depth = 0;
                     dbg_mark('~');
@@ -2934,11 +2906,21 @@ static int ios_late_create_device(void)
                         ios_dbg_hex32(handler);
                         if (handler == (ULONG)ios_wdm_ior_entry) {
                             dbg_mark('*');
+                            found_us = 1;
+                        } else if (found_us && !g_late_next_handler) {
+                            g_late_next_handler = handler;
+                            dbg_mark('N');
+                            DBGPRINT("NTMINI: Next handler (passthru target): %08lx\n",
+                                     handler);
                         }
                         cd = *(ULONG *)(cd + 0x0C);
                         depth++;
                     }
                     dbg_mark('~');
+                    if (!g_late_next_handler) {
+                        dbg_mark('!');
+                        DBGPRINT("NTMINI: WARNING: no next handler found for passthru\n");
+                    }
                     /* Force VFAT to re-detect D: volume through our splice */
                     dbg_mark('k');
                     IFSMgr_NotifyVolumeArrival_Wrapper(3);
@@ -3465,16 +3447,15 @@ static void aep_config_dcb(PAEP aep)
         }
     }
 
-    /* Only claim devices we can handle.
-     * We handle: CD-ROM, DVD (ATAPI devices on the IDE bus),
-     * and ATA hard disks when the NT5 bridge has detected one.
-     * For ATAPI/SCSI devices the NT miniport provides superior
-     * command handling; for ATA disks we replace ESDI_506.PDR
-     * when our bridge is active. */
+    /* Never claim disk DCBs via AEP — we handle D: via late-create splice.
+     * Claiming C:'s DCB here steals it from ESDI_506, hanging the boot. */
+    if (dcb->DCB_device_type == DCB_TYPE_DISK) {
+        dbg_mark('d');
+        aep->AEP_result = AEP_FAILURE;
+        return;
+    }
     if (dcb->DCB_device_type != DCB_TYPE_CDROM &&
-        dcb->DCB_device_type != DCB_TYPE_DISK &&
         !(dcb->DCB_dmd_flags & DCB_DEV_ATAPI)) {
-        /* Not our device. Let another port driver handle it. */
         aep->AEP_result = AEP_FAILURE;
         return;
     }
@@ -3778,6 +3759,7 @@ void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
     PUCHAR iop;
     PIOR ior;
     PDCB dcb;
+    typedef void (__cdecl *calldown_fn_t)(PVOID);
 
     dbg_mark('W');
     if (!iop_ptr || !is_ring0_ptr((ULONG)iop_ptr)) {
@@ -3796,29 +3778,38 @@ void __cdecl ios_wdm_ior_entry(PVOID iop_ptr)
     ios_dbg_hex16(ior->IOR_func);
     dbg_mark('>');
 
-    /* IOS internal requests: succeed via IOR-level completion.
-     * IOS_BD_Complete_IOP deadlocks for internal IOPs (recursive chain).
-     * IOS_BD_Command_Complete operates on the IOR, not IOP, avoiding
-     * the chain re-entry. */
+    /* IOS internal requests: forward to next handler in chain. */
     if (iop[0x6D] & 0x04) {
         dbg_mark('j');
-        ior->IOR_status = 0;
-        IOS_BD_Command_Complete(ior);
-        dbg_mark('c');
+        if (g_late_next_handler) {
+            ((calldown_fn_t)g_late_next_handler)(iop_ptr);
+        }
         return;
     }
 
-    /* Use the existing DCB that D: routes through.
-     * If we haven't spliced into a real DCB, fall back to our late DCB. */
+    /* Only handle I/O we own: READ, WRITE, WRITEV, MEDIA_CHECK.
+     * Everything else goes to the next handler (ESDI_506). */
+    if (ior->IOR_func != IOR_READ && ior->IOR_func != IOR_WRITE &&
+        ior->IOR_func != IOR_WRITEV && ior->IOR_func != IOR_MEDIA_CHECK &&
+        ior->IOR_func != IOR_MEDIA_CHECK_RESET) {
+        dbg_mark('P');
+        if (g_late_next_handler) {
+            ((calldown_fn_t)g_late_next_handler)(iop_ptr);
+        }
+        return;
+    }
+
+    /* Use the existing DCB that D: routes through. */
     dcb = (PDCB)(g_existing_dcb_ptr ? g_existing_dcb_ptr : g_late_dcb_ptr);
     if (!dcb || !is_ring0_ptr((ULONG)dcb)) {
         dbg_mark('!');
-        ior->IOR_status = IORS_NOT_SUPPORTED;
-        IOS_BD_Complete_IOP(iop_ptr);
+        if (g_late_next_handler) {
+            ((calldown_fn_t)g_late_next_handler)(iop_ptr);
+        }
         return;
     }
 
-    /* Dispatch to the real IOR handler which translates to SRB */
+    /* Dispatch to ata_direct_ior for READ/WRITE/MEDIA_CHECK */
     ior_handler(ior, dcb);
 }
 
@@ -4025,6 +4016,7 @@ static void ata_direct_ior(PIOR ior, PBRIDGE_DEVICE dev)
         dbg_mark('T');
     }
 
+    ior->IOR_xfer_count = sector_count * 512;
     complete_ior(ior, IORS_SUCCESS);
 }
 
