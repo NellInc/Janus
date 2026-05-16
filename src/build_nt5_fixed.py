@@ -111,9 +111,71 @@ else:
 merged_ddb_off = obj_offsets[ddb_obj - 1] + ddb_off_in_obj
 print(f"DDB: obj{ddb_obj} off 0x{ddb_off_in_obj:X} -> merged 0x{merged_ddb_off:X}")
 
-# --- Resident name: override to match DDB name (NTMINI) ---
-rnt_name = b'NTMINI'
-print(f"Resident name: '{rnt_name.decode('ascii')}' (overridden to match DDB)")
+# --- Static DRP for IOS-loaded PDR registration ---
+# IOS reads DDB_Reference_Data (+0x2C) to find a pre-populated DRP with
+# "XXXXXXXX" eyecatcher and AER (AEP handler). This is how ESDI_506.PDR works.
+# Without this, IOS-loaded PDRs never register and never receive AEP callbacks.
+
+# Find ios_aep_bridge in merged pages (pattern: pushad, push [esp+36], call, add esp 4, popad, clc, ret)
+aep_bridge_pattern = bytes([0x60, 0xFF, 0x74, 0x24, 0x24])
+aep_bridge_off = None
+search_start = 0
+while search_start < len(all_pages):
+    idx = all_pages.find(aep_bridge_pattern, search_start)
+    if idx < 0:
+        break
+    after = all_pages[idx+5:idx+15]
+    if len(after) >= 10 and after[0] == 0xE8 and after[5:10] == bytes([0x83, 0xC4, 0x04, 0x61, 0xF8]):
+        aep_bridge_off = idx
+        break
+    search_start = idx + 1
+
+if aep_bridge_off is not None:
+    print(f"ios_aep_bridge found at merged offset 0x{aep_bridge_off:X}")
+
+    # Find free space at end of last page (after last non-zero byte)
+    last_page_start = (num_pages - 1) * page_size
+    last_nonzero = last_page_start
+    for j in range(last_page_start + page_size - 1, last_page_start - 1, -1):
+        if all_pages[j] != 0:
+            last_nonzero = j
+            break
+    drp_off = (last_nonzero + 16) & ~0xF  # 16-byte aligned
+    free_bytes = last_page_start + page_size - drp_off
+
+    if free_bytes >= 56:
+        # Write static DRP at drp_off in merged pages
+        drp = bytearray(56)
+        drp[0:8] = b'XXXXXXXX'
+        struct.pack_into('<I', drp, 8, 0x00400000)   # lgn = DRP_ESDI_PD
+        struct.pack_into('<I', drp, 12, aep_bridge_off)  # aer = ios_aep_bridge (merged offset, needs fixup)
+        struct.pack_into('<I', drp, 16, 0)             # ilb = 0 (IOS fills this)
+        drp[20:36] = b'NTMINI\x00' + b'\x00' * 9  # ascii_name[16] at +0x14
+        drp[36] = 1                                    # revision at +0x24
+        struct.pack_into('<I', drp, 37, 0x00080040)   # feature_code at +0x25
+        struct.pack_into('<H', drp, 41, 0x00FF)       # if_requirements at +0x29
+        drp[43] = 0x00                                 # bus_type at +0x2B
+        all_pages[drp_off:drp_off+56] = drp
+
+        # Patch DDB_Reference_Data (+0x2C from DDB start) to point to DRP
+        ddb_refdata_off = merged_ddb_off + 0x2C
+        struct.pack_into('<I', all_pages, ddb_refdata_off, drp_off)
+
+        print(f"Static DRP at merged offset 0x{drp_off:X} ({free_bytes} bytes free)")
+        print(f"  DDB_Reference_Data (0x{ddb_refdata_off:X}) -> 0x{drp_off:X}")
+        print(f"  DRP.aer -> 0x{aep_bridge_off:X} (ios_aep_bridge)")
+    else:
+        print(f"WARNING: Not enough free space for DRP ({free_bytes} bytes, need 56)")
+        drp_off = None
+else:
+    print("WARNING: ios_aep_bridge not found, cannot create static DRP")
+    drp_off = None
+
+# --- Read resident names table for the module name ---
+rnt_abs = le + struct.unpack_from('<I', data, le + 0x58)[0]
+rnt_name_len = data[rnt_abs]
+rnt_name = data[rnt_abs + 1:rnt_abs + 1 + rnt_name_len]
+print(f"Resident name: '{rnt_name.decode('ascii', errors='replace')}' (len={rnt_name_len})")
 
 # --- Read and translate fixup records ---
 fpt = [struct.unpack_from('<I', data, fpt_abs + i * 4)[0] for i in range(num_pages + 1)]
@@ -185,6 +247,39 @@ for pg in range(num_pages):
     new_fixup_data.extend(page_fixups)
     new_fpt.append(len(new_fixup_data))
 
+# --- Add fixups for static DRP (DDB_Reference_Data and DRP.aer) ---
+if drp_off is not None and aep_bridge_off is not None:
+    def add_internal_fixup(merged_offset, target_offset):
+        """Add a 32-bit internal fixup record for a field at merged_offset pointing to target_offset."""
+        pg = merged_offset // page_size
+        src_off_in_page = merged_offset % page_size
+        rec = bytearray()
+        rec.append(0x07)           # src_type: 32-bit offset
+        if target_offset <= 0xFFFF:
+            rec.append(0x00)       # internal, 16-bit target
+            rec.extend(struct.pack('<H', src_off_in_page))
+            rec.append(0x01)       # object 1
+            rec.extend(struct.pack('<H', target_offset))
+        else:
+            rec.append(0x10)       # internal, 32-bit target
+            rec.extend(struct.pack('<H', src_off_in_page))
+            rec.append(0x01)       # object 1
+            rec.extend(struct.pack('<I', target_offset))
+        # Insert into the correct page's fixup data
+        insert_pos = new_fpt[pg + 1]  # end of this page's fixups
+        new_fixup_data[insert_pos:insert_pos] = rec
+        # Adjust FPT for all subsequent pages
+        for j in range(pg + 1, len(new_fpt)):
+            new_fpt[j] += len(rec)
+        return len(rec)
+
+    ddb_refdata_merged = merged_ddb_off + 0x2C
+    drp_aer_merged = drp_off + 0x0C
+    sz1 = add_internal_fixup(ddb_refdata_merged, drp_off)
+    sz2 = add_internal_fixup(drp_aer_merged, aep_bridge_off)
+    fixup_count += 2
+    print(f"Added 2 DRP fixups ({sz1}+{sz2} bytes): DDB+0x2C→DRP, DRP.aer→aep_bridge")
+
 print(f"\nFixups: {fixup_count} records, {len(new_fixup_data)} bytes")
 
 # --- Build LE with IOS-compatible layout ---
@@ -233,9 +328,9 @@ fixup_section_end_le = frt_off + len(new_fixup_data)
 import_off = fixup_section_end_le
 fixup_section_size = (NP + 1) * 4 + len(new_fixup_data)
 
-# PAGE DATA: align to 512-byte sector boundary after fixup section (matching ESDI_506)
-data_off_le_rel = (fixup_section_end_le + 0x1FF) & ~0x1FF
-data_pages_file = MZ_SIZE + data_off_le_rel  # file-absolute
+# PAGE DATA: file-absolute offset must be sector-aligned (VMM/VXDLDR requirement)
+data_pages_file = (MZ_SIZE + fixup_section_end_le + 0x1FF) & ~0x1FF
+data_off_le_rel = data_pages_file - MZ_SIZE
 
 # NONRESIDENT NAMES TABLE (after page data)
 nrn = bytearray()
@@ -320,7 +415,7 @@ struct.pack_into('<I', le_hdr, 0xC0, 0x04000000)           # Win386 OS type
 obj_e = bytearray(24)
 struct.pack_into('<I', obj_e, 0, merged_vsize)
 struct.pack_into('<I', obj_e, 4, 0x00000000)  # reloc base = 0, matching ESDI_506.PDR obj1
-struct.pack_into('<I', obj_e, 8, 0x2047)  # flags: readable, writable, executable, preload, 32-bit
+struct.pack_into('<I', obj_e, 8, 0x2045)  # flags: readable, executable, preload, 32-bit (WRITABLE bit crashes)
 struct.pack_into('<I', obj_e, 12, 1)      # page map idx (1-based)
 struct.pack_into('<I', obj_e, 16, NP)     # page count
 struct.pack_into('<I', obj_e, 20, 0x444F434C)  # reserved = 'LCOD', matching ESDI_506.PDR obj1
