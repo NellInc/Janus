@@ -80,7 +80,14 @@ d) Use a VMM timer callback to defer registration until IOS is ready
 
 **Implication:** `ios_register_port_driver()` cannot be called from VMM control dispatch. IOS must call the port driver's AEP handler directly — it finds the DRP at a known location (perhaps `DDB_Reference_Data` or a fixed offset after the DDB, or via `IOS_Register` called from `Sys_Critical_Init`).
 
-**Next approach:** Call `ios_register_port_driver()` from `Sys_Critical_Init` (0x00) handler instead. This IS received. But IOS may not be ready at `Sys_Critical_Init` time — need to test. Alternatively, examine how ESDI_506.PDR registers (disassemble its `Sys_Critical_Init` handler).
+**Key discovery:** ESDI_506's control proc checks for `Sys_Dynamic_Device_Init` (0x1B) FIRST — it DOES receive this message. Our PDR doesn't. Something about our DDB prevents VMM from sending 0x1B. Compare DDB fields:
+
+ESDI_506 DDB: Device_ID=0x008D, Version=3.10, Init_Order=0x80000000
+Our DDB:      Device_ID=0x0000, Version=1.0,  Init_Order=0x80000000
+
+The `Device_ID=0x0000` (UNDEFINED_DEVICE_ID) may cause VMM to skip the dynamic init dispatch. Or `Version=1.0` vs `3.10` triggers a different code path.
+
+**Next approach:** Either fix the DDB fields (try Device_ID=0x008D or Version=3.10), or call `ios_register_port_driver()` from `Sys_Critical_Init` (0x00) which IS received.
 
 ## ScanDisk Suppression (REQUIRED for fresh images)
 
