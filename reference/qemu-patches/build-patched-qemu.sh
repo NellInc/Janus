@@ -52,7 +52,7 @@ if grep -q "NTMINI_PA_FIXUP" "${LSI_SRC}" 2>/dev/null; then
     echo "Patch already applied."
 else
     echo "Applying lsi-ntmini-full.patch..."
-    patch -p1 < "${PATCH_FILE}"
+    cd "qemu-${QEMU_VERSION}" && patch -p1 < "${PATCH_FILE}" && cd ..
 fi
 
 # Install the NTMINI qtest (copy source, register in meson.build)
