@@ -1,6 +1,6 @@
 ---
-stepsCompleted: 0
-status: READY
+stepsCompleted: 2
+status: IN_PROGRESS
 predecessor: hdd_pdr_ios_register_20260516.md
 session_date: 2026-05-16
 ---
