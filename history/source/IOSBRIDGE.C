@@ -2512,14 +2512,17 @@ int ios_register_port_driver(void)
             return -1;
         }
     } else {
-        /* IOS_Register succeeded. IOS will call our AEP handler for
-         * DCB configuration (AEP_CONFIG_DCB). Do NOT run late-create
-         * as it would create phantom DCBs that conflict with IOS. */
+        /* IOS_Register succeeded but we registered too late for
+         * AEP_CONFIG_DCB. Run late-create to manually set up DCBs
+         * and splice into the existing D: calldown chain. */
         dbg_mark('s');
-        DBGPRINT("NTMINI: IOS_Register OK, skipping late-create\n");
+        DBGPRINT("NTMINI: IOS_Register OK, running late-create for HDD splice\n");
         dbg_mark(g_bridge.drp.reg_result == 1 ? 'L' : 'l');
         dbg_mark(g_bridge.drp.ilb ? 'V' : 'v');
         dbg_mark(g_bridge.drp.reference_data ? 'U' : 'u');
+        if (ios_late_create_device() != 0) {
+            dbg_mark('w');
+        }
     }
     g_ios_registered = 1;
     dbg_mark('g');
@@ -2889,7 +2892,7 @@ static int ios_late_create_device(void)
             isp_hdd_cd.dcb = isp_get.dcb;
             isp_hdd_cd.req = (ULONG)ios_wdm_ior_entry;
             isp_hdd_cd.ddb = g_bridge.ios_ddb;
-            isp_hdd_cd.flags = 0x00000100UL; /* 512-byte sectors */
+            isp_hdd_cd.flags = ISPCDF_BOTTOM | ISPCDF_PORT_DRIVER;
             isp_hdd_cd.lgn = 0x15;
             Call_ILB_Service(ilb->service_rtn, &isp_hdd_cd);
             dbg_mark('s');
