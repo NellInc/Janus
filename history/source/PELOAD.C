@@ -4,8 +4,17 @@
  * Part of the NTMINI project: running NT4 SCSI miniport drivers on Win98.
  *
  * Loads a .sys PE image from a memory buffer into ring 0 memory,
- * processes relocations, resolves imports against a provided
- * ScsiPort function table, and returns the DriverEntry address.
+ * processes relocations, resolves imports against registered port
+ * driver shims, previously loaded images, or a caller-provided
+ * function table (backward-compatible fallback), and returns the
+ * DriverEntry address.
+ *
+ * Multi-DLL support: maintains a registry of loaded images and port
+ * driver shims for cross-DLL import resolution. Loading order:
+ *   1. Registered port driver shim (ScsiPort, VideoPort, NDIS, etc.)
+ *   2. Previously loaded image exports
+ *   3. Caller-provided func_table (backward compat fallback)
+ *   4. Fail with PE_ERR_IMPORT_FAIL
  *
  * All memory allocation is done through VxD_PageAllocate (provided
  * by the VxD wrapper). No Win32 API calls are used.
@@ -50,6 +59,7 @@ extern void VxD_Debug_Printf(const char *fmt, ...);
 #define IMAGE_SIZEOF_SHORT_NAME         8
 
 /* Data directory indices */
+#define IMAGE_DIRECTORY_ENTRY_EXPORT    0
 #define IMAGE_DIRECTORY_ENTRY_IMPORT    1
 #define IMAGE_DIRECTORY_ENTRY_BASERELOC 5
 
@@ -189,16 +199,76 @@ typedef struct _IMAGE_BASE_RELOCATION {
     /* USHORT TypeOffset[] follows */
 } IMAGE_BASE_RELOCATION;
 
+/* ---- PE export directory (for parsing loaded image exports) ---- */
+
+typedef struct _IMAGE_EXPORT_DIRECTORY {
+    ULONG   Characteristics;
+    ULONG   TimeDateStamp;
+    USHORT  MajorVersion;
+    USHORT  MinorVersion;
+    ULONG   Name;                   /* RVA to DLL name string */
+    ULONG   Base;                   /* Ordinal base */
+    ULONG   NumberOfFunctions;      /* Total exported functions */
+    ULONG   NumberOfNames;          /* Number of named exports */
+    ULONG   AddressOfFunctions;     /* RVA to function address array */
+    ULONG   AddressOfNames;         /* RVA to name string RVA array */
+    ULONG   AddressOfNameOrdinals;  /* RVA to ordinal index array */
+} IMAGE_EXPORT_DIRECTORY;
+
 #pragma pack(pop)
 
 /* ================================================================
- * Import function table entry (provided by caller)
+ * Import function table entry (provided by caller or port shim)
  * ================================================================ */
 
 typedef struct {
     const char *name;
     void       *func;
 } IMPORT_FUNC_ENTRY;
+
+/* ================================================================
+ * Port driver shim registry
+ *
+ * Each port driver shim (ScsiPort, VideoPort, NDIS, etc.) registers
+ * a DLL name and a null-terminated function table. When a PE image
+ * imports from that DLL name, the shim's table is used.
+ * ================================================================ */
+
+typedef struct _PORT_DRIVER_SHIM {
+    const char              *dll_name;      /* e.g. "SCSIPORT.SYS" */
+    const IMPORT_FUNC_ENTRY *func_table;    /* null-terminated */
+    int                      func_count;    /* informational; lookup uses null terminator */
+    int  (*bridge_init)(void *context);
+    int  (*bridge_io)(void *request);
+    void (*bridge_cleanup)(void);
+} PORT_DRIVER_SHIM;
+
+#define MAX_PORT_SHIMS 8
+static PORT_DRIVER_SHIM *shim_registry[MAX_PORT_SHIMS];
+static int shim_count = 0;
+
+/* ================================================================
+ * Loaded image registry
+ *
+ * Each loaded PE image can be registered so that subsequent images
+ * can resolve imports against its exports. Export name pointers
+ * reference into the loaded image's memory, so the image must remain
+ * loaded for as long as any dependents are active.
+ * ================================================================ */
+
+#define MAX_LOADED_IMAGE_EXPORTS 64
+
+typedef struct _LOADED_IMAGE {
+    const char        *name;        /* DLL name (e.g. "pciidex.sys") */
+    void              *base;        /* Loaded image base address */
+    ULONG              image_size;  /* SizeOfImage for bounds checks */
+    IMPORT_FUNC_ENTRY  exports[MAX_LOADED_IMAGE_EXPORTS];
+    int                n_exports;
+} LOADED_IMAGE;
+
+#define MAX_LOADED_IMAGES 8
+static LOADED_IMAGE loaded_images[MAX_LOADED_IMAGES];
+static int loaded_image_count = 0;
 
 /* ================================================================
  * Error codes
@@ -217,6 +287,7 @@ typedef struct {
 #define PE_ERR_IMPORT_FAIL     -10
 #define PE_ERR_RELOC_FAIL      -11
 #define PE_ERR_NO_ENTRY        -12
+#define PE_ERR_REGISTRY_FULL   -13
 
 /* ================================================================
  * Helper: case-insensitive string compare
@@ -272,7 +343,9 @@ static ULONG pe_strlen(const char *s)
 }
 
 /* ================================================================
- * Helper: resolve an imported function name against the func table
+ * Helper: resolve an imported function name against a func table
+ *
+ * The table must be null-terminated (last entry has name == NULL).
  * ================================================================ */
 
 static void *resolve_import(const char *name, const IMPORT_FUNC_ENTRY *table)
@@ -290,11 +363,343 @@ static void *resolve_import(const char *name, const IMPORT_FUNC_ENTRY *table)
 }
 
 /* ================================================================
+ * Port driver shim registration
+ * ================================================================ */
+
+/*
+ * register_port_driver - Register a port driver shim for import resolution.
+ *
+ * The shim's dll_name is used for case-insensitive matching against
+ * PE import descriptors. The func_table must be null-terminated.
+ *
+ * Returns: 0 on success, PE_ERR_REGISTRY_FULL if registry is full.
+ */
+int register_port_driver(PORT_DRIVER_SHIM *shim)
+{
+    if (!shim || !shim->dll_name) {
+        DBGPRINT("PELOAD: register_port_driver: null shim or dll_name\n");
+        return PE_ERR_NULL_INPUT;
+    }
+
+    if (shim_count >= MAX_PORT_SHIMS) {
+        DBGPRINT("PELOAD: port driver shim registry full (%d/%d)\n",
+                 shim_count, MAX_PORT_SHIMS);
+        return PE_ERR_REGISTRY_FULL;
+    }
+
+    shim_registry[shim_count] = shim;
+    shim_count++;
+
+    DBGPRINT("PELOAD: registered port driver shim: %s (%d/%d)\n",
+             shim->dll_name, shim_count, MAX_PORT_SHIMS);
+    return PE_OK;
+}
+
+/*
+ * find_port_driver - Find a registered port driver shim by DLL name.
+ *
+ * Case-insensitive match. Returns NULL if not found.
+ */
+PORT_DRIVER_SHIM *find_port_driver(const char *dll_name)
+{
+    int i;
+
+    if (!dll_name) return (PORT_DRIVER_SHIM *)0;
+
+    for (i = 0; i < shim_count; i++) {
+        if (shim_registry[i] &&
+            strcmp_nocase(dll_name, shim_registry[i]->dll_name) == 0) {
+            return shim_registry[i];
+        }
+    }
+    return (PORT_DRIVER_SHIM *)0;
+}
+
+/* ================================================================
+ * Loaded image registry
+ * ================================================================ */
+
+/*
+ * find_loaded_image - Find a previously loaded image by DLL name.
+ *
+ * Case-insensitive match. Returns NULL if not found.
+ */
+LOADED_IMAGE *find_loaded_image(const char *dll_name)
+{
+    int i;
+
+    if (!dll_name) return (LOADED_IMAGE *)0;
+
+    for (i = 0; i < loaded_image_count; i++) {
+        if (loaded_images[i].name &&
+            strcmp_nocase(dll_name, loaded_images[i].name) == 0) {
+            return &loaded_images[i];
+        }
+    }
+    return (LOADED_IMAGE *)0;
+}
+
+/*
+ * register_loaded_image - Register a loaded image for cross-DLL resolution.
+ *
+ * The caller provides the image name and base address. Exports should
+ * be populated via pe_parse_exports() before calling this, or can be
+ * left empty for images with no exports.
+ *
+ * Returns a pointer to the LOADED_IMAGE slot, or NULL if full.
+ */
+LOADED_IMAGE *register_loaded_image(const char *name, void *base, ULONG image_size)
+{
+    LOADED_IMAGE *img;
+
+    if (!name || !base) {
+        DBGPRINT("PELOAD: register_loaded_image: null name or base\n");
+        return (LOADED_IMAGE *)0;
+    }
+
+    if (loaded_image_count >= MAX_LOADED_IMAGES) {
+        DBGPRINT("PELOAD: loaded image registry full (%d/%d)\n",
+                 loaded_image_count, MAX_LOADED_IMAGES);
+        return (LOADED_IMAGE *)0;
+    }
+
+    img = &loaded_images[loaded_image_count];
+    pe_memzero(img, sizeof(LOADED_IMAGE));
+    img->name = name;
+    img->base = base;
+    img->image_size = image_size;
+    img->n_exports = 0;
+
+    loaded_image_count++;
+
+    DBGPRINT("PELOAD: registered loaded image: %s at 0x%08lX (%d/%d)\n",
+             name, (ULONG)base, loaded_image_count, MAX_LOADED_IMAGES);
+    return img;
+}
+
+/* ================================================================
+ * pe_parse_exports - Parse a PE image's export directory
+ *
+ * Reads the export directory of a loaded PE image and populates
+ * the LOADED_IMAGE's exports array. Only named exports are stored;
+ * ordinal-only exports are skipped. Forwarder entries (function RVA
+ * falls inside the export directory) are skipped with a warning.
+ *
+ * Export name pointers reference into the loaded image's memory.
+ * The image must remain loaded for as long as dependents need the
+ * export table.
+ *
+ * image_base:  base address of the already-loaded PE image
+ * image_size:  SizeOfImage of the PE
+ * img:         LOADED_IMAGE entry to populate (exports[] and n_exports)
+ *
+ * Returns: number of exports parsed, or 0 if no export directory.
+ * ================================================================ */
+
+int pe_parse_exports(void *image_base, ULONG image_size, LOADED_IMAGE *img)
+{
+    PUCHAR                        base;
+    const IMAGE_DOS_HEADER       *dos;
+    const IMAGE_NT_HEADERS       *nt;
+    const IMAGE_EXPORT_DIRECTORY *expdir;
+    IMAGE_DATA_DIRECTORY          exp_dd;
+    ULONG   exp_rva, exp_size;
+    ULONG   num_names, max_parse;
+    const ULONG   *name_rvas;
+    const USHORT  *name_ords;
+    const ULONG   *func_rvas;
+    ULONG   i;
+    int     count;
+
+    if (!image_base || !img) return 0;
+
+    base = (PUCHAR)image_base;
+    dos = (const IMAGE_DOS_HEADER *)base;
+
+    /* Validate DOS header */
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    if ((ULONG)dos->e_lfanew + sizeof(IMAGE_NT_HEADERS) > image_size) return 0;
+
+    nt = (const IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+
+    /* Check for export directory */
+    if (nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT) {
+        DBGPRINT("PELOAD: pe_parse_exports: no export directory entries\n");
+        return 0;
+    }
+
+    exp_dd = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    exp_rva  = exp_dd.VirtualAddress;
+    exp_size = exp_dd.Size;
+
+    if (exp_rva == 0 || exp_size == 0) {
+        DBGPRINT("PELOAD: pe_parse_exports: empty export directory\n");
+        return 0;
+    }
+
+    /* Bounds check the export directory itself */
+    if (exp_rva + sizeof(IMAGE_EXPORT_DIRECTORY) > image_size) {
+        DBGPRINT("PELOAD: pe_parse_exports: export directory beyond image bounds\n");
+        return 0;
+    }
+
+    expdir = (const IMAGE_EXPORT_DIRECTORY *)(base + exp_rva);
+    num_names = expdir->NumberOfNames;
+
+    DBGPRINT("PELOAD: pe_parse_exports: %lu named exports, %lu total functions\n",
+             num_names, expdir->NumberOfFunctions);
+
+    if (num_names == 0) return 0;
+
+    /* Bounds check the three parallel arrays */
+    if (expdir->AddressOfNames == 0 ||
+        expdir->AddressOfNames + num_names * sizeof(ULONG) > image_size) {
+        DBGPRINT("PELOAD: pe_parse_exports: AddressOfNames out of bounds\n");
+        return 0;
+    }
+    if (expdir->AddressOfNameOrdinals == 0 ||
+        expdir->AddressOfNameOrdinals + num_names * sizeof(USHORT) > image_size) {
+        DBGPRINT("PELOAD: pe_parse_exports: AddressOfNameOrdinals out of bounds\n");
+        return 0;
+    }
+    if (expdir->AddressOfFunctions == 0 ||
+        expdir->AddressOfFunctions +
+            expdir->NumberOfFunctions * sizeof(ULONG) > image_size) {
+        DBGPRINT("PELOAD: pe_parse_exports: AddressOfFunctions out of bounds\n");
+        return 0;
+    }
+
+    name_rvas = (const ULONG *)(base + expdir->AddressOfNames);
+    name_ords = (const USHORT *)(base + expdir->AddressOfNameOrdinals);
+    func_rvas = (const ULONG *)(base + expdir->AddressOfFunctions);
+
+    /* Clamp to MAX_LOADED_IMAGE_EXPORTS to prevent overflow */
+    max_parse = num_names;
+    if (max_parse > MAX_LOADED_IMAGE_EXPORTS - 1) {
+        DBGPRINT("PELOAD: pe_parse_exports: WARNING: %lu exports exceed cap of %d, "
+                 "truncating\n", num_names, MAX_LOADED_IMAGE_EXPORTS - 1);
+        max_parse = MAX_LOADED_IMAGE_EXPORTS - 1;
+    }
+
+    count = 0;
+    for (i = 0; i < max_parse; i++) {
+        ULONG name_rva;
+        USHORT ord_idx;
+        ULONG func_rva;
+        const char *exp_name;
+
+        name_rva = name_rvas[i];
+        ord_idx  = name_ords[i];
+
+        /* Bounds check name RVA */
+        if (name_rva == 0 || name_rva >= image_size) {
+            DBGPRINT("PELOAD: pe_parse_exports: name RVA 0x%08lX out of bounds, "
+                     "skipping\n", name_rva);
+            continue;
+        }
+
+        /* Bounds check ordinal index */
+        if (ord_idx >= expdir->NumberOfFunctions) {
+            DBGPRINT("PELOAD: pe_parse_exports: ordinal %u beyond function count "
+                     "%lu, skipping\n", (unsigned)ord_idx, expdir->NumberOfFunctions);
+            continue;
+        }
+
+        func_rva = func_rvas[ord_idx];
+
+        /* Forwarder detection: if the function RVA falls inside the
+         * export directory range, it's a forwarder string, not code.
+         * Skip these; NT storage drivers rarely use them. */
+        if (func_rva >= exp_rva && func_rva < exp_rva + exp_size) {
+            exp_name = (const char *)(base + name_rva);
+            DBGPRINT("PELOAD: pe_parse_exports: skipping forwarder: %s -> %s\n",
+                     exp_name, (const char *)(base + func_rva));
+            continue;
+        }
+
+        /* Bounds check function RVA */
+        if (func_rva >= image_size) {
+            DBGPRINT("PELOAD: pe_parse_exports: function RVA 0x%08lX out of "
+                     "bounds, skipping\n", func_rva);
+            continue;
+        }
+
+        exp_name = (const char *)(base + name_rva);
+
+        img->exports[count].name = exp_name;
+        img->exports[count].func = (void *)(base + func_rva);
+        count++;
+
+        DBGPRINT("PELOAD: pe_parse_exports: [%d] %s -> 0x%08lX\n",
+                 count - 1, exp_name, (ULONG)(base + func_rva));
+    }
+
+    /* Null-terminate for compatibility with resolve_import() */
+    if (count < MAX_LOADED_IMAGE_EXPORTS) {
+        img->exports[count].name = (const char *)0;
+        img->exports[count].func = (void *)0;
+    }
+
+    img->n_exports = count;
+
+    DBGPRINT("PELOAD: pe_parse_exports: parsed %d named exports\n", count);
+    return count;
+}
+
+/* ================================================================
+ * resolve_dll_import - Resolve a function import against all sources
+ *
+ * Resolution order:
+ *   1. Port driver shim matching the DLL name
+ *   2. Loaded image exports matching the DLL name
+ *   3. Caller-provided fallback func_table (backward compat)
+ *
+ * Returns the resolved function address, or NULL if unresolved.
+ * ================================================================ */
+
+static void *resolve_dll_import(
+    const char *dll_name,
+    const char *func_name,
+    const IMPORT_FUNC_ENTRY *fallback_table)
+{
+    void *resolved;
+
+    /* 1. Check registered port driver shims */
+    {
+        PORT_DRIVER_SHIM *shim = find_port_driver(dll_name);
+        if (shim && shim->func_table) {
+            resolved = resolve_import(func_name, shim->func_table);
+            if (resolved) return resolved;
+        }
+    }
+
+    /* 2. Check previously loaded image exports */
+    {
+        LOADED_IMAGE *img = find_loaded_image(dll_name);
+        if (img && img->n_exports > 0) {
+            resolved = resolve_import(func_name, img->exports);
+            if (resolved) return resolved;
+        }
+    }
+
+    /* 3. Fallback to caller-provided table (backward compat) */
+    if (fallback_table) {
+        resolved = resolve_import(func_name, fallback_table);
+        if (resolved) return resolved;
+    }
+
+    return (void *)0;
+}
+
+/* ================================================================
  * pe_load_image - Load a PE image from a memory buffer
  *
  * pe_data:     pointer to the entire .sys file contents in memory
  * pe_size:     size of the file in bytes
  * func_table:  array of {name, func_ptr} pairs, NULL-name terminated
+ *              (backward-compat fallback; may be NULL if port shims
+ *              are registered)
  * out_entry:   receives the entry point (DriverEntry) address
  * out_base:    receives the loaded image base address
  *
@@ -646,8 +1051,6 @@ int pe_load_image(
             /* Walk import descriptors until a null entry */
             while (imp->u.OriginalFirstThunk != 0 || imp->FirstThunk != 0) {
                 const char *dll_name;
-                const IMAGE_THUNK_DATA32 *name_thunk;
-                PULONG iat_entry;
 
                 /* Validate DLL name RVA */
                 if (imp->Name == 0 || imp->Name >= image_size) {
@@ -660,41 +1063,6 @@ int pe_load_image(
                 dll_name = (const char *)(image + imp->Name);
                 DBGPRINT("PELOAD: importing from DLL: %s\n", dll_name);
 
-                /* Only SCSIPORT.SYS imports are supported */
-                if (strcmp_nocase(dll_name, "SCSIPORT.SYS") != 0 &&
-                    strcmp_nocase(dll_name, "scsiport.sys") != 0) {
-                    /* Try a more lenient check: just look for "scsiport" */
-                    int is_scsiport = 0;
-                    {
-                        const char *p = dll_name;
-                        /* Simple check: does the name contain "scsiport" (case insensitive)? */
-                        ULONG namelen = pe_strlen(dll_name);
-                        if (namelen >= 8) {
-                            ULONG k;
-                            for (k = 0; k <= namelen - 8; k++) {
-                                if (strcmp_nocase(p + k, "scsiport") == 0 ||
-                                    (((p[k]   | 0x20) == 's') &&
-                                     ((p[k+1] | 0x20) == 'c') &&
-                                     ((p[k+2] | 0x20) == 's') &&
-                                     ((p[k+3] | 0x20) == 'i') &&
-                                     ((p[k+4] | 0x20) == 'p') &&
-                                     ((p[k+5] | 0x20) == 'o') &&
-                                     ((p[k+6] | 0x20) == 'r') &&
-                                     ((p[k+7] | 0x20) == 't'))) {
-                                    is_scsiport = 1;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!is_scsiport) {
-                        DBGPRINT("PELOAD: ERROR: unsupported import DLL: %s\n", dll_name);
-                        DBGPRINT("PELOAD: only SCSIPORT.SYS imports are supported\n");
-                        VxD_PageFree(image);
-                        return PE_ERR_IMPORT_FAIL;
-                    }
-                }
-
                 /*
                  * Use OriginalFirstThunk (INT) for names if available,
                  * otherwise fall back to FirstThunk.
@@ -702,6 +1070,8 @@ int pe_load_image(
                 {
                     ULONG int_rva = imp->u.OriginalFirstThunk;
                     ULONG iat_rva = imp->FirstThunk;
+                    const IMAGE_THUNK_DATA32 *name_thunk;
+                    PULONG iat_entry;
 
                     if (int_rva == 0) int_rva = iat_rva;
 
@@ -743,19 +1113,31 @@ int pe_load_image(
                             hint_name = (const IMAGE_IMPORT_BY_NAME *)(image + hint_rva);
                             func_name = hint_name->Name;
 
-                            DBGPRINT("PELOAD:   resolving: %s (hint %u)\n",
-                                     func_name, (unsigned)hint_name->Hint);
+                            DBGPRINT("PELOAD:   resolving: %s!%s (hint %u)\n",
+                                     dll_name, func_name, (unsigned)hint_name->Hint);
 
-                            resolved = resolve_import(func_name, func_table);
+                            /*
+                             * Multi-source resolution:
+                             *   1. Port driver shim matching dll_name
+                             *   2. Loaded image exports matching dll_name
+                             *   3. Caller's func_table (backward compat)
+                             */
+                            resolved = resolve_dll_import(
+                                dll_name, func_name, func_table);
+
                             if (!resolved) {
-                                DBGPRINT("PELOAD: ERROR: unresolved import: %s\n",
-                                         func_name);
+                                DBGPRINT("PELOAD: UNRESOLVED: ");
+                                DBGPRINT(dll_name);
+                                DBGPRINT("!");
+                                DBGPRINT(func_name);
+                                DBGPRINT("\r\n");
                                 VxD_PageFree(image);
                                 return PE_ERR_IMPORT_FAIL;
                             }
 
-                            DBGPRINT("PELOAD:   resolved %s -> 0x%08lX\n",
-                                     func_name, (ULONG)resolved);
+                            DBGPRINT("PELOAD: resolved ");
+                            DBGPRINT(func_name);
+                            DBGPRINT("\r\n");
 
                             *iat_entry = (ULONG)resolved;
                         }
@@ -797,12 +1179,34 @@ int pe_load_image(
 
 /* ================================================================
  * pe_unload_image - Free a previously loaded PE image
+ *
+ * Also removes the image from the loaded image registry if present.
  * ================================================================ */
 
 void pe_unload_image(void *image_base)
 {
     if (image_base) {
+        int i;
+
         DBGPRINT("PELOAD: unloading image at 0x%08lX\n", (ULONG)image_base);
+
+        /* Remove from loaded image registry if present */
+        for (i = 0; i < loaded_image_count; i++) {
+            if (loaded_images[i].base == image_base) {
+                DBGPRINT("PELOAD: removing '%s' from loaded image registry\n",
+                         loaded_images[i].name ? loaded_images[i].name : "(null)");
+
+                /* Shift remaining entries down */
+                if (i < loaded_image_count - 1) {
+                    ULONG move_size =
+                        (ULONG)(loaded_image_count - 1 - i) * sizeof(LOADED_IMAGE);
+                    pe_memcpy(&loaded_images[i], &loaded_images[i + 1], move_size);
+                }
+                loaded_image_count--;
+                break;
+            }
+        }
+
         VxD_PageFree(image_base);
     }
 }
