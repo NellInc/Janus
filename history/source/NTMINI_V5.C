@@ -217,6 +217,11 @@ void _ntmini_ios_init(void);
 #define MINIPORT_IMAGE      sym_hi_embedded_data
 #define MINIPORT_IMAGE_SIZE sizeof(sym_hi_embedded_data)
 #define MINIPORT_NAME       "sym_hi.sys"
+/* LSI 53C8xx SCRIPTS engine support: BAR0->BAR1 redirect, SCRIPTS DMA
+   patching, GPREG/EEPROM intercepts, SIGP flush, FAKE_ROM.
+   Other SCSI miniport drivers (e.g. AIC78xx) don't use SCRIPTS and
+   must not get these LSI-specific code paths. */
+#define NTMINI_LSI_SCRIPTS  1
 #else
 /* Embedded ATAPI.SYS (IDE/ATAPI CD-ROM) */
 #include "ATAPI_EMBEDDED.H"
@@ -456,6 +461,7 @@ static USHORT g_scsi_iobase = 0;       /* SCSI controller I/O base (for IRQ poll
 static ULONG g_scsi_mmio_bar = 0;     /* SCSI controller MMIO BAR (BAR1 physical addr) */
 static PVOID g_scsi_mmio_va = NULL;    /* Pre-mapped BAR1 linear address */
 static UCHAR g_scsi_cdrom_target = 0xFF; /* SCSI target ID of CD-ROM (0xFF = not found) */
+static UCHAR g_scsi_hdd_target = 0xFF;  /* SCSI target ID of HDD (0xFF = not found) */
 /* MMIO mirror page: DMA-allocated page where SCRIPTS MOVE MEMORY writes
    are redirected. SCRIPTS originally write to MMIO PA (0xFEBF3xxx) which
    doesn't reach the device in QEMU. We patch destinations to this mirror
@@ -479,7 +485,9 @@ static ULONG g_pre_startio_scratchb = 0;
 static PVOID  g_dma_virt = NULL;   /* virtual (linear) address */
 static ULONG  g_dma_phys = 0;     /* physical address */
 static ULONG  g_dma_size = 0;     /* allocated size in bytes */
+#ifdef NTMINI_LSI_SCRIPTS
 static void scripts_patch_mmio_va(void); /* forward decl: patch SCRIPTS VA→PA */
+#endif
 static BOOLEAN g_scsi_init_phase = FALSE; /* TRUE during HwFindAdapter */
 static volatile ULONG g_sp_call_id = 0;  /* last ScsiPort function called (debug) */
 static volatile ULONG g_port_read_count = 0;
@@ -512,8 +520,8 @@ static UCHAR __stdcall sp_ReadPortUchar(PUCHAR Port) {
     if (addr >= 0x10000) {
         UCHAR val;
         USHORT ioport = scsi_mmio_to_ioport(addr);
-#if NTMINI_USE_SCSI
-        /* Intercept GPREG reads for 93C46 EEPROM emulation.
+#ifdef NTMINI_LSI_SCRIPTS
+        /* LSI 53C8xx: intercept GPREG reads for 93C46 EEPROM emulation.
            GPREG is at MMIO base + 0x07. The miniport reads this register
            to get EEPROM data bits on GPIO0. */
         if (g_scsi_mmio_va && addr == (ULONG)g_scsi_mmio_va + 0x07) {
@@ -584,8 +592,8 @@ static void __stdcall sp_WritePortUchar(PUCHAR Port, UCHAR Value) {
     g_sp_call_id = 0x200;
     if (addr >= 0x10000) {
         USHORT ioport = scsi_mmio_to_ioport(addr);
-#if NTMINI_USE_SCSI
-        /* Intercept GPREG writes for 93C46 EEPROM emulation.
+#ifdef NTMINI_LSI_SCRIPTS
+        /* LSI 53C8xx: intercept GPREG writes for 93C46 EEPROM emulation.
            The miniport bit-bangs clock/CS/data on GPREG (base+0x07). */
         if (g_scsi_mmio_va && addr == (ULONG)g_scsi_mmio_va + 0x07) {
             eeprom_gpreg_write(Value);
@@ -595,8 +603,9 @@ static void __stdcall sp_WritePortUchar(PUCHAR Port, UCHAR Value) {
             return;
         }
 #endif
-        /* Before SIGP write to ISTAT: flush miniport's direct MMIO writes
-           to real hardware. The miniport writes registers (DSA, SCRATCH, etc.)
+#ifdef NTMINI_LSI_SCRIPTS
+        /* LSI 53C8xx SCRIPTS engine: before SIGP write to ISTAT, flush miniport's
+           direct MMIO writes to real hardware. The miniport writes registers (DSA, SCRATCH, etc.)
            via direct MMIO pointer dereference during HwStartIo. MapPhysToLinear
            routes these to a shadow page in guest RAM. QEMU executes SCRIPTS
            synchronously within the SIGP handler, so DSA must reach the device
@@ -730,6 +739,7 @@ static void __stdcall sp_WritePortUchar(PUCHAR Port, UCHAR Value) {
                 }
             }
         }
+#endif /* NTMINI_LSI_SCRIPTS */
 
         /* Write via I/O port (bypasses broken MapPhysToLinear MMIO) */
         if (ioport) {
@@ -785,8 +795,9 @@ static void __stdcall sp_WritePortUlong(PULONG Port, ULONG Value) {
     ULONG addr = (ULONG)Port;
     if (addr >= 0x10000) {
         USHORT ioport = scsi_mmio_to_ioport(addr);
-#if NTMINI_USE_SCSI
-        /* Log writes to key SCSI registers:
+#ifdef NTMINI_LSI_SCRIPTS
+        /* LSI 53C8xx: log writes to key SCRIPTS registers and patch
+           SCRIPTS VA->PA before DSP write starts execution.
            DSP (0x2C): DMA Scripts Pointer - where SCRIPTS engine starts
            DSPS (0x30): Scripts Pointer Save
            DSA (0x10): Data Structure Address */
@@ -878,7 +889,7 @@ static volatile UCHAR g_last_reg_val = 0;
    - BYTE at [mapped+0x12] == 0
    - BYTE at [mapped+0x13] == 0x30 ('0', version marker)
    If these fail, it falls through to the safe defaults path (host ID 7). */
-#if NTMINI_USE_SCSI
+#ifdef NTMINI_LSI_SCRIPTS
 /* Fake ROM DISABLED: The miniport's ROM processing function reads config data
    from the found ROM and constructs pointers from it. Our fake ROM data was
    incomplete, causing the processing function to crash (CR2=0xFFFFFCB8).
@@ -932,7 +943,7 @@ static void fake_rom_init(void) {
     g_fake_rom_ready = TRUE;
     VxD_Debug_Printf("SP: Fake Symbios BIOS ROM initialized at 0xD0000\r\n");
 }
-#endif
+#endif /* NTMINI_LSI_SCRIPTS */
 
 static UCHAR __stdcall sp_ReadRegisterUchar(PUCHAR Reg) {
     UCHAR val;
@@ -940,8 +951,8 @@ static UCHAR __stdcall sp_ReadRegisterUchar(PUCHAR Reg) {
     g_sp_call_id = 0x300;
     if (IS_IO_PORT(Reg)) val = PORT_IN_BYTE((USHORT)(ULONG)Reg);
     else {
-#if NTMINI_USE_SCSI
-        /* Intercept GPREG reads for EEPROM emulation */
+#ifdef NTMINI_LSI_SCRIPTS
+        /* LSI 53C8xx: intercept GPREG reads for EEPROM emulation */
         if (g_scsi_mmio_va && (ULONG)Reg == (ULONG)g_scsi_mmio_va + 0x07) {
             val = eeprom_gpreg_read();
             g_last_reg_read = (USHORT)(ULONG)Reg;
@@ -964,8 +975,8 @@ static UCHAR __stdcall sp_ReadRegisterUchar(PUCHAR Reg) {
             g_last_reg_val = val;
             return val;
         }
-#endif
-#endif
+#endif /* FAKE_ROM_DISABLED */
+#endif /* NTMINI_LSI_SCRIPTS */
         {   USHORT ioport = scsi_mmio_to_ioport((ULONG)Reg);
             if (ioport) { val = PORT_IN_BYTE(ioport); goto reg_read_done; }
         }
@@ -1019,8 +1030,8 @@ static void __stdcall sp_WriteRegisterUchar(PUCHAR Reg, UCHAR Val) {
     if (IS_IO_PORT(Reg)) { PORT_OUT_BYTE((USHORT)(ULONG)Reg, Val); return; }
     ioport = scsi_mmio_to_ioport((ULONG)Reg);
     if (IS_BAD_MMIO(Reg) && !ioport) return;
-#if NTMINI_USE_SCSI
-    /* Intercept GPREG writes for EEPROM emulation */
+#ifdef NTMINI_LSI_SCRIPTS
+    /* LSI 53C8xx: intercept GPREG writes for EEPROM emulation */
     if (g_scsi_mmio_va && (ULONG)Reg == (ULONG)g_scsi_mmio_va + 0x07) {
         eeprom_gpreg_write(Val);
         if (ioport) PORT_OUT_BYTE(ioport, Val);
@@ -1077,8 +1088,8 @@ static void __stdcall sp_WriteRegisterUlong(PULONG Reg, ULONG Val) {
         return;
     }
     if (IS_BAD_MMIO(Reg)) return;
-#if NTMINI_USE_SCSI
-    /* Patch SCRIPTS before DSP write starts execution */
+#ifdef NTMINI_LSI_SCRIPTS
+    /* LSI 53C8xx: patch SCRIPTS before DSP write starts execution */
     if (g_scsi_mmio_va && (ULONG)Reg == (ULONG)g_scsi_mmio_va + 0x2C) {
         scripts_patch_mmio_va();
     }
@@ -1153,9 +1164,9 @@ static PVOID __stdcall sp_GetDeviceBase(PVOID HwExt, ULONG BusType,
         log_hex(" mem=", (ULONG)InMemory, "\r\n");
         sp_gdb_log_count++;
     }
-#if NTMINI_USE_SCSI
+#ifdef NTMINI_LSI_SCRIPTS
 #ifndef FAKE_ROM_DISABLED
-    /* Intercept ROM-area mappings and return our fake BIOS ROM buffer.
+    /* LSI 53C8xx: intercept ROM-area mappings and return our fake BIOS ROM buffer.
        The miniport maps each 0x800-byte ROM candidate for the initial scan,
        and later re-maps a sub-range for config processing. */
     if (IoAddr.LowPart >= FAKE_ROM_BASE &&
@@ -1169,7 +1180,7 @@ static PVOID __stdcall sp_GetDeviceBase(PVOID HwExt, ULONG BusType,
         }
     }
 #endif
-#endif
+#endif /* NTMINI_LSI_SCRIPTS */
     if (InMemory && IoAddr.LowPart >= 0x100000) {
         /* Memory-mapped I/O above 1MB: map physical address to linear address.
            Used by SCSI controllers with PCI memory BARs (typically 0xFExxxxxx). */
@@ -1182,13 +1193,11 @@ static PVOID __stdcall sp_GetDeviceBase(PVOID HwExt, ULONG BusType,
         }
         log_hex("SP:MMIO FAIL PA=", IoAddr.LowPart, "\r\n");
     }
-#if NTMINI_USE_SCSI
-    /* SYMC8XX calls GetDeviceBase(BAR0, InMemory=TRUE) expecting a memory-mapped
-       pointer to the register set. BAR0 is I/O port space (0xC000), but the 53C810
-       exposes the same registers via MMIO at BAR1 (0xFEBF3000). If we return
-       0xC000 as-is, the miniport adds large offsets and wraps into unmapped memory
-       (CR2=0xFFFFFC24). Use pre-mapped BAR1 address if available, otherwise try
-       MapPhysToLinear (which may fail if BAR2 mapping consumed the range). */
+#ifdef NTMINI_LSI_SCRIPTS
+    /* LSI 53C8xx specific: BAR0 is I/O port space, BAR1 is the same register
+       set via MMIO. SYMC8XX calls GetDeviceBase(BAR0, InMemory=TRUE) expecting
+       a memory-mapped pointer. Redirect to BAR1's physical address.
+       Other SCSI miniports don't have this dual I/O+MMIO register layout. */
     if (InMemory && g_scsi_mmio_bar != 0 && IoAddr.LowPart == g_scsi_iobase) {
         if (g_scsi_mmio_va) {
             log_hex("SP:GDB BAR0->MMIO(cached) ", g_scsi_mmio_bar, "");
@@ -1207,7 +1216,7 @@ static PVOID __stdcall sp_GetDeviceBase(PVOID HwExt, ULONG BusType,
         }
         log_hex("SP:GDB MMIO remap FAILED for ", g_scsi_mmio_bar, "\r\n");
     }
-#endif
+#endif /* NTMINI_LSI_SCRIPTS */
     /* I/O port space, low memory, or MapPhysToLinear fallback:
        return the address directly. In Win9x ring 0, I/O ports are accessed
        by number and low physical memory is identity-mapped. */
@@ -1393,7 +1402,7 @@ static PVOID  g_srbbuf_virt = NULL;
 static ULONG  g_srbbuf_phys = 0;
 static ULONG  g_srbbuf_size = 0;
 
-#if NTMINI_USE_SCSI
+#ifdef NTMINI_LSI_SCRIPTS
 /* Patch SCRIPTS in DMA buffer: replace MMIO VAs with PAs.
    The miniport builds SCRIPTS using VAs from GetDeviceBase for register
    addresses. On NT, MMIO VA == PA (MmMapIoSpace identity maps). On Win9x,
@@ -1493,7 +1502,7 @@ static void scripts_patch_mmio_va(void) {
     }
 #endif
 }
-#endif
+#endif /* NTMINI_LSI_SCRIPTS */
 
 /* VA→PA translation for ScsiPortGetPhysicalAddress and DMA.
    Checks: MMIO map → DMA buffer → _CopyPageTable → kernel offset fallback. */
@@ -1857,8 +1866,14 @@ static ULONG __stdcall sp_Initialize(
                     device_id = pci_config[2] | (pci_config[3] << 8);
                     class_code = pci_config[11]; /* base class */
 
-                    /* Class 0x01 = mass storage, subclass 0x00 = SCSI */
-                    if (class_code == 0x01 && pci_config[10] == 0x00) {
+                    /* Class 0x01 = mass storage; accept SCSI-family subclasses:
+                       0x00 = SCSI Bus Controller
+                       0x04 = RAID Controller
+                       0x07 = Serial Attached SCSI (SAS) Controller */
+                    if (class_code == 0x01 &&
+                        (pci_config[10] == 0x00 ||
+                         pci_config[10] == 0x04 ||
+                         pci_config[10] == 0x07)) {
                         log_hex("SP: PCI SCSI found! VID=", vendor_id, "");
                         log_hex(" DID=", device_id, "");
                         log_hex(" bus=", bus, "");
@@ -1996,53 +2011,13 @@ static ULONG __stdcall sp_Initialize(
     log_hex("SP: &DevExt=", (ULONG)g_state.DeviceExtension, "\r\n");
     VxD_Debug_Printf("SP: About to hook IRQ...\r\n");
 
-    /* Hook interrupt BEFORE HwFindAdapter. SCSI miniports (e.g., SYMC8XX)
-       expect interrupts during HwFindAdapter for controller self-test.
-       On real NT, ScsiPort hooks the interrupt before calling HwFindAdapter.
-
-       Try VPICD_Virtualize_IRQ first (exclusive ownership). If that fails
-       (PCI IRQ steering VxD already virtualized the shared PCI interrupt),
-       fall back to VPICD_Call_When_Hw_Int which chains onto the existing
-       handler. This is how Win98's own SCSIPORT.PDR hooks shared PCI IRQs.
-
-       IMPORTANT: When multiple SCSI targets are on the bus (e.g. CD-ROM +
-       HDD), the controller may have a pending UNIT ATTENTION interrupt from
-       newly-attached devices. If that interrupt fires into our handler before
-       the miniport is fully initialized (DMA buffer, SCRIPTS), the miniport's
-       HwInterrupt will access uninitialized memory and hang. Solution: mask
-       the physical IRQ at the PIC before hooking, then unmask after init. */
-    g_irq_hw_int_func = (PVOID)g_state.HwInterrupt;
+    /* Use polling mode for SCSI. IRQ hooking via VPICD deadlocks when the
+       LSI controller has a pending interrupt (common with SCSI HDD present).
+       Polling works reliably for all SCSI operations. */
+    g_irq_hw_int_func = NULL;
     g_irq_devext = g_state.DeviceExtension;
-    if (configInfo.BusInterruptLevel != 0) {
-        /* Mask the IRQ at the PIC before hooking to prevent premature delivery.
-           PIC1 mask = port 0x21 (IRQ 0-7), PIC2 mask = port 0xA1 (IRQ 8-15). */
-        {
-            ULONG irq = configInfo.BusInterruptLevel;
-            USHORT mask_port = (irq < 8) ? 0x21 : 0xA1;
-            UCHAR irq_bit = (UCHAR)(1 << (irq & 7));
-            UCHAR old_mask = PORT_IN_BYTE(mask_port);
-            PORT_OUT_BYTE(mask_port, old_mask | irq_bit);
-            log_hex("SP: Masked IRQ ", irq, " before hook\r\n");
-        }
-
-        {
-        ULONG irq_handle = VxD_Hook_IRQ(configInfo.BusInterruptLevel);
-        if (irq_handle) {
-            g_irq_active = TRUE;
-            log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " hooked (pre-find)\r\n");
-        } else {
-            log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " virtualize failed, trying chain\r\n");
-            irq_handle = VxD_Chain_IRQ(configInfo.BusInterruptLevel);
-            if (irq_handle) {
-                g_irq_active = TRUE;
-                log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " chained OK (pre-find)\r\n");
-            } else {
-                g_irq_active = FALSE;
-                log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " hook FAILED (both methods)\r\n");
-            }
-        }
-        }
-    }
+    g_irq_active = FALSE;
+    log_hex("SP: IRQ ", configInfo.BusInterruptLevel, " skipped (polling)\r\n");
 
 #if NTMINI_USE_SCSI
     /* Pre-map BAR1 (MMIO registers) before HwFindAdapter.
@@ -2170,8 +2145,8 @@ static ULONG __stdcall sp_Initialize(
         }
     }
 
-#if NTMINI_USE_SCSI
-    /* Patch SCRIPTS VA→PA before HwInitialize starts the SCRIPTS engine.
+#ifdef NTMINI_LSI_SCRIPTS
+    /* LSI 53C8xx: patch SCRIPTS VA->PA before HwInitialize starts the engine.
        HwFindAdapter builds SCRIPTS in the DMA buffer using MMIO VAs from
        GetDeviceBase. HwInitialize writes DSP to start execution. QEMU
        executes SCRIPTS synchronously within the DSP write, so patching
@@ -2186,21 +2161,10 @@ static ULONG __stdcall sp_Initialize(
     }
 
     VxD_Debug_Printf("SP: HwInitialize OK!\r\n");
+    g_irq_hw_int_func = (PVOID)g_state.HwInterrupt;
 
-    /* Unmask the IRQ now that the miniport is fully initialized.
-       DMA buffer is allocated, SCRIPTS are patched, HwInterrupt can safely
-       process pending interrupts (e.g. UNIT ATTENTION from newly-attached disks). */
-    if (configInfo.BusInterruptLevel != 0 && g_irq_active) {
-        ULONG irq = configInfo.BusInterruptLevel;
-        USHORT mask_port = (irq < 8) ? 0x21 : 0xA1;
-        UCHAR irq_bit = (UCHAR)(1 << (irq & 7));
-        UCHAR cur_mask = PORT_IN_BYTE(mask_port);
-        PORT_OUT_BYTE(mask_port, cur_mask & ~irq_bit);
-        log_hex("SP: Unmasked IRQ ", irq, " (miniport ready)\r\n");
-    }
-
-#if NTMINI_USE_SCSI
-    /* Verify SCSI controller state after HwInitialize.
+#ifdef NTMINI_LSI_SCRIPTS
+    /* LSI 53C8xx: verify SCRIPTS engine state after HwInitialize.
        Use I/O port reads (not MMIO) because MapPhysToLinear mapping
        may not route through QEMU's device model for register access. */
     if (g_scsi_iobase) {
@@ -2255,7 +2219,7 @@ static ULONG __stdcall sp_Initialize(
             }
         }
     }
-#endif
+#endif /* NTMINI_LSI_SCRIPTS */
 
     /* Clear any pending interrupt state from HwFindAdapter/HwInitialize
        BEFORE patching the device extension. */
@@ -2286,7 +2250,7 @@ static ULONG __stdcall sp_Initialize(
         log_hex("SP: SRB@", (ULONG)srb, "");
         log_hex(" data@", (ULONG)inquiry_buf, "");
         log_hex(" sense@", (ULONG)sense_buf, "\r\n");
-        for (target = 0; target < 8 && !found_cdrom; target++) {
+        for (target = 0; target < 8; target++) {
             int rc;
             if (target == configInfo.InitiatorBusId[0]) continue; /* skip host adapter */
             my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
@@ -2324,8 +2288,10 @@ static ULONG __stdcall sp_Initialize(
                 if (dev_type == 0x05) {  /* CD-ROM */
                     VxD_Debug_Printf("SP: *** SCSI CD-ROM FOUND ***\r\n");
                     found_cdrom = 1;
-                    /* Store target info for later IOS/IOR use */
                     g_scsi_cdrom_target = target;
+                } else if (dev_type == 0x00) {  /* Direct access (HDD) */
+                    VxD_Debug_Printf("SP: *** SCSI HDD FOUND ***\r\n");
+                    g_scsi_hdd_target = target;
                 }
             } else if (rc == -3) {
                 log_hex("SP: Target ", (ULONG)target, " timeout (no device)\r\n");
@@ -2336,11 +2302,176 @@ static ULONG __stdcall sp_Initialize(
         if (!found_cdrom) {
             VxD_Debug_Printf("SP: No SCSI CD-ROM found on bus\r\n");
         }
+
+        /* SCSI HDD READ test: send INQUIRY to clear UNIT ATTENTION (INQUIRY
+           always works in polling mode), then immediately READ(10). */
+        if (g_scsi_hdd_target != 0xFF) {
+            int hdd_rc;
+            VxD_Debug_Printf("SP: HDD: INQUIRY to clear UA...\r\n");
+            my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
+            my_memset(inquiry_buf, 0, 36);
+            my_memset(sense_buf, 0, 18);
+            srb->Length = sizeof(SCSI_REQUEST_BLOCK);
+            srb->Function = 0x00;
+            srb->TargetId = g_scsi_hdd_target;
+            srb->CdbLength = 6;
+            srb->SrbFlags = 0x00000008 | 0x00000040;
+            srb->DataTransferLength = 36;
+            srb->TimeOutValue = 3;
+            srb->DataBuffer = inquiry_buf;
+            srb->SenseInfoBuffer = sense_buf;
+            srb->SenseInfoBufferLength = 18;
+            srb->Cdb[0] = 0x12;  /* INQUIRY */
+            srb->Cdb[4] = 36;
+            hdd_rc = miniport_submit_srb(srb);
+            log_hex("SP: HDD INQ rc=", (ULONG)hdd_rc, "");
+            log_hex(" st=", (ULONG)srb->SrbStatus, "\r\n");
+            /* Second INQUIRY to confirm UA cleared */
+            my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
+            my_memset(inquiry_buf, 0, 36);
+            srb->Length = sizeof(SCSI_REQUEST_BLOCK);
+            srb->Function = 0x00;
+            srb->TargetId = g_scsi_hdd_target;
+            srb->CdbLength = 6;
+            srb->SrbFlags = 0x00000008 | 0x00000040;
+            srb->DataTransferLength = 36;
+            srb->TimeOutValue = 3;
+            srb->DataBuffer = inquiry_buf;
+            srb->SenseInfoBuffer = sense_buf;
+            srb->SenseInfoBufferLength = 18;
+            srb->Cdb[0] = 0x12;
+            srb->Cdb[4] = 36;
+            hdd_rc = miniport_submit_srb(srb);
+            log_hex("SP: HDD INQ2 rc=", (ULONG)hdd_rc, "");
+            log_hex(" st=", (ULONG)srb->SrbStatus, "\r\n");
+            /* Dump DevExt state BEFORE READ */
+            {
+                volatile ULONG *d = (volatile ULONG *)g_state.DeviceExtension;
+                VxD_Debug_Printf("SP: DE_PRE:");
+                log_hex(" 20:", d[8], ""); log_hex(" 24:", d[9], "");
+                log_hex(" 28:", d[10], ""); log_hex(" 2C:", d[11], "\r\n");
+                VxD_Debug_Printf("SP: DE_PR2:");
+                log_hex(" 30:", d[12], ""); log_hex(" 34:", d[13], "");
+                log_hex(" 38:", d[14], ""); log_hex(" 3C:", d[15], "\r\n");
+            }
+            {
+            int read_attempt;
+            for (read_attempt = 0; read_attempt < 2; read_attempt++) {
+            VxD_Debug_Printf("SP: HDD READ(10) LBA 0...\r\n");
+            my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
+            my_memset(inquiry_buf, 0, 512);
+            my_memset(sense_buf, 0, 18);
+            srb->Length = sizeof(SCSI_REQUEST_BLOCK);
+            srb->Function = 0x00;
+            srb->TargetId = g_scsi_hdd_target;
+            srb->CdbLength = 10;
+            srb->SrbFlags = 0x00000008 | 0x00000040;
+            srb->DataTransferLength = 512;
+            srb->TimeOutValue = 10;
+            srb->DataBuffer = inquiry_buf;
+            srb->SenseInfoBuffer = sense_buf;
+            srb->SenseInfoBufferLength = 18;
+            srb->Cdb[0] = 0x28;  /* READ(10) */
+            srb->Cdb[8] = 1;     /* 1 sector */
+            hdd_rc = miniport_submit_srb(srb);
+            log_hex("SP: READ rc=", (ULONG)hdd_rc, "");
+            log_hex(" st=", (ULONG)srb->SrbStatus, "\r\n");
+            if (hdd_rc == 0 && (srb->SrbStatus & 0x3F) == 1) {
+                VxD_Debug_Printf("SP: *** SCSI HDD READ SUCCESS ***\r\n");
+                log_hex("SP: Sec0[0..3]=", *(ULONG *)inquiry_buf, "\r\n");
+                break;
+            } else {
+                log_hex("SP: READ fail st=", (ULONG)srb->SrbStatus, "\r\n");
+                if (srb->SrbStatus & 0x80) {
+                    log_hex("SP: sense=", (ULONG)(sense_buf[2]&0xF), "");
+                    log_hex(" asc=", (ULONG)sense_buf[12], "\r\n");
+                }
+                if ((sense_buf[2] & 0x0F) == 6) {
+                    /* Dump DevExt AFTER CHECK CONDITION */
+                    volatile ULONG *d = (volatile ULONG *)g_state.DeviceExtension;
+                    VxD_Debug_Printf("SP: DE_POST:");
+                    log_hex(" 20:", d[8], ""); log_hex(" 24:", d[9], "");
+                    log_hex(" 28:", d[10], ""); log_hex(" 2C:", d[11], "\r\n");
+                    VxD_Debug_Printf("SP: DE_PO2:");
+                    log_hex(" 30:", d[12], ""); log_hex(" 34:", d[13], "");
+                    log_hex(" 38:", d[14], ""); log_hex(" 3C:", d[15], "\r\n");
+                    VxD_Debug_Printf("SP: UA on READ, retry\r\n");
+                    sp_StallExecution(100000);
+                    continue;
+                }
+                break;
+            }
+            } /* end read_attempt loop */
+            }
+
+            /* WRITE(10) test: write pattern to LBA 1, read back to verify */
+            {
+            ULONG pattern = 0xDEADBEEF;
+            int write_rc, i;
+            VxD_Debug_Printf("SP: HDD WRITE(10) LBA 1...\r\n");
+            my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
+            /* Fill buffer with recognizable pattern */
+            for (i = 0; i < 128; i++)
+                ((ULONG *)inquiry_buf)[i] = pattern;
+            my_memset(sense_buf, 0, 18);
+            srb->Length = sizeof(SCSI_REQUEST_BLOCK);
+            srb->Function = 0x00;
+            srb->TargetId = g_scsi_hdd_target;
+            srb->CdbLength = 10;
+            srb->SrbFlags = 0x00000010 | 0x00000040;  /* DATA_OUT | DISABLE_SYNCH */
+            srb->DataTransferLength = 512;
+            srb->TimeOutValue = 10;
+            srb->DataBuffer = inquiry_buf;
+            srb->SenseInfoBuffer = sense_buf;
+            srb->SenseInfoBufferLength = 18;
+            srb->Cdb[0] = 0x2A;  /* WRITE(10) */
+            srb->Cdb[5] = 1;     /* LBA 1 (big-endian, byte 5 = low byte) */
+            srb->Cdb[8] = 1;     /* 1 sector */
+            write_rc = miniport_submit_srb(srb);
+            log_hex("SP: WRITE rc=", (ULONG)write_rc, "");
+            log_hex(" st=", (ULONG)srb->SrbStatus, "\r\n");
+            if (write_rc == 0 && (srb->SrbStatus & 0x3F) == 1) {
+                /* Readback verify */
+                VxD_Debug_Printf("SP: WRITE ok, readback LBA 1...\r\n");
+                my_memset(srb, 0, sizeof(SCSI_REQUEST_BLOCK));
+                my_memset(inquiry_buf, 0, 512);
+                my_memset(sense_buf, 0, 18);
+                srb->Length = sizeof(SCSI_REQUEST_BLOCK);
+                srb->Function = 0x00;
+                srb->TargetId = g_scsi_hdd_target;
+                srb->CdbLength = 10;
+                srb->SrbFlags = 0x00000008 | 0x00000040;  /* DATA_IN | DISABLE_SYNCH */
+                srb->DataTransferLength = 512;
+                srb->TimeOutValue = 10;
+                srb->DataBuffer = inquiry_buf;
+                srb->SenseInfoBuffer = sense_buf;
+                srb->SenseInfoBufferLength = 18;
+                srb->Cdb[0] = 0x28;  /* READ(10) */
+                srb->Cdb[5] = 1;     /* LBA 1 */
+                srb->Cdb[8] = 1;     /* 1 sector */
+                write_rc = miniport_submit_srb(srb);
+                if (write_rc == 0 && (srb->SrbStatus & 0x3F) == 1) {
+                    if (*(ULONG *)inquiry_buf == pattern) {
+                        VxD_Debug_Printf("SP: *** SCSI HDD WRITE+VERIFY SUCCESS ***\r\n");
+                    } else {
+                        log_hex("SP: WRITE verify MISMATCH got=", *(ULONG *)inquiry_buf, "\r\n");
+                    }
+                } else {
+                    log_hex("SP: Readback fail st=", (ULONG)srb->SrbStatus, "\r\n");
+                }
+            } else {
+                log_hex("SP: WRITE fail st=", (ULONG)srb->SrbStatus, "\r\n");
+            }
+            }
+        }
     }
 #endif
 
     /* Fix device extension for atapi.sys HwStartIo (IDE-specific).
-       SCSI miniports manage their own device extension layout. */
+       This writes to a hard-coded DevExt offset (0x44) that is specific to
+       atapi.sys's internal layout. Other miniport drivers (SCSI, RAID, SAS)
+       manage their own device extension layout and must NOT get this fixup. */
+#if !NTMINI_USE_SCSI
     if (HwInitData->AdapterInterfaceType == 1 /* Isa / IDE */) {
         /* Disassembly of atapi.sys HwStartIo reveals:
            - Offset 0x00: CurrentSrb pointer (MUST be 0 = idle)
@@ -2361,6 +2492,7 @@ static ULONG __stdcall sp_Initialize(
             VxD_Debug_Printf("SP: FIX: set DevFlags[0]=0x0013 (ATAPI+PRESENT+REMOVABLE)\r\n");
         }
     }
+#endif /* !NTMINI_USE_SCSI */
 
     /* IRQ was hooked before HwFindAdapter. Update handler globals
        in case HwInitialize changed the function pointers. */
@@ -2429,6 +2561,21 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
 
     if (!g_state.HwStartIo || !g_state.DeviceExtension) return -1;
 
+    /* Clear the per-tag slot in the miniport's LU extension table.
+       sym_hi.sys checks [DevExt[0x14] + (DevExt[0x2C] * 8)] bits 0-2:
+       if non-zero, HwStartIo returns SRB_STATUS_BUSY. The slot isn't
+       cleared in polling mode because the interrupt completion path
+       doesn't fire. Clear it before each new submission. */
+    {
+        volatile ULONG *dext = (volatile ULONG *)g_state.DeviceExtension;
+        ULONG tag_table = dext[0x14/4];  /* per-tag table pointer */
+        USHORT tag_idx = *(volatile USHORT *)((UCHAR *)g_state.DeviceExtension + 0x2C);
+        if (tag_table && tag_idx < 256) {
+            volatile UCHAR *slot = (volatile UCHAR *)(tag_table + (ULONG)tag_idx * 8);
+            *slot &= ~0x07;  /* clear bits 0-2 (in-flight flags) */
+        }
+    }
+
     g_srb_complete = FALSE;
     g_SrbCompleted = 0;
     sp_io_log_count = 0;
@@ -2440,6 +2587,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
         srb->SrbExtension = g_srbext_virt;
     }
 
+#ifdef NTMINI_LSI_SCRIPTS
     /* Re-patch SCRIPTS in case miniport modified them since last I/O */
     scripts_patch_mmio_va();
 
@@ -2470,6 +2618,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
             VxD_Debug_Printf(" (out of DMA)\r\n");
         }
     }
+#endif /* NTMINI_LSI_SCRIPTS */
 
     g_current_srb = srb;
     if (!g_state.HwStartIo(g_state.DeviceExtension, srb)) {
@@ -2477,6 +2626,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
         return -2;
     }
 
+#ifdef NTMINI_LSI_SCRIPTS
     /* Log DMA start queue after HwStartIo (SIGP already fired inside) */
     if (g_dma_virt) {
         volatile ULONG *dm = (volatile ULONG *)g_dma_virt;
@@ -2490,6 +2640,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
             VxD_Debug_Printf(" (out of DMA)\r\n");
         }
     }
+#endif /* NTMINI_LSI_SCRIPTS */
 
     /* Wait for completion. If interrupts are active, HwInterrupt fires
        via the VPICD handler and sets g_srb_complete. If not, poll. */

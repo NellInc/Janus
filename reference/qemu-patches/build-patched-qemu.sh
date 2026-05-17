@@ -7,11 +7,16 @@
 #   2. NTMINI_PA_FIXUP — translate VxD-reported wrong PAs (VA - 0xC0000000)
 #      through guest page tables via cpu_get_phys_page_debug(), 64-entry cache.
 #      Translated reads/writes go through address_space_memory.
+#      FIX: cache lookup before current_cpu check (allows async SCSI callbacks
+#      to resolve PAs from cache when no CPU context is active).
 #   3. NTMINI_SCNTL1_CON — preserve the hardware-managed CON bit on software
 #      writes to SCNTL1 (real hardware: read-only status). Fixes SYMC8XX
 #      clearing the nexus after a successful SELECT.
 #   4. NTMINI_STIME1_NOGEN — do NOT raise LSI_SIST1_GEN immediately when
 #      software programs STIME1. Fixes premature SRB_STATUS_SELECTION_TIMEOUT.
+#   5. lsi_disconnect reselect intercept — after DISCONNECT, if a queued
+#      request has pending data, immediately perform reselection. Required
+#      for polling-mode VxDs that cannot service RSL interrupts.
 #
 # Usage: ./build-patched-qemu.sh
 # Result: /tmp/qemu-patched/qemu-10.2.2/build/qemu-system-i386
