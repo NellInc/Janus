@@ -41,6 +41,10 @@ void _port_rep_outsw(unsigned short port, void *buf, unsigned long cnt);
 #pragma aux _port_rep_outsw = "rep outsw" parm [dx] [esi] [ecx] modify [esi ecx];
 void _port_rep_outsd(unsigned short port, void *buf, unsigned long cnt);
 #pragma aux _port_rep_outsd = "rep outsd" parm [dx] [esi] [ecx] modify [esi ecx];
+void _port_rep_insb(unsigned short port, void *buf, unsigned long cnt);
+#pragma aux _port_rep_insb = "rep insb" parm [dx] [edi] [ecx] modify [edi ecx];
+void _port_rep_outsb(unsigned short port, void *buf, unsigned long cnt);
+#pragma aux _port_rep_outsb = "rep outsb" parm [dx] [esi] [ecx] modify [esi ecx];
 void _port_stall(void);
 #pragma aux _port_stall = "in al, 0x80" modify [al];
 #endif
@@ -53,8 +57,10 @@ void _port_stall(void);
 #define PORT_OUT_DWORD(p,v) _port_outd((unsigned short)(p),(unsigned long)(v))
 #define PORT_READ_BUFFER_USHORT(p,b,c) _port_rep_insw((unsigned short)(p),(b),(c))
 #define PORT_READ_BUFFER_ULONG(p,b,c) _port_rep_insd((unsigned short)(p),(b),(c))
+#define PORT_READ_BUFFER_UCHAR(p,b,c) _port_rep_insb((unsigned short)(p),(b),(c))
 #define PORT_WRITE_BUFFER_USHORT(p,b,c) _port_rep_outsw((unsigned short)(p),(b),(c))
 #define PORT_WRITE_BUFFER_ULONG(p,b,c) _port_rep_outsd((unsigned short)(p),(b),(c))
+#define PORT_WRITE_BUFFER_UCHAR(p,b,c) _port_rep_outsb((unsigned short)(p),(b),(c))
 #define PORT_STALL_ONE() _port_stall()
 
 typedef unsigned char       UCHAR;
@@ -215,12 +221,21 @@ void _ntmini_ios_init(void);
 /* Embedded miniport drivers.
    NTMINI_USE_SCSI selects which miniport to load:
      0 = ATAPI (IDE/ATAPI CD-ROM, default)
-     1 = SCSI (sym_hi.sys for LSI/Symbios controllers) */
+     1 = SCSI sym_hi.sys (LSI/Symbios 53C810)
+     2 = SCSI amsint.mpd (AMD AM53C974 / Tekram DC-390)
+     3 = NDIS ne2000.sys (NE2000 ISA network, uses NDIS_SHIM) */
 #ifndef NTMINI_USE_SCSI
 #define NTMINI_USE_SCSI 0
 #endif
 
-#if NTMINI_USE_SCSI
+#if NTMINI_USE_SCSI == 2
+/* Embedded AMSINT.MPD (AMD AM53C974 PCscsi SCSI miniport).
+   Generate with: python3 embed_sys.py amsint.mpd AMSINT_EMBEDDED.H amsint_embedded */
+#include "AMSINT_EMBEDDED.H"
+#define MINIPORT_IMAGE      amsint_embedded_data
+#define MINIPORT_IMAGE_SIZE sizeof(amsint_embedded_data)
+#define MINIPORT_NAME       "amsint.mpd"
+#elif NTMINI_USE_SCSI == 1
 /* Embedded SYM_HI.SYS (Symbios/LSI SCSI miniport).
    Generate with: python3 embed_sys.py sym_hi.sys SYM_HI_EMBEDDED.H sym_hi_embedded */
 #include "SYM_HI_EMBEDDED.H"
@@ -866,6 +881,12 @@ static void __stdcall sp_WritePortBufferUshort(PUSHORT Port, PUSHORT Buf, ULONG 
 static void __stdcall sp_WritePortBufferUlong(PULONG Port, PULONG Buf, ULONG Cnt) {
     PORT_WRITE_BUFFER_ULONG(remap_port((USHORT)(ULONG)Port), Buf, Cnt);
 }
+static void __stdcall sp_ReadPortBufferUchar(PUCHAR Port, PUCHAR Buf, ULONG Cnt) {
+    PORT_READ_BUFFER_UCHAR(remap_port((USHORT)(ULONG)Port), Buf, Cnt);
+}
+static void __stdcall sp_WritePortBufferUchar(PUCHAR Port, PUCHAR Buf, ULONG Cnt) {
+    PORT_WRITE_BUFFER_UCHAR(remap_port((USHORT)(ULONG)Port), Buf, Cnt);
+}
 
 /* Register I/O: memory-mapped, with I/O port fallback.
    On real NT, GetDeviceBase maps I/O ports into memory space so Register
@@ -1398,6 +1419,12 @@ static PVOID  g_srbext_virt = NULL;
 static ULONG  g_srbext_phys = 0;
 static ULONG  g_srbext_size = 0;
 
+/* Logical unit extension: per-LU private data for the miniport.
+   NT's ScsiPort allocates SpecificLuExtensionSize bytes per logical unit.
+   We support a single LU in polling mode, so one buffer suffices. */
+static PVOID  g_luext_virt = NULL;
+static ULONG  g_luext_size = 0;
+
 /* SRB I/O buffer: DMA-allocated for SCSI data transfer and SRB itself.
    Stack-based buffers have unreliable VA→PA translation (KERN fallback
    assumes VA=0xC0000000+PA but VxD stack pages aren't identity-mapped).
@@ -1902,6 +1929,20 @@ static ULONG __stdcall sp_Initialize(
             log_hex(" sz=", g_srbext_size, "\r\n");
         } else {
             VxD_Debug_Printf("SP: SrbExt DMA alloc FAILED!\r\n");
+        }
+    }
+
+    /* Allocate LU extension if miniport requested one. */
+    if (HwInitData->SpecificLuExtensionSize > 0 && !g_luext_virt) {
+        ULONG luextPages = (HwInitData->SpecificLuExtensionSize + 4095) / 4096;
+        g_luext_virt = VxD_PageAllocate(luextPages, 1);
+        if (g_luext_virt) {
+            g_luext_size = luextPages * 4096;
+            my_memset(g_luext_virt, 0, g_luext_size);
+            log_hex("SP: LuExt VA=", (ULONG)g_luext_virt, "");
+            log_hex(" sz=", g_luext_size, "\r\n");
+        } else {
+            VxD_Debug_Printf("SP: LuExt alloc FAILED!\r\n");
         }
     }
 
@@ -2627,6 +2668,45 @@ static ULONG __stdcall sp_Initialize(
     return STATUS_SUCCESS;
 }
 
+/* ScsiPortGetLogicalUnit: returns per-LU extension for the given path/target/lun.
+   NT allocates SpecificLuExtensionSize bytes per logical unit. We support
+   a single LU in polling mode, so we return the one pre-allocated buffer. */
+static PVOID __stdcall sp_GetLogicalUnit(PVOID HwDeviceExtension,
+    UCHAR PathId, UCHAR TargetId, UCHAR Lun)
+{
+    log_hex("SP:GetLU path=", (ULONG)PathId, "");
+    log_hex(" tgt=", (ULONG)TargetId, "");
+    log_hex(" lun=", (ULONG)Lun, "\r\n");
+    return g_luext_virt;
+}
+
+/* ScsiPortGetSrb: returns the active SRB for a given path/target/lun/queue-tag.
+   In our single-request polling model, this is g_current_srb or NULL. */
+static PSCSI_REQUEST_BLOCK __stdcall sp_GetSrb(PVOID HwDeviceExtension,
+    UCHAR PathId, UCHAR TargetId, UCHAR Lun, LONG QueueTag)
+{
+    log_hex("SP:GetSrb tag=", (ULONG)QueueTag, "\r\n");
+    return g_current_srb;
+}
+
+/* ScsiPortValidateRange: checks if an I/O range is available. Always TRUE. */
+static BOOLEAN __stdcall sp_ValidateRange(PVOID HwDeviceExtension,
+    ULONG BusType, ULONG SystemIoBusNumber, ULONG IoAddress,
+    ULONG NumberOfBytes, BOOLEAN InIoSpace)
+{
+    log_hex("SP:ValidateRange addr=", IoAddress, "");
+    log_hex(" len=", NumberOfBytes, "\r\n");
+    return TRUE;
+}
+
+/* ScsiDebugPrint: debug output from miniport. Route to VxD debug console. */
+static void sp_DebugPrint(ULONG Level, const char *Fmt, ...)
+{
+    VxD_Debug_Printf("SP:MiniDbg: ");
+    if (Fmt) VxD_Debug_Printf(Fmt);
+    VxD_Debug_Printf("\r\n");
+}
+
 /* Import function table */
 static const IMPORT_FUNC_ENTRY scsiport_funcs[] = {
     { "ScsiPortGetDeviceBase",               (PVOID)sp_GetDeviceBase },
@@ -2634,10 +2714,12 @@ static const IMPORT_FUNC_ENTRY scsiport_funcs[] = {
     { "ScsiPortReadPortUchar",               (PVOID)sp_ReadPortUchar },
     { "ScsiPortReadPortUshort",              (PVOID)sp_ReadPortUshort },
     { "ScsiPortReadPortUlong",               (PVOID)sp_ReadPortUlong },
+    { "ScsiPortReadPortBufferUchar",         (PVOID)sp_ReadPortBufferUchar },
     { "ScsiPortReadPortBufferUshort",        (PVOID)sp_ReadPortBufferUshort },
     { "ScsiPortReadPortBufferUlong",         (PVOID)sp_ReadPortBufferUlong },
     { "ScsiPortWritePortUchar",              (PVOID)sp_WritePortUchar },
     { "ScsiPortWritePortUshort",             (PVOID)sp_WritePortUshort },
+    { "ScsiPortWritePortBufferUchar",        (PVOID)sp_WritePortBufferUchar },
     { "ScsiPortWritePortBufferUshort",       (PVOID)sp_WritePortBufferUshort },
     { "ScsiPortWritePortBufferUlong",        (PVOID)sp_WritePortBufferUlong },
     { "ScsiPortWritePortUlong",              (PVOID)sp_WritePortUlong },
@@ -2667,6 +2749,10 @@ static const IMPORT_FUNC_ENTRY scsiport_funcs[] = {
     { "ScsiPortFlushDma",                    (PVOID)sp_FlushDma },
     { "ScsiPortIoMapTransfer",               (PVOID)sp_IoMapTransfer },
     { "ScsiPortGetVirtualAddress",           (PVOID)sp_GetVirtualAddress },
+    { "ScsiPortGetLogicalUnit",              (PVOID)sp_GetLogicalUnit },
+    { "ScsiPortGetSrb",                      (PVOID)sp_GetSrb },
+    { "ScsiPortValidateRange",               (PVOID)sp_ValidateRange },
+    { "ScsiDebugPrint",                      (PVOID)sp_DebugPrint },
     { NULL, NULL }
 };
 
@@ -2685,6 +2771,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
 
     if (!g_state.HwStartIo || !g_state.DeviceExtension) return -1;
 
+#ifdef NTMINI_LSI_SCRIPTS
     /* Clear the per-tag slot in the miniport's LU extension table.
        sym_hi.sys checks [DevExt[0x14] + (DevExt[0x2C] * 8)] bits 0-2:
        if non-zero, HwStartIo returns SRB_STATUS_BUSY. The slot isn't
@@ -2699,6 +2786,7 @@ static int miniport_submit_srb(PSCSI_REQUEST_BLOCK srb)
             *slot &= ~0x07;  /* clear bits 0-2 (in-flight flags) */
         }
     }
+#endif
 
     g_srb_complete = FALSE;
     g_SrbCompleted = 0;
@@ -2905,7 +2993,37 @@ int _ntmini_init(void)
         log_hex(", ", (ULONG)scsi_count, " SCSI\r\n");
     }
 
-#if NTMINI_USE_SCSI
+#if NTMINI_USE_SCSI == 4
+    /* VideoPort path: test display miniport driver shim. */
+    {
+        extern int video_test_miniport(void);
+        int vp_rc;
+        VxD_Debug_Printf("V5: === VIDEO PORT TEST ===\r\n");
+        vp_rc = video_test_miniport();
+        log_hex("V5: video_test returned ", (ULONG)vp_rc, "\r\n");
+        g_ntmini_initialized = TRUE;
+        g_ios_ready = 0;
+        VxD_Debug_Printf("V5: VideoPort test complete\r\n");
+        return 1;
+        (void)entry_point; (void)image_base; (void)rc; (void)status; (void)DriverEntry;
+    }
+#elif NTMINI_USE_SCSI == 3
+    /* NDIS path: use NDIS_SHIM to load a network miniport driver.
+       Skip IOS/CD-ROM init (not a storage driver). */
+    {
+        extern int ndis_test_ne2000(void);
+        int ndis_rc;
+        VxD_Debug_Printf("V5: === NDIS NE2000 TEST ===\r\n");
+        ndis_rc = ndis_test_ne2000();
+        log_hex("V5: ndis_test_ne2000 returned ", (ULONG)ndis_rc, "\r\n");
+        g_ntmini_initialized = TRUE;
+        g_ios_ready = 0;  /* No IOS for NDIS — skip CD-ROM mount */
+        memlog("NDIS_DONE\r\n");
+        VxD_Debug_Printf("V5: NDIS test complete\r\n");
+        return 1;
+        (void)entry_point; (void)image_base; (void)rc; (void)status; (void)DriverEntry;
+    }
+#elif NTMINI_USE_SCSI
     /* SCSI path: load miniport PE image, call DriverEntry which calls
        ScsiPortInitialize, which triggers our sp_Initialize shim.
        sp_Initialize does PCI enumeration + HwFindAdapter + HwInitialize. */
