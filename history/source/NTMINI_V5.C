@@ -138,6 +138,16 @@ typedef char NTMINI_ASSERT_SRB_CDB_OFFSET_IS_0x30[
 typedef char NTMINI_ASSERT_SRB_SIZE_IS_0x40[
     (NTMINI_SRB_SIZE == 0x40) ? 1 : -1];
 
+/* SRB flags (from NT DDK) */
+#define SRB_FLAGS_DATA_IN   0x00000008
+#define SRB_FLAGS_DATA_OUT  0x00000010
+
+/* ISA 8237 DMA page registers (indexed by channel number) */
+static const USHORT g_dma_page_reg[8] = {
+    0x87, 0x83, 0x81, 0x82,  /* channels 0-3 */
+    0x8F, 0x8B, 0x89, 0x8A   /* channels 4-7 */
+};
+
 /* HW_INITIALIZATION_DATA */
 typedef struct _HW_INITIALIZATION_DATA {
     ULONG HwInitializationDataSize; ULONG AdapterInterfaceType;
@@ -489,6 +499,7 @@ static ULONG  g_dma_size = 0;     /* allocated size in bytes */
 static void scripts_patch_mmio_va(void); /* forward decl: patch SCRIPTS VA→PA */
 #endif
 static BOOLEAN g_scsi_init_phase = FALSE; /* TRUE during HwFindAdapter */
+static ULONG g_isa_dma_channel = 0xFFFFFFFF; /* ISA DMA channel from ConfigInfo; 0xFFFFFFFF = not ISA DMA */
 static volatile ULONG g_sp_call_id = 0;  /* last ScsiPort function called (debug) */
 static volatile ULONG g_port_read_count = 0;
 static volatile USHORT g_last_port_read = 0;
@@ -1694,16 +1705,105 @@ static ULONG __stdcall sp_SetBusDataByOffset(PVOID HwExt, ULONG BusDataType,
     return Len;
 }
 
-/* Additional ScsiPort stubs for SCSI miniport compatibility */
+/* ISA 8237 DMA controller support (for aha154x.sys and similar ISA SCSI) */
 static void __stdcall sp_FlushDma(PVOID HwExt) {
+    ULONG ch = g_isa_dma_channel;
     g_sp_call_id = 0xFD1;
-    VxD_Debug_Printf("SP:FlushDma\r\n");
+    if (ch == 0xFFFFFFFF || ch > 7) {
+        VxD_Debug_Printf("SP:FlushDma (no ISA DMA)\r\n");
+        return;
+    }
+    log_hex("SP:FlushDma ch=", ch, "\r\n");
+    /* Mask the DMA channel to stop transfers */
+    if (ch < 4) {
+        PORT_OUT_BYTE(0x0A, (UCHAR)((ch & 0x03) | 0x04));
+    } else {
+        PORT_OUT_BYTE(0xD4, (UCHAR)((ch & 0x03) | 0x04));
+    }
 }
 
 static void __stdcall sp_IoMapTransfer(PVOID HwExt, PSCSI_REQUEST_BLOCK Srb,
     ULONG PhysAddr, PULONG Length) {
+    ULONG ch = g_isa_dma_channel;
+    ULONG addr = PhysAddr;
+    ULONG count;
+    UCHAR mode;
+    USHORT mask_port, mode_port, ff_port;
+    USHORT addr_port, count_port;
+
     g_sp_call_id = 0xFD2;
-    VxD_Debug_Printf("SP:IoMapTransfer\r\n");
+    if (ch == 0xFFFFFFFF || ch > 7 || !Length || *Length == 0) {
+        VxD_Debug_Printf("SP:IoMapTransfer (no ISA DMA)\r\n");
+        return;
+    }
+    count = *Length;
+    log_hex("SP:IoMapTransfer ch=", ch, "");
+    log_hex(" addr=", addr, "");
+    log_hex(" len=", count, "\r\n");
+
+    /* Determine transfer direction from SRB flags.
+       8237 "write" = device to memory (SRB_FLAGS_DATA_IN)
+       8237 "read"  = memory to device (SRB_FLAGS_DATA_OUT) */
+    if (Srb && (Srb->SrbFlags & SRB_FLAGS_DATA_OUT)) {
+        mode = 0x48;  /* single mode, read (memory->device) */
+    } else {
+        mode = 0x44;  /* single mode, write (device->memory) */
+    }
+    mode |= (UCHAR)(ch & 0x03);
+
+    if (ch < 4) {
+        /* 8-bit DMA channels 0-3 */
+        mask_port  = 0x0A;
+        mode_port  = 0x0B;
+        ff_port    = 0x0C;
+        addr_port  = (USHORT)(ch * 2);
+        count_port = (USHORT)(ch * 2 + 1);
+
+        /* Mask channel */
+        PORT_OUT_BYTE(mask_port, (UCHAR)((ch & 0x03) | 0x04));
+        /* Clear flip-flop */
+        PORT_OUT_BYTE(ff_port, 0);
+        /* Set mode */
+        PORT_OUT_BYTE(mode_port, mode);
+        /* Address low, then high byte */
+        PORT_OUT_BYTE(addr_port, (UCHAR)(addr & 0xFF));
+        PORT_OUT_BYTE(addr_port, (UCHAR)((addr >> 8) & 0xFF));
+        /* Page register (bits 16-23) */
+        PORT_OUT_BYTE(g_dma_page_reg[ch], (UCHAR)((addr >> 16) & 0xFF));
+        /* Count low, then high byte (count - 1) */
+        count--;
+        PORT_OUT_BYTE(count_port, (UCHAR)(count & 0xFF));
+        PORT_OUT_BYTE(count_port, (UCHAR)((count >> 8) & 0xFF));
+        /* Unmask channel */
+        PORT_OUT_BYTE(mask_port, (UCHAR)(ch & 0x03));
+    } else {
+        /* 16-bit DMA channels 4-7: word-addressed */
+        ULONG word_addr = (addr >> 1) & 0xFFFF;
+        ULONG word_count = (count / 2) - 1;
+
+        mask_port  = 0xD4;
+        mode_port  = 0xD6;
+        ff_port    = 0xD8;
+        addr_port  = (USHORT)(0xC0 + (ch - 4) * 4);
+        count_port = (USHORT)(0xC0 + (ch - 4) * 4 + 2);
+
+        /* Mask channel */
+        PORT_OUT_BYTE(mask_port, (UCHAR)((ch & 0x03) | 0x04));
+        /* Clear flip-flop */
+        PORT_OUT_BYTE(ff_port, 0);
+        /* Set mode */
+        PORT_OUT_BYTE(mode_port, mode);
+        /* Word address low, then high byte */
+        PORT_OUT_BYTE(addr_port, (UCHAR)(word_addr & 0xFF));
+        PORT_OUT_BYTE(addr_port, (UCHAR)((word_addr >> 8) & 0xFF));
+        /* Page register (bits 16-23 of byte address, NOT shifted) */
+        PORT_OUT_BYTE(g_dma_page_reg[ch], (UCHAR)((addr >> 16) & 0xFF));
+        /* Word count low, then high byte */
+        PORT_OUT_BYTE(count_port, (UCHAR)(word_count & 0xFF));
+        PORT_OUT_BYTE(count_port, (UCHAR)((word_count >> 8) & 0xFF));
+        /* Unmask channel */
+        PORT_OUT_BYTE(mask_port, (UCHAR)(ch & 0x03));
+    }
 }
 
 static PVOID __stdcall sp_GetVirtualAddress(PVOID HwExt,
@@ -1959,11 +2059,10 @@ static ULONG __stdcall sp_Initialize(
         }
     } else {
         /* ============================================================
-         * ISA Bus path: IDE/ATAPI (existing proven path)
+         * ISA Bus path
          * ============================================================ */
-
-        /* Set up port remapping for IDE: miniport uses primary addresses
-           (0x1F0-0x1F7, 0x3F6) but hardware is on secondary (0x170-0x177, 0x376). */
+#if !NTMINI_USE_SCSI
+        /* IDE/ATAPI: hardcoded secondary IDE port remapping */
         g_num_port_remaps = 0;
         port_remap_add(0x1F0, 0x170, 8);   /* command registers */
         port_remap_add(0x3F6, 0x376, 1);   /* control register */
@@ -2004,6 +2103,24 @@ static ULONG __stdcall sp_Initialize(
         accessRanges[1].RangeStart.HighPart = 0;
         accessRanges[1].RangeLength = 1;
         accessRanges[1].RangeInMemory = FALSE;
+#else
+        /* Generic ISA SCSI path (aha154x.sys, etc.).
+           Don't hardcode I/O ports or IRQ; let HwFindAdapter probe the
+           hardware and populate ConfigInfo and AccessRanges itself. */
+        g_num_port_remaps = 0;
+
+        configInfo.SystemIoBusNumber = 0;
+        configInfo.AdapterInterfaceType = 1; /* Isa */
+        configInfo.InterruptMode = 1;        /* Latched */
+        configInfo.MaximumTransferLength = 0x10000;
+        configInfo.NumberOfPhysicalBreaks = 17;
+        configInfo.NumberOfBuses = 1;
+        configInfo.MaximumNumberOfTargets = 8;
+        configInfo.MapBuffers = TRUE;
+        /* AccessRanges left zeroed; HwFindAdapter will fill them via
+           ScsiPortGetDeviceBase after probing the adapter I/O ports. */
+        VxD_Debug_Printf("SP: ISA SCSI path (generic)\r\n");
+#endif
     }
 
     /* Log addresses for crash EIP correlation */
@@ -2127,6 +2244,13 @@ static ULONG __stdcall sp_Initialize(
 
             if (status == 0 /* SP_RETURN_FOUND */) {
                 found = TRUE;
+                /* Capture ISA DMA channel from ConfigInfo (set by HwFindAdapter) */
+                if (configInfo.AdapterInterfaceType == 1 &&
+                    configInfo.DmaChannel != 0 &&
+                    configInfo.DmaChannel <= 7) {
+                    g_isa_dma_channel = configInfo.DmaChannel;
+                    log_hex("SP: ISA DMA channel=", g_isa_dma_channel, "\r\n");
+                }
                 break;
             }
             if (!again) break;  /* miniport says don't call again */
