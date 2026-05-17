@@ -11,7 +11,7 @@
  #include "qemu/log.h"
  #include "qemu/module.h"
  #include "trace.h"
-@@ -445,10 +447,98 @@
+@@ -445,10 +447,99 @@
  static void lsi_reg_writeb(LSIState *s, int offset, uint8_t val);
  static void lsi_execute_script(LSIState *s);
  static void lsi_reselect(LSIState *s, lsi_request *p);
@@ -41,12 +41,9 @@
 +    unsigned int idx;
 +    vaddr va;
 +    hwaddr real_pa;
- 
++
 +    *translated = false;
 +    if (addr >= 0x40000000) {
-+        return addr;
-+    }
-+    if (!current_cpu) {
 +        return addr;
 +    }
 +    if (!lsi_fixup_cache_inited) {
@@ -64,7 +61,11 @@
 +        *translated = true;
 +        return lsi_fixup_cache_pa[idx] | (addr & 0xfff);
 +    }
-+
+ 
++    /* Cache miss: need CPU context for page table walk */
++    if (!current_cpu) {
++        return addr;
++    }
 +    va = (vaddr)addr + 0xC0000000;
 +    real_pa = cpu_get_phys_page_debug(current_cpu, va);
 +    if (real_pa == (hwaddr)-1) {
@@ -110,7 +111,7 @@
      if (s->dmode & LSI_DMODE_SIOM) {
          address_space_read(&s->pci_io_as, addr, MEMTXATTRS_UNSPECIFIED,
                             buf, len);
-@@ -460,6 +550,32 @@
+@@ -460,6 +551,32 @@
  static inline void lsi_mem_write(LSIState *s, dma_addr_t addr,
                                  const void *buf, dma_addr_t len)
  {
@@ -143,7 +144,7 @@
      if (s->dmode & LSI_DMODE_DIOM) {
          address_space_write(&s->pci_io_as, addr, MEMTXATTRS_UNSPECIFIED,
                              buf, len);
-@@ -471,8 +587,21 @@
+@@ -471,8 +588,21 @@
  static inline uint32_t read_dword(LSIState *s, uint32_t addr)
  {
      uint32_t buf;
@@ -166,7 +167,7 @@
      return cpu_to_le32(buf);
  }
  
-@@ -860,10 +989,15 @@
+@@ -860,10 +990,15 @@
      trace_lsi_do_command(s->dbc);
      if (s->dbc > 16)
          s->dbc = 16;
@@ -183,7 +184,7 @@
      id = (s->select_tag >> 8) & 0xf;
      dev = scsi_device_find(&s->bus, 0, id, s->current_lun);
      if (!dev) {
-@@ -912,7 +1046,7 @@
+@@ -912,7 +1047,7 @@
      s->dbc = 1;
      status = s->status;
      s->sfbr = status;
@@ -192,7 +193,7 @@
      lsi_set_phase(s, PHASE_MI);
      s->msg_action = LSI_MSG_ACTION_DISCONNECT;
      lsi_add_msg_byte(s, 0); /* COMMAND COMPLETE */
-@@ -929,7 +1063,7 @@
+@@ -929,7 +1064,7 @@
          len = s->dbc;
  
      if (len) {
@@ -201,7 +202,7 @@
          /* Linux drivers rely on the last byte being in the SIDL.  */
          s->sidl = s->msg[len - 1];
          s->msg_len -= len;
-@@ -964,7 +1098,7 @@
+@@ -964,7 +1099,7 @@
  static uint8_t lsi_get_msgbyte(LSIState *s)
  {
      uint8_t data;
@@ -210,7 +211,7 @@
      s->dnad++;
      s->dbc--;
      return data;
-@@ -1151,7 +1285,6 @@
+@@ -1151,7 +1286,6 @@
  
  static void lsi_execute_script(LSIState *s)
  {
@@ -218,7 +219,7 @@
      uint32_t insn;
      uint32_t addr, addr_high;
      int opcode;
-@@ -1218,7 +1351,13 @@
+@@ -1218,7 +1352,13 @@
  
              /* 32-bit Table indirect */
              offset = sextract32(addr, 0, 24);
@@ -233,7 +234,7 @@
              /* byte count is stored in bits 0:23 only */
              s->dbc = cpu_to_le32(buf[0]) & 0xffffff;
              s->rbc = s->dbc;
-@@ -1606,7 +1745,7 @@
+@@ -1606,7 +1746,7 @@
              n = (insn & 7);
              reg = (insn >> 16) & 0xff;
              if (insn & (1 << 24)) {
@@ -242,7 +243,7 @@
                  trace_lsi_execute_script_mm_load(reg, n, addr, *(int *)data);
                  for (i = 0; i < n; i++) {
                      lsi_reg_writeb(s, reg + i, data[i]);
-@@ -1616,7 +1755,7 @@
+@@ -1616,7 +1756,7 @@
                  for (i = 0; i < n; i++) {
                      data[i] = lsi_reg_readb(s, reg + i);
                  }
@@ -251,7 +252,7 @@
              }
          }
      }
-@@ -1895,7 +2034,11 @@
+@@ -1895,7 +2035,11 @@
          }
          break;
      case 0x01: /* SCNTL1 */
@@ -264,7 +265,7 @@
          if (val & LSI_SCNTL1_IARB) {
              qemu_log_mask(LOG_UNIMP,
                        "lsi_scsi: Immediate Arbritration not implemented\n");
-@@ -2053,12 +2196,14 @@
+@@ -2053,12 +2197,14 @@
          s->stime0 = val;
          break;
      case 0x49: /* STIME1 */

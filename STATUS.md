@@ -33,6 +33,14 @@ Five new modules implement a WDM compatibility layer for hosting NT5 driver stac
 - **PCIBUS**: PCI bus enumeration and configuration for IDE controllers. Scans the PCI bus, creates PDOs for discovered controllers, and implements BUS_INTERFACE_STANDARD for pciidex.sys config access.
 - **WDMBRIDGE**: Bridges the NT5 WDM IDE driver stack to Win9x IOS. Translates IOS I/O Requests into WDM IRPs with SCSI SRBs, dispatches them through the NT5 device stack, and translates completion status back to IOR format.
 
+## SCSI HDD (sym_hi.sys + LSI 53C810, via PA repo)
+
+- **SCSI HDD READ: WORKING** (9/9 sectors verified, READ(10) through ScsiPort shim)
+- **SCSI HDD WRITE+VERIFY: WORKING** (9/9 sectors, WRITE(10) + VERIFY(10))
+- LE merger tool available at `reference/tools/le_merge_objects.py` for single-object VxD output (required for Win98 VMM32 loading)
+- QEMU PA cache fix proven: `lsi_fixup_addr` cache-before-CPU-check eliminates spurious DMA stalls
+- Patched QEMU source and build scripts at `reference/qemu-patches/`
+
 ## Needs End-to-End Testing
 
 - IOR handler (NT4 path): fully implemented with CDB builders, queue management, and status translation, but not yet tested with live IOS traffic
