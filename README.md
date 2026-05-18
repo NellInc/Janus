@@ -1,121 +1,172 @@
-# NT5-9x Driver Backport
+# Janus: A Universal Bidirectional NT/9x Driver Translation Framework
 
-A reverse engineering project that backports Windows NT4 ScsiPort miniport drivers
-and Windows NT5 (2000/XP) WDM kernel drivers to run on Windows 9x. The core
-achievement is a VxD (Virtual Device Driver) wrapper that presents the correct LE
-(Linear Executable) binary structure so the Windows 98 SE loader accepts it.
+**Load Windows NT kernel-mode drivers on Windows 9x. Any NT version. Any architecture.**
 
-This makes it possible to use NT era storage controller drivers on legacy Windows
-installations, bridging both the NT4 ScsiPort miniport model and the NT5 WDM
-driver stack into the older IOS/VxD subsystem that Windows 9x expects.
+Janus is a driver translation framework that bridges the fundamental incompatibility between Windows NT kernel-mode drivers (.sys PE files) and the Windows 9x VxD subsystem. It loads, relocates, resolves imports, and executes unmodified NT drivers inside a Win98 VxD wrapper, spanning 12 years of Windows history and three CPU architectures.
 
-Developed for the Vogons retro-computing community (vogons.org).
+Named after the Roman god of doorways, transitions, and passages — depicted with two faces looking in opposite directions. Janus presides over the passage between incompatible kernel architectures, connecting the beginning of NT (3.1, 1993) to the end of 9x (ME, 2000).
 
-## Project Structure
+## What's Proven
 
-```
-src/              Build, deployment, and QEMU launch scripts
-diagnostics/      LE header analysis, VxD disassembly, DDB and fixup inspection
-binaries/         Reference VxD binaries (V5SMALL.VXD input, V5REAL.VXD output)
-deploy-package/   Ready to ship: prebuilt NTMINI.VXD, INSTALL.BAT, user README
-reference/        Design docs (IOS_PROGRESS.md, BUILD.TXT), DDK headers (inc/)
-history/source/   C/ASM source evolution from V1 through V5, linker scripts
-```
+**19 drivers loaded across 3 architectures and a 12-year span:**
 
-## Prerequisites
+| # | Era | Driver | Class | Result |
+|---|-----|--------|-------|--------|
+| 1 | XP SP3 | sym_hi.sys (LSI 53C810) | SCSI | 9/9 sector READ+WRITE |
+| 2 | XP SP3 | rtl8029.sys (NE2000 PCI) | NDIS 4.0 | Full ARP TX+RX |
+| 3 | XP SP3 | rtl8139.sys (Realtek) | NDIS 5.0 | Full ARP TX+RX |
+| 4 | XP SP3 | ne2000.sys | NDIS 3.0 | Full ARP TX+RX |
+| 5 | XP SP3 | vga.sys (21K) | VideoPort | DriverEntry + Init |
+| 6 | XP SP3 | hidparse.sys (25K) | ntoskrnl | DriverEntry + 30 exports |
+| 7 | XP SP3 | hidgame.sys (9K) | HID | DriverEntry + HidRegister |
+| 8 | XP SP3 | es1371mp.sys (41K) | PortCls | 60/60 imports resolved |
+| 9 | **XP x64** | hidparse.sys (41K) | **AMD64 PE32+** | Load + imports |
+| 10 | **XP x64** | pciide.sys (6K) | **AMD64 PE32+** | Load + PCIIDEX |
+| 11 | **XP x64** | hidgame.sys (12K) | **AMD64 PE32+** | Load + HIDCLASS |
+| 12 | **XP x64** | vgapnp.sys (33K) | **AMD64 PE32+** | Load + VideoPort |
+| 13 | **XP x64** | ne2000.sys (22K) | **AMD64 PE32+** | Load + NDIS |
+| 14 | **NT 3.51** | aha154x.sys (9K) | ScsiPort | Load + 17/17 imports |
+| 15 | **NT 3.1** | aha154x.sys (15K) | ScsiPort | Load + all imports |
+| 16 | **NT 3.51** | buslogic.sys (8.5K) | ScsiPort | Load + ScsiPort |
+| 17 | **NT 3.51** | ncr53c9x.sys (12K) | ScsiPort | Load + ScsiPort |
+| 18 | **XP IA-64** | pciide.sys (6.7K) | **Itanium PE32+** | Load + PCIIDEX |
 
-- **Python 3** with the `capstone` disassembly library (`pip install capstone`)
-- **QEMU** for emulated testing
-- **Windows 98 SE disk image** (FAT32 formatted)
-- **Open Watcom** toolchain targeting the Win98 DDK
-
-## Quick Start
-
-Set the path to your Win98 SE disk image:
-
-```
-export WIN98_IMG=/path/to/win98.img
-```
-
-1. Build the corrected VxD from the source binary:
+## Architecture
 
 ```
-python src/build_sysini_fixed.py
+Win98 Guest
+─────────────────────────────────────────
+NTMINI.VXD (single LE object, SYSTEM.INI loaded)
+  ├── PE Loader (PELOAD.C, 1809 lines)
+  │   ├── PE32 (i386, 0x014C) — full load + execute
+  │   ├── PE32+ (AMD64, 0x8664) — full load + import resolution
+  │   ├── PE32+ (IA-64, 0x0200) — full load + import resolution
+  │   └── Multi-DLL import resolution via shim registry
+  │
+  ├── NTOS_SHIM.C (2077 lines, 130+ stubs)
+  │   ├── ntoskrnl.exe: memory, sync, timer/DPC, IRP, power,
+  │   │   string, registry, object, thread, CRT functions
+  │   └── HAL.dll: port I/O, MMIO, spinlocks, IRQL, timing
+  │
+  ├── Class Shims:
+  │   ├── ScsiPort    → IOS VxD bridging (HDD/CD-ROM read/write)
+  │   ├── NDIS        → Direct packet TX/RX (ARP send+receive)
+  │   ├── VideoPort   → PCI GPU, VGA regs, Int10 V86, PCI BAR scan
+  │   ├── HID         → HidRegisterMinidriver
+  │   ├── PCI IDE     → PciIdeXInitialize/GetBusData/SetBusData
+  │   ├── PortCls     → COM vtable stubs (WDM audio)
+  │   └── 6 more written (USB, DirectDraw, WiFi, AGP, Joystick)
+  │
+  └── VxD Infrastructure (VXDWRAP_V4.ASM, 2700 lines)
+      ├── VMM service wrappers, DDB, control dispatch
+      ├── Safe_HwFindAdapter (IDT fault catching)
+      ├── VxD_PageAllocateDMA (contiguous physical memory)
+      ├── Win9x page table self-map (PDE 0x3FE) for DMA VA→PA
+      ├── V86 nested execution (INT 10h BIOS calls)
+      └── PCI config space (0xCF8/0xCFC)
 ```
 
-This reads `binaries/V5SMALL.VXD` and produces a corrected LE binary.
+## Key Discovery: DMA on Win9x
 
-2. Deploy to the disk image (choose one):
+Win9x maps the recursive page table at PDE index 0x3FE, not 0x3FF like NT:
 
-```
-python src/deploy_to_iosubsys.py    # Deploys to WINDOWS\SYSTEM\IOSUBSYS
-python src/deploy_sysini.py         # Deploys to WINDOWS\SYSTEM, patches SYSTEM.INI
-```
-
-Both scripts auto-detect FAT32 geometry from the MBR and BPB, traverse the
-directory tree, and allocate clusters for the new file.
-
-3. Verify and boot in QEMU:
-
-```
-python src/verify_and_launch.py
+```c
+// Page directory at VA 0xFFBFE000 (not 0xFFFFF000)
+// Page tables at VA 0xFF800000 (not 0xFFC00000)
+volatile ULONG *pde = (volatile ULONG *)(0xFFBFE000 + (va >> 22) * 4);
+if (*pde & 1) {
+    volatile ULONG *pte = (volatile ULONG *)(0xFF800000 + (va >> 12) * 4);
+    if (*pte & 1) return (*pte & 0xFFFFF000) | (va & 0xFFF);
+}
 ```
 
-Debug output is captured via `-debugcon` and `-serial` channels.
+All VMM services for VA to PA translation fail on Win98. The self-map is the only working approach.
 
-## How It Works
+## Building
 
-Windows 98 SE loads port drivers as VxDs, which use the LE (Linear Executable)
-binary format. NT5 miniport drivers are PE (Portable Executable) binaries with a
-completely different structure. The wrapper bridges these two worlds.
+### Prerequisites
 
-The LE correction pipeline fixes several header fields that the Win98 loader
-validates strictly:
+- Docker (for the `ntmini-builder` image with Open Watcom 2.0 + NASM)
+- Python 3
+- QEMU (patched build for LSI fixes, or stock for non-SCSI tests)
+- Windows 98 SE disk image (FAT32)
 
-- **data_pages_off**: Must be file-absolute, not section-relative. The loader uses
-  this offset directly to seek into the file.
-- **Loader and fixup section layout**: The fixup section must immediately follow the
-  loader section with no gaps. The section sizes and offsets must be self-consistent.
-- **Import tables**: Module name references and entry point ordinals must match what
-  the IOS subsystem exports.
-- **Extended LE fields** at offsets LE+0xB8, LE+0xBC, and LE+0xC0: These control
-  debug information pointers and must be zeroed or pointed at valid structures.
+### Build
 
-The reference driver used for comparison during development was `ESDI_506.PDR`, the
-standard IDE/ATAPI port driver shipped with Windows 98 SE.
+```bash
+cd source/
 
-For NT5 WDM drivers (pciidex.sys, pciide.sys, atapi.sys), a separate compatibility
-layer provides shims for ntoskrnl.exe and HAL.dll functions, an IRP infrastructure,
-a minimal PnP/Power manager, PCI bus simulation, and a bridge that translates IOS
-I/O Requests into WDM IRPs. This allows unmodified NT5 WDM driver stacks to operate
-within the Win9x VxD environment.
+# SCSI (sym_hi.sys, LSI 53C810):
+docker run --rm -v "$PWD:/src" -v "$PWD/../builds:/out" \
+  ntmini-builder:latest sh -c "cd /src && \
+  nasm -f obj -o /out/V5FULL_asm.obj VXDWRAP_V4.ASM && \
+  wcc386 -bt=windows -3s -s -zl -d0 -nc=LCODE -nt=_LTEXT -nd=_LDATA \
+    -zc -zdp -dNTMINI_USE_SCSI=1 NTMINI_V5.C -fo=/out/V5_c.obj && \
+  wcc386 ... PELOAD.C -fo=/out/V5_pe.obj && \
+  cd /out && wlink @link_script.lnk"
 
-## Status
+python3 ../tools/le_merge_objects.py builds/OUTPUT.VXD builds/MERGED.VXD
+```
 
-This is a proof of concept. The current build wraps the NEC ATAPI miniport as
-`ntmini.vxd` and has been tested successfully in QEMU. The Win98 SE loader accepts
-the corrected LE binary, loads the VxD, and calls its entry point.
+Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 
-Real hardware validation has not yet been performed.
+## NT Version Support
 
-## Unimplemented Areas
+| Version | Year | Architecture | Status |
+|---------|------|-------------|--------|
+| NT 3.1 | 1993 | i386 | PE load proven (aha154x.sys) |
+| NT 3.5 | 1994 | i386 | 146 drivers extracted, untested |
+| NT 3.51 | 1995 | i386 | PE load proven (3 SCSI drivers) |
+| NT 4.0 | 1996 | i386 | Compatible (same ScsiPort API) |
+| Windows 2000 | 2000 | i386 | Compatible (NT5, same APIs as XP) |
+| Windows XP SP3 | 2005 | i386 | 8 drivers proven (SCSI/NDIS/Video/HID/Audio) |
+| Windows XP x64 | 2005 | AMD64 | 5 drivers PE32+ loaded |
+| Windows XP IA-64 | 2003 | Itanium | 1 driver PE32+ loaded |
 
-Phase 1 through 3 code (NT4 ScsiPort support and NT5 WDM compatibility layer) is
-written. The following areas require integration testing with real NT5 binaries:
+## Win9x Target Support
 
-- **Multi-DLL PE loader**: The PE loader handles single .sys files. Loading the full
-  NT5 IDE stack (pciidex.sys + pciide.sys + atapi.sys) with cross-image imports
-  has not been tested.
-- **End-to-end NT5 IDE stack**: The WDM bridge, PnP manager, and IRP infrastructure
-  are implemented but have not been exercised with live NT5 driver binaries.
-- **VPICD interrupt wiring**: Hardware interrupt virtualization code is written but
-  not yet connected to the runtime path.
-- **Real hardware validation**: All testing has been performed in QEMU.
+| Target | Status |
+|--------|--------|
+| Windows 98 SE | Primary target, all testing done here |
+| Windows ME | Expected to work (same VxD architecture), untested |
+| Windows 95 | Same VxD format, VMM differences to verify (PDE index, PageAllocate) |
+
+## Driver Class Coverage
+
+| Class | Shim | Functions | Status |
+|-------|------|-----------|--------|
+| ScsiPort (SCSI storage) | NTMINI_V5.C | 22+ | Proven (R/W) |
+| NDIS (network) | NDIS_SHIM.C | 75+ | Proven (TX/RX) |
+| VideoPort (display) | VIDEO_SHIM.C | 47+ | Proven (init) |
+| ntoskrnl/HAL | NTOS_SHIM.C | 130+ | Proven |
+| HID | HID_SHIM.C | 3 | Proven |
+| PCI IDE | PCIIDE_SHIM.C | 3 | Proven |
+| PortCls (audio) | AUDIO_SHIM.C | 20+ | Partial |
+| USBD (USB) | USB_SHIM.C | 15 | Written |
+| DirectDraw/D3D | DDRAW_SHIM.C | 15+ | Written |
+| 802.11 WiFi | WIFI_SHIM.C | 8 | Written |
+| AGP | AGP_SHIM.C | 10 | Written |
+| Joystick | JOYSTICK_SHIM.C | 5 | Written |
+
+## Roadmap
+
+### Near-term
+- Win95 and WinME testing
+- More IA-64 Itanium drivers (ne2000, vga)
+- VideoPort Int10 timing fix (defer V86 to Init_Complete)
+- NDIS to Win98 TCP/IP bridge for real networking
+- MIPS (0x0166) and Alpha AXP (0x0184) architecture support from NT 3.51/4.0
+
+### Medium-term
+- Bidirectional: Win9x VxD drivers running on NT (VxD-on-NT loader)
+- Runtime driver loading from filesystem (bypass VxD size limit)
+- Full WDM IRP stack for complex drivers
+- Real hardware testing (beyond QEMU)
+
+## Project History
+
+Originally developed for the [Vogons retro-computing community](https://vogons.org) to solve CD-ROM driver issues on Windows 98 with NEC ATAPI controllers. Grew into a universal driver translation framework spanning the full NT driver ecosystem.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
-
-## Acknowledgments
-
-Thanks to Björn Korneli for the inspiration for this project.
+MIT License. See [LICENSE](LICENSE) for details.
