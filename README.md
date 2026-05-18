@@ -20,16 +20,16 @@ Named after the Roman god of doorways, transitions, and passages — depicted wi
 | 6 | XP SP3 | hidparse.sys (25K) | ntoskrnl | DriverEntry + 30 exports |
 | 7 | XP SP3 | hidgame.sys (9K) | HID | DriverEntry + HidRegister |
 | 8 | XP SP3 | es1371mp.sys (41K) | PortCls | 60/60 imports resolved |
-| 9 | **XP x64** | hidparse.sys (41K) | **AMD64 PE32+** | Load + imports |
-| 10 | **XP x64** | pciide.sys (6K) | **AMD64 PE32+** | Load + PCIIDEX |
-| 11 | **XP x64** | hidgame.sys (12K) | **AMD64 PE32+** | Load + HIDCLASS |
-| 12 | **XP x64** | vgapnp.sys (33K) | **AMD64 PE32+** | Load + VideoPort |
-| 13 | **XP x64** | ne2000.sys (22K) | **AMD64 PE32+** | Load + NDIS |
-| 14 | **NT 3.51** | aha154x.sys (9K) | ScsiPort | Load + 17/17 imports |
-| 15 | **NT 3.1** | aha154x.sys (15K) | ScsiPort | Load + all imports |
-| 16 | **NT 3.51** | buslogic.sys (8.5K) | ScsiPort | Load + ScsiPort |
-| 17 | **NT 3.51** | ncr53c9x.sys (12K) | ScsiPort | Load + ScsiPort |
-| 18 | **XP IA-64** | pciide.sys (6.7K) | **Itanium PE32+** | Load + PCIIDEX |
+| 9 | XP x64 | hidparse.sys (41K) | AMD64 PE32+ | Load + imports |
+| 10 | XP x64 | pciide.sys (6K) | AMD64 PE32+ | Load + PCIIDEX |
+| 11 | XP x64 | hidgame.sys (12K) | AMD64 PE32+ | Load + HIDCLASS |
+| 12 | XP x64 | vgapnp.sys (33K) | AMD64 PE32+ | Load + VideoPort |
+| 13 | XP x64 | ne2000.sys (22K) | AMD64 PE32+ | Load + NDIS |
+| 14 | NT 3.51 | aha154x.sys (9K) | ScsiPort | Load + 17/17 imports |
+| 15 | NT 3.1 | aha154x.sys (15K) | ScsiPort | Load + all imports |
+| 16 | NT 3.51 | buslogic.sys (8.5K) | ScsiPort | Load + ScsiPort |
+| 17 | NT 3.51 | ncr53c9x.sys (12K) | ScsiPort | Load + ScsiPort |
+| 18 | XP IA-64 | pciide.sys (6.7K) | Itanium PE32+ | Load + PCIIDEX |
 
 ## Architecture
 
@@ -166,6 +166,8 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 ## Project History
 
 Originally developed for the [Vogons retro-computing community](https://vogons.org) to solve CD-ROM driver issues on Windows 98 with NEC ATAPI controllers. Grew into a universal driver translation framework spanning the full NT driver ecosystem.
+
+Approximately 200 million tokens of Claude (Opus) compute over 3 months of development, March-May 2026.
 
 ## License
 
