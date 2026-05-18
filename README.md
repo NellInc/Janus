@@ -167,7 +167,7 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 
 Originally developed for the [Vogons retro-computing community](https://vogons.org) to solve CD-ROM driver issues on Windows 98 with NEC ATAPI controllers. Grew into a universal driver translation framework spanning the full NT driver ecosystem.
 
-Approximately 200 million tokens of Claude (Opus 4.6) compute over 3 months of development, March-May 2026.
+Approximately 200 million tokens of Claude (Opus 4.6) reverse engineering compute over 3 months of development, March-May 2026.
 
 ## License
 
