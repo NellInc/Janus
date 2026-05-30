@@ -1,0 +1,16 @@
+format windows vxd dynamic
+name V5IA64NE2K.VXD
+file V5FULL_asm.obj
+file V5NTOS_c.obj
+file V5FULL_pe.obj
+file NTOS_SHIM.obj
+file NDIS_SHIM.obj
+export NTMINI_DDB
+option quiet
+disable 1014
+order
+    clname LCODE
+        segment _LTEXT
+        segment _LDATA
+        segment CONST
+        segment CONST2

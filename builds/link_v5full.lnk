@@ -1,0 +1,17 @@
+format windows vxd dynamic
+name V5SMALL.VXD
+file V5FULL_asm.obj
+file V5FULL_c.obj
+file V5FULL_pe.obj
+export NTMINI_DDB
+option quiet
+order
+    clname LCODE
+        segment _LTEXT
+        segment _LDATA
+        segment _TEXT
+        segment _DATA
+        segment _BSS
+        segment CONST
+        segment CONST2
+        segment _TLS

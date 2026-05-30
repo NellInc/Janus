@@ -17,7 +17,11 @@ binaries/
 *.vxd
 *.sys
 *.SYS
-# copyright reference material
+*.PDR
+*.pdr
+*.mpd
+*.MPD
+# copyright reference material (incl. vendor DDK headers, scanned books)
 *.pdf
 reference/
 # local harness / environment config (may contain secrets)
@@ -27,5 +31,8 @@ reference/
 /x
 # Embedded third-party driver binaries (byte-array headers) embed proprietary vendor
 # .sys/.vxd files. Keep them OUT of public mirrors; users regenerate them from their own
-# licensed driver copies via tools/embed_sys.py. Uncomment to enforce:
-# source/*_EMBEDDED.H
+# licensed driver copies via tools/embed_sys.py.
+source/*_EMBEDDED.H
+
+# Vogons forum-post draft — not part of the published framework
+VOGONS_POST_DRAFT.md
