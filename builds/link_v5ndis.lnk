@@ -1,0 +1,15 @@
+format windows vxd dynamic
+name V5NDIS.VXD
+file V5FULL_asm.obj
+file V5NDIS_c.obj
+file V5FULL_pe.obj
+file NDIS_SHIM.obj
+export NTMINI_DDB
+option quiet
+disable 1014
+order
+    clname LCODE
+        segment _LTEXT
+        segment _LDATA
+        segment CONST
+        segment CONST2

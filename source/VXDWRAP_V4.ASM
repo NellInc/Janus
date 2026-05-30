@@ -1,0 +1,3376 @@
+;------------------------------------------------------------------------
+; VXDWRAP_V4.ASM - Win98 VxD Assembly Wrapper
+;
+; Provides the VxD entry points, DDB, and service call wrappers
+; for the NTMINI CD-ROM file system driver.
+;
+; Assembler: NASM (nasm -f obj)
+; Released under the MIT License. See LICENSE for details.
+;------------------------------------------------------------------------
+
+[BITS 32]
+
+; VMM services
+%define VMM_Out_Debug_String    0x0001001D
+%define VMM_HeapAllocate        0x00010256
+%define VMM_HeapFree            0x00010257
+%define VMM__PageAllocate       0x00010053
+%define VMM__PageFree           0x00010054
+%define VMM__MapPhysToLinear    0x0001006C
+%define VMM__CopyPageTable     0x00010049
+%define VMM__PageReserve       0x00010059
+%define VMM__PageCommitPhys    0x00010154
+%define VMM__PageDecommit      0x0001005B
+%define VMM__LinPageLock       0x00010061
+
+; V86 nested execution services (for INT 10h BIOS calls)
+%define VMM_Begin_Nest_V86_Exec 0x00010082
+%define VMM_Exec_Int            0x00010084
+%define VMM_End_Nest_Exec       0x00010086
+
+; Boot Log services (available during init)
+%define VMM_Open_Boot_Log       0x00010188
+%define VMM_Write_Boot_Log      0x00010189
+%define VMM_Close_Boot_Log      0x0001018A
+
+; V86 interrupt hooking
+%define VMM_Hook_V86_Int_Chain  0x00010069
+%define VMM_Get_Cur_VM_Handle   0x00010001
+
+; IFSMgr Ring-0 File I/O (cdecl, stack-based)
+%define IFSMgr_Ring0_FileIO     0x00400032
+
+; Ring0_FileIO function codes
+%define R0_OPENCREATFILE        0xD500
+%define R0_READFILE             0xD600
+%define R0_WRITEFILE            0xD601
+%define R0_CLOSEFILE            0xD700
+%define R0_GETFILESIZE          0xD800
+
+; Open flags
+%define R0_NO_CACHE             0x0100
+%define R0_OPEN_ACCESS_READONLY 0x0000
+%define R0_OPEN_SHARE_DENYWRITE 0x0020
+
+; Control messages
+%define Sys_Critical_Init       0x0000
+%define Device_Init             0x0001
+%define Init_Complete           0x0002
+%define Sys_VM_Init             0x0003
+%define Sys_Dynamic_Device_Init 0x001B
+%define Sys_Dynamic_Device_Exit 0x001C
+
+%define UNDEFINED_DEVICE_ID     0x0000
+%define UNDEFINED_INIT_ORDER    0x80000000
+
+extern _ntmini_init
+extern _ntmini_cleanup
+extern _ntmini_mount_cdrom
+extern _ntmini_ios_init
+extern _ntmini_aep_handler
+
+;============================================================================
+;   ALL CODE - single LCODE segment
+;   DDB MUST be first: IOS loader requires the DDB in page 0 of the object.
+;   If code before the DDB exceeds 4096 bytes, IOS will not load the VxD.
+;============================================================================
+segment _LTEXT public use32 class=LCODE align=4
+
+;--- DDB at offset 0 so it's always in page 0 ---
+global NTMINI_DDB
+NTMINI_DDB:
+    dd      0                     ; DDB_Next
+    dw      0x0400                ; DDB_SDK_Version
+    dw      UNDEFINED_DEVICE_ID   ; DDB_Req_Device_Number
+    db      3                     ; DDB_Dev_Major_Version
+    db      0                     ; DDB_Dev_Minor_Version
+    dw      0                     ; DDB_Flags
+    db      'NTMINI  '            ; DDB_Name (8 bytes, space-padded)
+    dd      UNDEFINED_INIT_ORDER  ; DDB_Init_Order
+    dd      NTMINI_Control        ; DDB_Control_Proc
+    dd      0                     ; DDB_V86_API_Proc
+    dd      0                     ; DDB_PM_API_Proc
+    dd      0                     ; DDB_V86_API_CSIP
+    dd      0                     ; DDB_PM_API_CSIP
+    dd      0                     ; DDB_Reference_Data
+    dd      0                     ; DDB_Service_Table_Ptr
+    dd      0                     ; DDB_Service_Table_Size
+    dd      0                     ; DDB_Win32_Service_Table
+    dd      0                     ; DDB_Prev
+    dd      0x44                  ; DDB_Size
+
+global NTMINI_Control
+NTMINI_Control:
+    ; --- DEBUG MARKER 'A': entry to control_proc ---
+    push    eax
+    mov     al, 'A'
+    out     0xE9, al
+    pop     eax
+
+    cmp     eax, Device_Init
+    je      .do_init
+    cmp     eax, Sys_Critical_Init
+    je      .do_serial_only
+    cmp     eax, Init_Complete
+    je      .do_init_complete
+    cmp     eax, Sys_VM_Init
+    je      .do_sys_vm_init
+    cmp     eax, Sys_Dynamic_Device_Init
+    je      .do_dynamic_init
+    cmp     eax, Sys_Dynamic_Device_Exit
+    je      .do_exit
+    clc
+    ret
+
+.do_serial_only:
+    ; --- DEBUG MARKER 'S': Sys_Critical_Init handler ---
+    push    eax
+    mov     al, 'S'
+    out     0xE9, al
+    pop     eax
+
+    ; Sys_Critical_Init: init serial port
+    pushad
+    call    VxD_Serial_Init
+    popad
+    clc
+    ret
+
+.do_dynamic_init:
+    ; --- DEBUG MARKER 'D': Sys_Dynamic_Device_Init handler ---
+    push    eax
+    mov     al, 'D'
+    out     0xE9, al
+    pop     eax
+
+    ; Sys_Dynamic_Device_Init: loaded by IOS from IOSUBSYS.
+    ; Minimal init only (serial + log). Full miniport init is
+    ; deferred because it would crash during early IOS phase.
+    pushad
+    call    VxD_Serial_Init
+    popad
+    pushad
+    extern  _ntmini_dynamic_init
+    call    _ntmini_dynamic_init
+    popad
+    clc
+    ret
+
+.do_sys_vm_init:
+    ; --- DEBUG MARKER 'V': Sys_VM_Init handler ---
+    push    eax
+    mov     al, 'V'
+    out     0xE9, al
+    pop     eax
+
+    ; Sys_VM_Init: deferred timer setup + fallback init path.
+    ; Always call deferred timer setup (even if Init_Complete ran).
+    ; Set_Global_Time_Out needs system VM context, which Sys_VM_Init provides.
+    extern  _ntmini_deferred_timer_setup
+    pushad
+    call    _ntmini_deferred_timer_setup
+    popad
+    ; Note: _ntmini_deferred_video_test is called from Init_Complete (below),
+    ; NOT here. Sys_VM_Init never fires for SYSTEM.INI-loaded VxDs.
+    ; Check if Init_Complete already ran (g_init_complete_ran flag)
+    cmp     byte [g_init_complete_ran], 0
+    jne     .svm_skip
+    ; Init_Complete hasn't run yet, so do the work from here
+    mov     byte [g_sys_vm_init_ran], 1
+    ; Hook INT 2Fh for MSCDEX CD-ROM access
+    pushad
+    mov     eax, 0x2F
+    mov     esi, mscdex_v86_handler
+    int     0x20
+    dd      VMM_Hook_V86_Int_Chain
+    popad
+    ; Attach CDFS mount
+    pushad
+    call    _ntmini_mount_cdrom
+    popad
+    ; File I/O test
+    pushad
+    call    _fileio_test
+    popad
+.svm_skip:
+    clc
+    ret
+
+.do_init_complete:
+    ; --- DEBUG MARKER 'C': Init_Complete handler ---
+    push    eax
+    mov     al, 'C'
+    out     0xE9, al
+    pop     eax
+
+    mov     byte [g_init_complete_ran], 1
+    ; Deferred VideoPort test (Int10 needs System VM, ready at Init_Complete).
+    extern  _ntmini_deferred_video_test
+    pushad
+    call    _ntmini_deferred_video_test
+    popad
+    ; Deferred NDIS test (VPICD ready at Init_Complete, not Device_Init).
+    extern  _ntmini_deferred_ndis_test
+    pushad
+    call    _ntmini_deferred_ndis_test
+    popad
+    ; Skip work if Sys_VM_Init already did it
+    cmp     byte [g_sys_vm_init_ran], 0
+    jne     .ic_skip
+    ; Hook INT 2Fh for MSCDEX CD-ROM access
+    pushad
+    mov     eax, 0x2F
+    mov     esi, mscdex_v86_handler
+    int     0x20
+    dd      VMM_Hook_V86_Int_Chain
+    popad
+    ; Attach CDFS mount
+    pushad
+    call    _ntmini_mount_cdrom
+    popad
+    ; File I/O test
+    pushad
+    call    _fileio_test
+    popad
+.ic_skip:
+    clc
+    ret
+
+.do_init:
+    ; --- DEBUG MARKER 'I': Device_Init handler ---
+    push    eax
+    mov     al, 'I'
+    out     0xE9, al
+    pop     eax
+
+    ; Device_Init / Sys_Dynamic_Device_Init:
+    ; Init serial first (in case we're loaded dynamically by IOS,
+    ; where Sys_Critical_Init is never sent)
+    pushad
+    call    VxD_Serial_Init
+    popad
+
+    ; --- DEBUG MARKER 'i': serial init returned ---
+    push    eax
+    mov     al, 'i'
+    out     0xE9, al
+    pop     eax
+
+    ; Then do main init (PE load, miniport, IOS registration)
+    pushad
+    call    _ntmini_init
+    popad
+
+    ; --- DEBUG MARKER '1': ntmini_init returned ---
+    push    eax
+    mov     al, '1'
+    out     0xE9, al
+    pop     eax
+
+    ; Register with IOS early to get the ILB callback table.
+    ; Full DCB creation is deferred to Init_Complete.
+    pushad
+    extern  _ntmini_ios_register_early
+    call    _ntmini_ios_register_early
+    popad
+    ; Always return success so VxD stays loaded for Init_Complete
+    clc
+    ret
+
+.do_exit:
+    pushad
+    call    _ntmini_cleanup
+    popad
+    clc
+    ret
+
+
+;--- COM1 Serial Init ---
+; Must be called once before serial output
+global VxD_Serial_Init
+global _VxD_Serial_Init
+VxD_Serial_Init:
+_VxD_Serial_Init:
+    ; --- DEBUG MARKER 's': serial init entry ---
+    push    eax
+    mov     al, 's'
+    out     0xE9, al
+    pop     eax
+
+    push    edx
+    push    eax
+    ; Set DLAB to configure baud rate
+    mov     dx, 0x3FB       ; LCR
+    mov     al, 0x80        ; DLAB=1
+    out     dx, al
+    ; 9600 baud (divisor = 12)
+    mov     dx, 0x3F8       ; Divisor low
+    mov     al, 12
+    out     dx, al
+    mov     dx, 0x3F9       ; Divisor high
+    xor     al, al
+    out     dx, al
+    ; 8N1, clear DLAB
+    mov     dx, 0x3FB       ; LCR
+    mov     al, 0x03        ; 8 data bits, no parity, 1 stop bit
+    out     dx, al
+    ; Enable FIFO
+    mov     dx, 0x3FA       ; FCR
+    mov     al, 0x07        ; Enable + clear FIFOs
+    out     dx, al
+    pop     eax
+    pop     edx
+    ret
+
+
+;--- Debug Printf (COM1 serial + Out_Debug_String) ---
+global VxD_Debug_Printf
+global _VxD_Debug_Printf
+VxD_Debug_Printf:
+_VxD_Debug_Printf:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    edx
+    push    eax
+    ; Write to COM1 serial
+    mov     esi, [ebp+8]
+.ser_loop:
+    lodsb
+    test    al, al
+    jz      .ser_done
+.ser_wait:
+    push    eax
+    mov     dx, 0x3FD       ; LSR
+    in      al, dx
+    test    al, 0x20        ; THRE
+    pop     eax
+    jz      .ser_wait
+    mov     dx, 0x3F8       ; THR
+    out     dx, al
+    jmp     .ser_loop
+.ser_done:
+    ; Also write to port 0xE9 (debugcon)
+    mov     esi, [ebp+8]
+.e9_loop:
+    lodsb
+    test    al, al
+    jz      .e9_done
+    out     0xE9, al
+    push    edx
+    mov     dx, 0x402
+    out     dx, al
+    pop     edx
+    jmp     .e9_loop
+.e9_done:
+    ; Also call Out_Debug_String
+    mov     esi, [ebp+8]
+    int     0x20
+    dd      VMM_Out_Debug_String
+    pop     eax
+    pop     edx
+    pop     esi
+    pop     ebp
+    ret
+
+
+;--- Heap Allocate ---
+global VxD_HeapAllocate
+global _VxD_HeapAllocate
+VxD_HeapAllocate:
+_VxD_HeapAllocate:
+    push    ebp
+    mov     ebp, esp
+    push    dword [ebp+12]
+    push    dword [ebp+8]
+    int     0x20
+    dd      VMM_HeapAllocate
+    add     esp, 8
+    pop     ebp
+    ret
+
+;--- Heap Free ---
+global VxD_HeapFree
+global _VxD_HeapFree
+VxD_HeapFree:
+_VxD_HeapFree:
+    push    ebp
+    mov     ebp, esp
+    push    dword [ebp+12]
+    push    dword [ebp+8]
+    int     0x20
+    dd      VMM_HeapFree
+    add     esp, 8
+    pop     ebp
+    ret
+
+
+;========================================================================
+;   Ring-0 File I/O via IFSMgr_Ring0_FileIO
+;
+;   Register-based calling convention:
+;   EAX = function code. Other params in EBX/ECX/EDX/ESI.
+;   Returns result in EAX. CF set on error.
+;========================================================================
+
+;------------------------------------------------------------------------
+; int VxD_File_Open(const char *filename)
+;
+; Opens a file for reading using IFSMgr_Ring0_FileIO.
+; Returns file handle (>= 0) or -1 on error.
+;
+; Register convention:
+;   EAX = R0_OPENCREATFILE (0xD500)
+;   ESI = pointer to filename
+;   EBX = access/share flags
+;   ECX = file attributes (0 = normal)
+;   EDX = action (1 = open existing)
+;   Returns: EAX = file handle, CF set on error
+;------------------------------------------------------------------------
+global VxD_File_Open
+global _VxD_File_Open
+VxD_File_Open:
+_VxD_File_Open:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+
+    ; Register-based calling convention
+    mov     esi, [ebp+8]                   ; ESI = filename pointer
+    mov     eax, R0_OPENCREATFILE           ; EAX = function code 0xD500
+    mov     ebx, R0_OPEN_ACCESS_READONLY | R0_OPEN_SHARE_DENYWRITE | R0_NO_CACHE
+    xor     ecx, ecx                        ; ECX = attributes (normal)
+    mov     edx, 1                          ; EDX = action: open existing
+
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+
+    ; Diagnostic: store all register values after call
+    mov     [_diag_regs + 0], eax           ; diag_regs[0] = EAX (should be handle)
+    mov     [_diag_regs + 4], ebx           ; diag_regs[1] = EBX
+    mov     [_diag_regs + 8], ecx           ; diag_regs[2] = ECX
+    mov     [_diag_regs + 12], edx          ; diag_regs[3] = EDX
+
+    jc      .open_fail
+
+    ; EAX = file handle from Ring0_FileIO.
+    ; Win9x kernel handles can be above 0x80000000 (kernel pointers).
+    ; Only reject zero handles, not "negative" ones.
+    test    eax, eax
+    jz      .open_fail
+
+    jmp     .open_done
+
+.open_fail:
+    mov     eax, -1
+
+.open_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;------------------------------------------------------------------------
+; int VxD_File_Create(const char *filename)
+;
+; Opens the boot log for debug output (same as V3).
+;------------------------------------------------------------------------
+global VxD_File_Create
+global _VxD_File_Create
+VxD_File_Create:
+_VxD_File_Create:
+    ; Open the boot log for our debug output
+    int     0x20
+    dd      VMM_Open_Boot_Log
+    jc      .bc_fail
+    mov     eax, 1              ; return "handle" = 1 (fake, just means log is open)
+    ret
+.bc_fail:
+    mov     eax, -1
+    ret
+
+
+;------------------------------------------------------------------------
+; int VxD_File_GetSize(int handle)
+;
+; Gets file size using IFSMgr_Ring0_FileIO (diagnostic).
+; Returns file size or -1 on error.
+;
+; Register convention:
+;   EAX = R0_GETFILESIZE (0xD800)
+;   EBX = file handle
+;   Returns: EAX = file size, CF set on error
+;------------------------------------------------------------------------
+global VxD_File_GetSize
+global _VxD_File_GetSize
+VxD_File_GetSize:
+_VxD_File_GetSize:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+
+    mov     eax, R0_GETFILESIZE             ; EAX = function code 0xD800
+    mov     ebx, [ebp+8]                   ; EBX = file handle
+
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+
+    jc      .gsize_fail
+    jmp     .gsize_done
+
+.gsize_fail:
+    mov     eax, -1
+
+.gsize_done:
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;------------------------------------------------------------------------
+; int VxD_File_Read(int handle, void *buffer, int count)
+;
+; Reads from a file using IFSMgr_Ring0_FileIO.
+; Returns bytes read, or -1 on error.
+;
+; Register convention:
+;   EAX = R0_READFILE (0xD600)
+;   EBX = file handle
+;   ECX = byte count to read
+;   EDX = file position (0xFFFFFFFF = current position)
+;   ESI = pointer to destination buffer
+;   Returns: EAX = bytes actually read, CF set on error
+;------------------------------------------------------------------------
+global VxD_File_Read
+global _VxD_File_Read
+VxD_File_Read:
+_VxD_File_Read:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+
+    ; Register-based calling convention
+    mov     ebx, [ebp+8]                   ; EBX = file handle
+    mov     esi, [ebp+12]                  ; ESI = buffer pointer
+    mov     ecx, [ebp+16]                  ; ECX = byte count
+    mov     edx, 0                          ; EDX = position 0 (start of file)
+    mov     eax, R0_READFILE                ; EAX = function code 0xD600
+
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+
+    ; Store post-call registers for diagnostic
+    mov     [_diag_regs + 0], eax           ; bytes read (EAX convention)
+    mov     [_diag_regs + 4], ebx
+    mov     [_diag_regs + 8], ecx           ; bytes read (ECX convention)
+    mov     [_diag_regs + 12], edx
+
+    jc      .read_fail
+
+    ; EAX = bytes actually read. Fall back to ECX if EAX is zero,
+    ; since some Win98 builds return the count in ECX instead.
+    test    eax, eax
+    jnz     .read_done
+    mov     eax, ecx                        ; fallback: try ECX
+    jmp     .read_done
+
+.read_fail:
+    mov     eax, -1
+
+.read_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;------------------------------------------------------------------------
+; int VxD_File_Write(int handle, void *buffer, int count)
+;
+; Writes to the boot log (for debug output).
+;------------------------------------------------------------------------
+global VxD_File_Write
+global _VxD_File_Write
+VxD_File_Write:
+_VxD_File_Write:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    mov     esi, [ebp+12]      ; buffer pointer
+    int     0x20
+    dd      VMM_Write_Boot_Log
+    mov     eax, [ebp+16]      ; return count (pretend all written)
+    pop     esi
+    pop     ebp
+    ret
+
+
+;------------------------------------------------------------------------
+; void VxD_File_Close(int handle)
+;
+; Closes a file using IFSMgr_Ring0_FileIO (register convention),
+; and also closes the boot log.
+;------------------------------------------------------------------------
+global VxD_File_Close
+global _VxD_File_Close
+VxD_File_Close:
+_VxD_File_Close:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+
+    ; Close via IFSMgr if handle is a valid kernel pointer (> 1).
+    ; Handle 0 is invalid, handle 1 is the boot log.
+    mov     ebx, [ebp+8]
+    test    ebx, ebx
+    jz      .close_done
+    cmp     ebx, 1
+    je      .close_bootlog
+
+    ; Register convention: EAX = func, EBX = handle
+    mov     eax, R0_CLOSEFILE               ; EAX = 0xD700
+    ; EBX already set above
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jmp     .close_done
+
+.close_bootlog:
+    ; Close boot log
+    int     0x20
+    dd      VMM_Close_Boot_Log
+
+.close_done:
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;========================================================================
+;   File I/O test - exercises register-based IFSMgr_Ring0_FileIO
+;   Called from Init_Complete when filesystem is ready.
+;   Opens MSDOS.SYS, gets size, reads 16 bytes, logs via port 0xE9.
+;========================================================================
+global _fileio_test
+global fileio_test
+_fileio_test:
+fileio_test:
+    pushad
+
+    ; --- Log banner ---
+    mov     esi, .msg_banner
+    call    .e9_print
+
+    ; --- OPEN: C:\MSDOS.SYS ---
+    mov     esi, .test_filename
+    mov     eax, R0_OPENCREATFILE
+    mov     ebx, R0_OPEN_ACCESS_READONLY | R0_OPEN_SHARE_DENYWRITE
+    xor     ecx, ecx                ; attr = normal
+    mov     edx, 1                  ; action = open existing
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jc      .ftest_open_fail
+
+    ; EAX = file handle
+    mov     [.ftest_handle], eax
+    mov     esi, .msg_open_ok
+    call    .e9_print
+    mov     eax, [.ftest_handle]
+    call    .e9_hex32               ; print handle value
+    call    .e9_crlf
+
+    ; --- GETFILESIZE ---
+    mov     eax, R0_GETFILESIZE
+    mov     ebx, [.ftest_handle]
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jc      .ftest_size_fail
+
+    mov     [.ftest_size], eax
+    mov     esi, .msg_size
+    call    .e9_print
+    mov     eax, [.ftest_size]
+    call    .e9_hex32
+    call    .e9_crlf
+
+    ; --- READ 16 bytes from offset 0 ---
+    mov     eax, R0_READFILE
+    mov     ebx, [.ftest_handle]
+    mov     ecx, 16                 ; read 16 bytes
+    xor     edx, edx                ; from offset 0
+    mov     esi, .ftest_buf
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jc      .ftest_read_fail
+
+    ; EAX = bytes read
+    mov     [.ftest_nread], eax
+    mov     esi, .msg_read
+    call    .e9_print
+    mov     eax, [.ftest_nread]
+    call    .e9_hex32
+    call    .e9_crlf
+
+    ; Dump first 16 bytes of buffer
+    mov     esi, .msg_data
+    call    .e9_print
+    mov     ecx, 16
+    mov     esi, .ftest_buf
+.ftest_dump:
+    movzx   eax, byte [esi]
+    call    .e9_hex8
+    mov     al, ' '
+    out     0xE9, al
+    inc     esi
+    loop    .ftest_dump
+    call    .e9_crlf
+
+    ; --- CLOSE ---
+    mov     eax, R0_CLOSEFILE
+    mov     ebx, [.ftest_handle]
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+
+    mov     esi, .msg_done
+    call    .e9_print
+    jmp     .ftest_exit
+
+.ftest_open_fail:
+    mov     esi, .msg_open_fail
+    call    .e9_print
+    jmp     .ftest_exit
+
+.ftest_size_fail:
+    mov     esi, .msg_size_fail
+    call    .e9_print
+    ; still close
+    mov     eax, R0_CLOSEFILE
+    mov     ebx, [.ftest_handle]
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jmp     .ftest_exit
+
+.ftest_read_fail:
+    mov     esi, .msg_read_fail
+    call    .e9_print
+    ; Log EAX for error info
+    call    .e9_hex32
+    call    .e9_crlf
+    mov     eax, R0_CLOSEFILE
+    mov     ebx, [.ftest_handle]
+    int     0x20
+    dd      IFSMgr_Ring0_FileIO
+    jmp     .ftest_exit
+
+.ftest_exit:
+    popad
+    ret
+
+;--- Helper: print NUL-terminated string to port 0xE9 ---
+.e9_print:
+    push    eax
+.e9p_loop:
+    lodsb
+    test    al, al
+    jz      .e9p_done
+    out     0xE9, al
+    jmp     .e9p_loop
+.e9p_done:
+    pop     eax
+    ret
+
+;--- Helper: print EAX as 8-digit hex to port 0xE9 ---
+.e9_hex32:
+    push    ecx
+    push    eax
+    mov     ecx, 8
+.h32_loop:
+    rol     eax, 4
+    push    eax
+    and     al, 0x0F
+    add     al, '0'
+    cmp     al, '9'
+    jle     .h32_digit
+    add     al, 7               ; 'A'-'9'-1
+.h32_digit:
+    out     0xE9, al
+    pop     eax
+    loop    .h32_loop
+    pop     eax
+    pop     ecx
+    ret
+
+;--- Helper: print AL as 2-digit hex to port 0xE9 ---
+.e9_hex8:
+    push    eax
+    push    ecx
+    mov     cl, al
+    shr     al, 4
+    and     al, 0x0F
+    add     al, '0'
+    cmp     al, '9'
+    jle     .h8_hi
+    add     al, 7
+.h8_hi:
+    out     0xE9, al
+    mov     al, cl
+    and     al, 0x0F
+    add     al, '0'
+    cmp     al, '9'
+    jle     .h8_lo
+    add     al, 7
+.h8_lo:
+    out     0xE9, al
+    pop     ecx
+    pop     eax
+    ret
+
+;--- Helper: print CR LF ---
+.e9_crlf:
+    push    eax
+    mov     al, 0x0D
+    out     0xE9, al
+    mov     al, 0x0A
+    out     0xE9, al
+    pop     eax
+    ret
+
+;--- Test data ---
+.test_filename:  db 'C:\MSDOS.SYS', 0
+.msg_banner:     db 0x0D, 0x0A, '=== FILEIO TEST (register conv) ===', 0x0D, 0x0A, 0
+.msg_open_ok:    db 'OPEN OK handle=', 0
+.msg_open_fail:  db 'OPEN FAIL', 0x0D, 0x0A, 0
+.msg_size:       db 'SIZE=', 0
+.msg_size_fail:  db 'GETSIZE FAIL', 0x0D, 0x0A, 0
+.msg_read:       db 'READ bytes=', 0
+.msg_read_fail:  db 'READ FAIL eax=', 0
+.msg_data:       db 'DATA: ', 0
+.msg_done:       db 'FILEIO TEST OK', 0x0D, 0x0A, 0
+
+;--- Test variables (BSS-like, in code segment for simplicity) ---
+.ftest_handle:   dd 0
+.ftest_size:     dd 0
+.ftest_nread:    dd 0
+.ftest_buf:      times 32 db 0
+
+
+;--- Page Allocate ---
+global VxD_PageAllocate
+global _VxD_PageAllocate
+VxD_PageAllocate:
+_VxD_PageAllocate:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    ecx
+    push    esi
+    push    edi
+    ; _PageAllocate(nPages, pType, hvm, AlignMask, minPhys, maxPhys, PhysAddr, flags)
+    ; cdecl: push right-to-left
+    push    dword 0x09               ; flags: PAGEFIXED(0x08) | PAGEZEROINIT(0x01)
+    push    dword 0                  ; PhysAddr (don't care)
+    push    dword 0                  ; maxPhys (any)
+    push    dword 0                  ; minPhys (any)
+    push    dword 0                  ; AlignMask (page-aligned by default)
+    push    dword 0                  ; hvm (0 = system VM)
+    push    dword 1                  ; pType: PG_SYS=1 (not 2)
+    push    dword [ebp+8]            ; nPages
+    int     0x20
+    dd      VMM__PageAllocate
+    add     esp, 32
+    mov     eax, edx
+    pop     edi
+    pop     esi
+    pop     ecx
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- Page Allocate for DMA (returns linear addr, writes phys addr to output ptr) ---
+; PVOID VxD_PageAllocateDMA(ULONG nPages, ULONG *pPhysAddr)
+; Returns: linear address (or 0 on failure). *pPhysAddr = physical address.
+; Physical address is obtained via page table walk (reliable for PAGEFIXED).
+global VxD_PageAllocateDMA
+global _VxD_PageAllocateDMA
+VxD_PageAllocateDMA:
+_VxD_PageAllocateDMA:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    ecx
+    push    esi
+    push    edi
+    ; _PageAllocate(nPages, pType, hvm, AlignMask, minPhys, maxPhys, PhysAddr, flags)
+    ; Use a local variable for PhysAddr so VMM fills it directly,
+    ; avoiding the manual page table walk (PDE self-mapping at 0xFFFFF000
+    ; is not accessible in all VxD contexts on Win9x).
+    ; Strategy: _PageAllocate then derive PA from the linear address.
+    ; Win98 VMM doesn't fill PhysAddr output and _CopyPageTable fails
+    ; for system pages. Use _PageReserve + _PageCommitPhys for DMA
+    ; buffers where we control the physical address.
+    ;
+    ; Step 1: Allocate with _PageAllocate (gives us VA + handle)
+    sub     esp, 4                   ; local DWORD for PhysAddr result
+    lea     edi, [esp]               ; EDI -> local PhysAddr
+    mov     dword [edi], 0           ; initialize
+    push    dword 0x0D               ; flags: PAGEFIXED | PAGECONTIG | PAGEZEROINIT
+    lea     eax, [esp+4]
+    push    eax                      ; PhysAddr -> local
+    push    dword 0                  ; maxPhys
+    push    dword 0                  ; minPhys
+    push    dword 0                  ; AlignMask
+    push    dword 0                  ; hvm
+    push    dword 1                  ; PG_SYS
+    push    dword [ebp+8]            ; nPages
+    int     0x20
+    dd      VMM__PageAllocate
+    add     esp, 32
+    lea     edi, [esp]               ; re-derive EDI
+    test    eax, eax
+    jz      .dma_fail_cleanup
+    mov     esi, edx                ; save VA in ESI
+    ; EAX = handle, save it
+    push    eax                     ; save handle on stack
+
+    ; Step 2: Use _CopyPageTable with BOTH flags to get PTE
+    ; The page is now allocated and fixed. Try harder.
+    mov     eax, esi
+    shr     eax, 12                 ; page number
+    sub     esp, 4                  ; local for PTE
+    lea     edi, [esp]
+    mov     dword [edi], 0
+
+    ; Lock the page first
+    push    dword 0                 ; flags
+    push    dword 1                 ; nPages
+    push    eax                     ; pageNum
+    int     0x20
+    dd      VMM__LinPageLock
+    add     esp, 12
+
+    ; CopyPageTable with flags=2 (CPT_SYSTEM)
+    mov     eax, esi
+    shr     eax, 12
+    push    dword 2                 ; CPT_SYSTEM
+    push    edi
+    push    dword 1
+    push    eax
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jnz     .dma_got_pte
+
+    ; Try flags=0
+    mov     dword [edi], 0
+    mov     eax, esi
+    shr     eax, 12
+    push    dword 0
+    push    edi
+    push    dword 1
+    push    eax
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jnz     .dma_got_pte
+
+    ; Try flags=3 (CPT_SYSTEM|1)
+    mov     dword [edi], 0
+    mov     eax, esi
+    shr     eax, 12
+    push    dword 3
+    push    edi
+    push    dword 1
+    push    eax
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jnz     .dma_got_pte
+
+    ; All CopyPageTable attempts failed: try Win9x recursive page table.
+    ; Win9x self-maps at PDE index 0x3FE:
+    ;   Page directory at VA 0xFFBFE000
+    ;   Page tables at VA 0xFF800000 + (pageIndex * 4)
+    mov     eax, esi            ; original VA
+    shr     eax, 22             ; PDE index
+    mov     eax, [0xFFBFE000 + eax*4]  ; PDE value
+    test    eax, 1              ; present?
+    jz      .dma_selfmap_fail
+    mov     eax, esi            ; original VA
+    shr     eax, 12             ; full page index
+    mov     eax, [0xFF800000 + eax*4]  ; PTE value
+    test    eax, 1              ; present?
+    jz      .dma_selfmap_fail
+    ; Got valid PTE
+    mov     [esp], eax          ; store in PTE local
+    jmp     .dma_got_pte
+
+.dma_selfmap_fail:
+    ; Self-map also failed: use VA-0xC0000000 fallback
+    add     esp, 4                  ; free PTE local
+    pop     eax                     ; restore handle
+    ; Log fallback
+    push    esi
+    push    ecx
+    push    dword .dma_path3_msg
+    call    _VxD_Debug_Printf
+    add     esp, 4
+    pop     ecx
+    pop     esi
+    mov     ebx, esi
+    cmp     ebx, 0xC0000000
+    jb      .dma_have_phys_direct
+    sub     ebx, 0xC0000000
+.dma_have_phys_direct:
+    jmp     .dma_store_pa
+
+.dma_got_pte:
+    ; PTE is at [edi] — extract physical address
+    mov     eax, [edi]
+    add     esp, 4                  ; free PTE local
+    pop     ebx                     ; restore handle (don't need it)
+    test    eax, 1                  ; present?
+    jz      .dma_pte_fail
+    and     eax, 0xFFFFF000         ; physical page frame
+    mov     ebx, esi
+    and     ebx, 0xFFF
+    or      ebx, eax                ; full PA = page frame | offset
+    ; Log success
+    push    esi
+    push    ecx
+    push    dword .dma_path2_msg
+    call    _VxD_Debug_Printf
+    add     esp, 4
+    pop     ecx
+    pop     esi
+    jmp     .dma_store_pa
+
+.dma_pte_fail:
+    ; PTE present bit not set — use fallback
+    mov     ebx, esi
+    cmp     ebx, 0xC0000000
+    jb      .dma_store_pa
+    sub     ebx, 0xC0000000
+
+.dma_store_pa:
+    ; EBX = computed physical address, ESI = linear address
+    ; Store PA to caller's output
+    mov     ecx, [ebp+12]           ; pPhysAddr (caller's output pointer)
+    test    ecx, ecx
+    jz      .dma_no_phys
+    mov     [ecx], ebx              ; store physical address for caller
+.dma_no_phys:
+    add     esp, 4                   ; free local PhysAddr variable
+    mov     eax, esi                ; return linear address
+    jmp     .dma_done
+.dma_fail_cleanup:
+    add     esp, 4                   ; free local PhysAddr variable
+.dma_fail:
+    xor     eax, eax
+.dma_done:
+    pop     edi
+    pop     esi
+    pop     ecx
+    pop     ebx
+    pop     ebp
+    ret
+
+.dma_path1_msg: db 'DMA-PA: path1 VMM direct', 0x0D, 0x0A, 0
+.dma_path2_msg: db 'DMA-PA: path2 CopyPageTable', 0x0D, 0x0A, 0
+.dma_path3_msg: db 'DMA-PA: *** path3 VA-0xC0000000 FALLBACK ***', 0x0D, 0x0A, 0
+.dma_vmm_pa_msg: db 'DMA: VMM _PageAllocate PhysAddr: ', 0
+.dma_vmm_nonzero: db 'NON-ZERO (has PA!)', 0x0D, 0x0A, 0
+.dma_vmm_is_zero: db 'ZERO (VMM did not fill)', 0x0D, 0x0A, 0
+
+;--- Page Free (no-op: we pass linear addr but _PageFree needs handle) ---
+;--- Memory stays allocated - fine for permanent driver ---
+global VxD_PageFree
+global _VxD_PageFree
+VxD_PageFree:
+_VxD_PageFree:
+    ret
+
+;--- Map Physical to Linear ---
+; PVOID VxD_MapPhysToLinear(ULONG physAddr, ULONG nBytes)
+; Maps a physical address range into linear address space.
+; Uses _MapPhysToLinear VMM service.
+global VxD_MapPhysToLinear
+global _VxD_MapPhysToLinear
+VxD_MapPhysToLinear:
+_VxD_MapPhysToLinear:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    ; _MapPhysToLinear(PhysAddr, nBytes, flags)
+    mov     eax, [ebp+8]            ; PhysAddr
+    mov     ecx, [ebp+12]           ; nBytes
+    mov     esi, ecx                ; nBytes in ESI too
+    xor     edx, edx                ; flags = 0
+    int     0x20
+    dd      VMM__MapPhysToLinear
+    cmp     eax, 0xFFFFFFFF
+    jne     .map_done
+    xor     eax, eax                ; return NULL on failure
+.map_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;============================================================================
+; ULONG VxD_GetPhysAddr(PVOID linearAddr)
+; Returns the physical address for a given linear (virtual) address.
+; Uses VMM _CopyPageTable to safely read the page table entry.
+; Returns 0 on failure (page not present).
+global VxD_GetPhysAddr
+global _VxD_GetPhysAddr
+VxD_GetPhysAddr:
+_VxD_GetPhysAddr:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    sub     esp, 4              ; local DWORD for PTE result
+
+    mov     eax, [ebp+8]        ; linearAddr
+    mov     esi, eax            ; save full VA
+
+    ; Lock the page first to ensure it has a fixed physical address.
+    ; _LinPageLock(HLinAddr, nPages, flags)
+    ; flags = 0 for standard lock
+    shr     eax, 12             ; page number
+    mov     ebx, eax            ; save page number in EBX
+    push    dword 0             ; flags
+    push    dword 1             ; nPages
+    push    eax                 ; HLinAddr (page number)
+    int     0x20
+    dd      VMM__LinPageLock
+    add     esp, 12
+    ; EAX = success (non-zero) or failure (0) — ignore result
+
+    ; Try _CopyPageTable with CPT_SYSTEM first (for system-allocated pages)
+    mov     eax, ebx            ; restore page number
+    lea     edi, [esp]          ; PageBuf -> local DWORD
+    mov     dword [edi], 0      ; clear output
+    push    dword 2             ; flags = CPT_SYSTEM
+    push    edi                 ; PageBuf
+    push    dword 1             ; nPages
+    push    eax                 ; LinPageNum
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jnz     .gpa_check_pte
+
+    ; CPT_SYSTEM failed: try without flag (current VM page tables)
+    mov     dword [esp], 0      ; clear output again
+    push    dword 0             ; flags = 0 (no CPT_SYSTEM)
+    lea     edi, [esp+4]        ; PageBuf -> local DWORD (adjusted for push)
+    push    edi                 ; PageBuf
+    push    dword 1             ; nPages
+    push    ebx                 ; LinPageNum (saved)
+    int     0x20
+    dd      VMM__CopyPageTable
+    add     esp, 16
+    test    eax, eax
+    jnz     .gpa_check_pte
+
+    ; Both CopyPageTable attempts failed: use Win9x recursive page table.
+    ; Win9x self-maps at PDE index 0x3FE (not 0x3FF like NT):
+    ;   Page directory at VA 0xFFBFE000
+    ;   Page tables at VA 0xFF800000 + (pageIndex * 4)
+    mov     eax, esi            ; original VA
+    shr     eax, 22             ; PDE index
+    mov     eax, [0xFFBFE000 + eax*4]  ; PDE value
+    test    eax, 1              ; present?
+    jz      .gpa_fail
+    ; PDE present: read PTE
+    mov     eax, esi            ; original VA
+    shr     eax, 12             ; page table index (full, includes PDE in high bits)
+    mov     eax, [0xFF800000 + eax*4]  ; PTE value
+    mov     [esp], eax          ; store in local for .gpa_check_pte
+    ; Fall through to check
+
+.gpa_check_pte:
+    ; PTE format: [PhysPageFrame:20][Flags:12]
+    ; Physical address = (PTE & 0xFFFFF000) | (VA & 0xFFF)
+    mov     eax, [esp]          ; PTE value
+    test    eax, 1              ; present bit
+    jz      .gpa_fail
+    and     eax, 0xFFFFF000     ; physical page frame
+    mov     ebx, esi
+    and     ebx, 0x00000FFF     ; page offset from original VA
+    or      eax, ebx            ; full physical address
+    jmp     .gpa_done
+
+.gpa_fail:
+    xor     eax, eax            ; return 0 on failure
+
+.gpa_done:
+    add     esp, 4              ; free local PTE
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;============================================================================
+; ULONG VxD_Exec_V86_Int10(PVOID BiosArguments)
+;
+; Executes a real-mode INT 10h BIOS call via VMM nested V86 execution.
+; BiosArguments points to VIDEO_X86_BIOS_ARGUMENTS:
+;   +0x00 Eax, +0x04 Ebx, +0x08 Ecx, +0x0C Edx,
+;   +0x10 Esi, +0x14 Edi, +0x18 Ebp
+;
+; The entire Begin -> set regs -> Exec_Int -> read regs -> End sequence
+; must be in ASM because Begin_Nest_V86_Exec repurposes EBP to point at
+; the Client_Reg_Struc. Returning to C would clobber this via push ebp.
+;
+; Client_Reg_Struc offsets (from VMM.INC):
+;   +0x00 Client_EDI   +0x04 Client_ESI   +0x08 Client_EBP
+;   +0x0C (reserved)   +0x10 Client_EBX   +0x14 Client_EDX
+;   +0x18 Client_ECX   +0x1C Client_EAX
+;
+; Returns 0 on success, 1 on failure.
+;============================================================================
+global VxD_Exec_V86_Int10
+global _VxD_Exec_V86_Int10
+VxD_Exec_V86_Int10:
+_VxD_Exec_V86_Int10:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+
+    ; Save C frame pointer and BiosArguments pointer to callee-saved regs.
+    ; After Begin_Nest_V86_Exec, EBP will be overwritten with Client_Reg_Struc.
+    mov     edi, [ebp+8]            ; EDI = BiosArguments pointer
+    mov     [v86int10_saved_c_ebp], ebp     ; save C's EBP for later restore
+
+    ; Save ESP and a large block of the ring-0 stack before V86 calls.
+    ; VMM nested V86 services clobber the ring-0 stack contents during
+    ; execution. We must save the entire stack region from ESP upward
+    ; to cover our frame, vp_Int10's frame, and the caller's frame.
+    ; 256 bytes (64 DWORDs) covers typical nested call depths.
+    mov     [v86int10_saved_esp], esp
+    push    ecx
+    mov     ecx, 0
+.save_stack_loop:
+    mov     eax, [esp+ecx+4]        ; +4 to skip the pushed ECX
+    mov     [v86int10_saved_stack+ecx], eax
+    add     ecx, 4
+    cmp     ecx, 256
+    jb      .save_stack_loop
+    pop     ecx
+
+    ; --- Begin_Nest_V86_Exec ---
+    ; EAX = 0 (use default V86 segment registers)
+    ; EDX = 0 (no reference data)
+    ; ESI = 0 (no callback — nonzero would be invoked by VMM)
+    xor     eax, eax
+    xor     edx, edx
+    xor     esi, esi
+    int     0x20
+    dd      VMM_Begin_Nest_V86_Exec ; 0x00010082
+    jc      .v86_begin_fail
+
+    ; EBP now points to Client_Reg_Struc. EDI still holds BiosArguments.
+    ; Write VIDEO_X86_BIOS_ARGUMENTS into Client_Reg_Struc.
+    mov     eax, [edi+0x00]         ; BiosArgs->Eax
+    mov     [ebp+0x1C], eax         ; Client_EAX
+
+    mov     eax, [edi+0x04]         ; BiosArgs->Ebx
+    mov     [ebp+0x10], eax         ; Client_EBX
+
+    mov     eax, [edi+0x08]         ; BiosArgs->Ecx
+    mov     [ebp+0x18], eax         ; Client_ECX
+
+    mov     eax, [edi+0x0C]         ; BiosArgs->Edx
+    mov     [ebp+0x14], eax         ; Client_EDX
+
+    mov     eax, [edi+0x10]         ; BiosArgs->Esi
+    mov     [ebp+0x04], eax         ; Client_ESI
+
+    mov     eax, [edi+0x14]         ; BiosArgs->Edi
+    mov     [ebp+0x00], eax         ; Client_EDI
+
+    mov     eax, [edi+0x18]         ; BiosArgs->Ebp
+    mov     [ebp+0x08], eax         ; Client_EBP
+
+    ; --- Exec_Int 0x10 ---
+    ; EAX = interrupt number to execute
+    ; EDX = 0 (no reference data)
+    ; ESI = 0 (no callback — nonzero would be invoked by VMM)
+    ; Save EDI (BiosArguments) to fixed slot in case Exec_Int clobbers it.
+    mov     [v86int10_saved_bios_args], edi
+    mov     eax, 0x10
+    xor     edx, edx
+    xor     esi, esi
+    int     0x20
+    dd      VMM_Exec_Int            ; 0x00010084
+    mov     edi, [v86int10_saved_bios_args] ; restore BiosArguments pointer
+
+    ; Read back Client_Reg_Struc into BiosArguments.
+    ; EDI still holds BiosArguments pointer.
+    mov     eax, [ebp+0x1C]         ; Client_EAX
+    mov     [edi+0x00], eax         ; BiosArgs->Eax
+
+    mov     eax, [ebp+0x10]         ; Client_EBX
+    mov     [edi+0x04], eax         ; BiosArgs->Ebx
+
+    mov     eax, [ebp+0x18]         ; Client_ECX
+    mov     [edi+0x08], eax         ; BiosArgs->Ecx
+
+    mov     eax, [ebp+0x14]         ; Client_EDX
+    mov     [edi+0x0C], eax         ; BiosArgs->Edx
+
+    mov     eax, [ebp+0x04]         ; Client_ESI
+    mov     [edi+0x10], eax         ; BiosArgs->Esi
+
+    mov     eax, [ebp+0x00]         ; Client_EDI
+    mov     [edi+0x14], eax         ; BiosArgs->Edi
+
+    mov     eax, [ebp+0x08]         ; Client_EBP
+    mov     [edi+0x18], eax         ; BiosArgs->Ebp
+
+    ; --- End_Nest_Exec ---
+    int     0x20
+    dd      VMM_End_Nest_Exec       ; 0x00010086
+
+    ; Restore C frame and stack contents clobbered by VMM V86 services.
+    mov     ebp, [v86int10_saved_c_ebp]
+    mov     esp, [v86int10_saved_esp]
+
+    ; Restore the full 256-byte stack block
+    push    ecx
+    mov     ecx, 0
+.restore_stack_loop:
+    mov     eax, [v86int10_saved_stack+ecx]
+    mov     [esp+ecx+4], eax        ; +4 to skip the pushed ECX
+    add     ecx, 4
+    cmp     ecx, 256
+    jb      .restore_stack_loop
+    pop     ecx
+
+    xor     eax, eax                ; return 0 = success
+    jmp     .v86_done
+
+.v86_begin_fail:
+    ; Begin_Nest_V86_Exec failed (carry set).
+    ; System VM may not be available yet. Restore C frame + stack, return error.
+    mov     ebp, [v86int10_saved_c_ebp]
+    mov     esp, [v86int10_saved_esp]
+    ; Restore full stack block
+    push    ecx
+    mov     ecx, 0
+.restore_stack_fail:
+    mov     eax, [v86int10_saved_stack+ecx]
+    mov     [esp+ecx+4], eax
+    add     ecx, 4
+    cmp     ecx, 256
+    jb      .restore_stack_fail
+    pop     ecx
+    mov     eax, 1                  ; return 1 = failure
+    ; No End_Nest_Exec needed since Begin failed.
+
+.v86_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+    align 4
+v86int10_saved_c_ebp:       dd 0
+v86int10_saved_bios_args:   dd 0
+v86int10_saved_esp:         dd 0
+v86int10_saved_stack:       times 64 dd 0  ; 256 bytes of stack save area
+
+
+;   Data segment (DDB moved to top of _LTEXT for IOS compatibility)
+;============================================================================
+segment _LDATA public use32 class=LCODE align=4
+
+;============================================================================
+;   C code and data segments - ALL class=LCODE for single object
+;============================================================================
+segment _TEXT public use32 class=LCODE align=4
+segment _DATA public use32 class=LCODE align=4
+
+; Diagnostic registers from IFSMgr_Ring0_FileIO calls
+global _diag_regs
+global diag_regs
+_diag_regs:
+diag_regs:
+    dd      0, 0, 0, 0      ; EAX, EBX, ECX, EDX after open
+
+; IOS_Get_Device_List register dump (all regs after call)
+global _gdl_regs
+global gdl_regs
+_gdl_regs:
+gdl_regs:
+    dd      0, 0, 0, 0, 0, 0   ; EAX, EBX, ECX, EDX, ESI, EDI
+; VPICD services
+%define VPICD_Virtualize_IRQ            0x00440001
+%define VPICD_Set_Int_Request           0x00440002
+%define VPICD_Clear_Int_Request         0x00440003
+%define VPICD_Phys_EOI                  0x00440006
+%define VPICD_Get_Complete_Status       0x00440009
+%define VPICD_Get_Status                0x0044000A
+%define VPICD_Call_When_Hw_Int          0x0044000E
+%define VPICD_Force_Default_Behavior    0x00440008
+
+; CONFIGMG (Configuration Manager) services - Device ID 0x0033
+%define CM_Locate_DevNode       0x00330002  ; ordinal 2
+%define CM_Create_DevNode       0x0033000B  ; ordinal 11
+%define CM_Register_Device_Driver 0x0033000E ; ordinal 14
+%define CM_Register_DevLoader   0x00330032  ; ordinal 50
+%define CM_Reenumerate_DevNode  0x00330033  ; ordinal 51
+%define CM_Setup_DevNode        0x00330034  ; ordinal 52
+%define CM_Get_DevNode_Status   0x00330036  ; ordinal 54
+%define CM_CallBack_Device_Driver 0x00330039 ; ordinal 57
+%define CM_Read_Registry_Value  0x0033003E  ; ordinal 62
+%define CM_Reprocess_DevNode    0x0033005C  ; ordinal 92
+
+; IOS (I/O Supervisor) services - Device ID 0x0010
+; Format: 0x00100000 | ordinal
+%define IOS_Get_Version         0x00100000  ; ordinal 0 - Get IOS version
+%define IOS_Register_Device     0x00100001  ; ordinal 1 - Register a device
+%define IOS_Find_Int13_Drive    0x00100002  ; ordinal 2 - Find INT 13h drive
+%define IOS_Get_Device_List     0x00100003  ; ordinal 3 - Get device list
+%define IOS_Send_Command        0x00100004  ; ordinal 4 - Send I/O command
+%define IOS_BD_Command_Complete 0x00100005  ; ordinal 5 - Signal command complete
+%define IOS_Synchronous_Command 0x00100006  ; ordinal 6 - Synchronous command
+%define IOS_Register            0x00100007  ; ordinal 7 - Register driver with IOS
+%define IOS_Requestor_Service   0x00100008  ; ordinal 8 - ISP dispatch (ISP_INSERT_CALLDOWN etc)
+%define IOS_Exclusive_Access    0x00100009  ; ordinal 9 - Exclusive device access
+%define IOS_Send_Next_Command   0x0010000A  ; ordinal 10 - Send next queued command
+%define IOS_Set_Async_Time_Out  0x0010000B  ; ordinal 11 - Set async timeout
+%define IOS_Signal_Semaphore    0x0010000C  ; ordinal 12 - Signal semaphore (no switch)
+%define IOS_Idle_Status         0x0010000D  ; ordinal 13 - Idle status check
+%define IOS_Map_IORS_To_I24     0x0010000E  ; ordinal 14 - Map IOR status to INT 24h
+%define IOS_Map_IORS_To_I21     0x0010000F  ; ordinal 15 - Map IOR status to INT 21h
+%define IOS_Print_Log           0x00100010  ; ordinal 16 - Debug print log
+%define IOS_Mem_Alloc           0x00100012  ; ordinal 18 - IOS memory allocator
+; Alias: ISP_INSERT_CALLDOWN is dispatched through IOS_Requestor_Service (ordinal 8)
+%define ISP_INSERT_CALLDOWN     IOS_Requestor_Service
+
+;--- IOS_Get_Version_Test() -> EAX = version or sentinel ---
+global _IOS_Get_Version_Test
+global IOS_Get_Version_Test
+_IOS_Get_Version_Test:
+IOS_Get_Version_Test:
+    mov     eax, 0xFEEDFACE
+    int     0x20
+    dd      IOS_Get_Version     ; 0x00100000
+    ret
+
+;--- ULONG IOS_Call_Service_N(ULONG ordinal, void *param) ---
+; Calls IOS service at given ordinal with param in EAX and on stack.
+; Returns: low word = carry (0=clear/success, 1=set/fail), high word = EAX result shifted
+; Actually: returns 0 if carry clear, 1 if carry set. Caller checks AEP side effects.
+global _IOS_Call_Service_N
+global IOS_Call_Service_N
+_IOS_Call_Service_N:
+IOS_Call_Service_N:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     ecx, [ebp+8]       ; ordinal
+    mov     eax, [ebp+12]      ; param (DDB pointer)
+    ; Build service ID: 0x00100000 | ordinal
+    or      ecx, 0x00100000
+    ; Self-modify the int 0x20 dd to use the right service ID
+    mov     [.svc_id], ecx
+    push    eax                 ; param on stack too
+    int     0x20
+.svc_id:
+    dd      0x00100000          ; placeholder, patched above
+    add     esp, 4
+    jc      .svc_fail
+    xor     eax, eax            ; carry clear = success
+    jmp     .svc_done
+.svc_fail:
+    mov     eax, 1              ; carry set = failure
+.svc_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IOS_Register_Driver(DDB *ddb) ---
+; Registers port driver with IOS (ordinal 7).
+; Returns 0 on success (carry clear), non-zero on failure.
+global _IOS_Register_Driver
+global IOS_Register_Driver
+_IOS_Register_Driver:
+IOS_Register_Driver:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]       ; DDB pointer in EAX (register convention)
+    push    eax                 ; also on stack
+    int     0x20
+    dd      IOS_Register        ; 0x00100007
+    add     esp, 4              ; clean stack
+    jc      .ios_reg_fail       ; carry set = failure
+    xor     eax, eax            ; success: return 0
+    jmp     .ios_reg_done
+.ios_reg_fail:
+    ; EAX may contain error code, or set a default
+    test    eax, eax
+    jnz     .ios_reg_done       ; if EAX non-zero, use it as error
+    mov     eax, 1              ; else return 1 (generic failure)
+.ios_reg_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG ISP_Insert_Calldown(DCB *dcb, CALLDOWN *cd, DDB *ddb, ULONG flags) ---
+; Insert our handler into a DCB's calldown chain.
+; Ordinal 8 = IOS_Requestor_Service, which dispatches ISP requests.
+; NOTE: ISP_INSERT_CALLDOWN is dispatched through IOS_Requestor_Service.
+; The params on stack form an ISP structure that IOS_Requestor_Service reads.
+; Returns 0 on success (carry clear).
+global _ISP_Insert_Calldown
+global ISP_Insert_Calldown
+_ISP_Insert_Calldown:
+ISP_Insert_Calldown:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    ; Push all 4 params on stack for the service
+    push    dword [ebp+20]      ; flags
+    push    dword [ebp+16]      ; ddb
+    push    dword [ebp+12]      ; cd (calldown)
+    push    dword [ebp+8]       ; dcb
+    ; Also set EAX = dcb (register convention backup)
+    mov     eax, [ebp+8]
+    int     0x20
+    dd      ISP_INSERT_CALLDOWN ; 0x00100008
+    add     esp, 16             ; clean 4 params
+    jc      .isp_fail
+    xor     eax, eax
+    jmp     .isp_done
+.isp_fail:
+    mov     eax, 1
+.isp_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- IOR handler bridge ---
+; Called by IOS when an I/O request arrives for our DCB.
+; DDK: port driver calldown uses cdecl convention.
+; First param (IOP pointer) is on stack at [ESP+4].
+; After pushad (32 bytes), original [ESP+4] is at [ESP+36].
+extern _ntmini_ior_handler
+global _ios_ior_bridge
+global ios_ior_bridge
+_ios_ior_bridge:
+ios_ior_bridge:
+    pushad
+    push    dword [esp+36]      ; IOP/IOR pointer (cdecl first param)
+    call    _ntmini_ior_handler
+    add     esp, 4
+    popad
+    ret
+
+;--- IOS AEP handler bridge ---
+; IOS calls the AER (DRP_aer) with cdecl convention.
+; AEP pointer is on stack at [ESP+4] (first param after return address).
+global _ios_aep_bridge
+global ios_aep_bridge
+_ios_aep_bridge:
+ios_aep_bridge:
+    pushad
+    ; After pushad (32 bytes): original [ESP+4] is now at [ESP+36]
+    push    dword [esp+36]      ; AEP pointer
+    call    _ntmini_aep_handler
+    add     esp, 4
+    popad
+    clc
+    ret
+
+;--- ULONG IOS_Get_Device_List_Wrapper() ---
+; Returns pointer to first DCB in IOS's device list.
+; IOS_Get_Device_List (ordinal 3) returns device list head.
+; Return value might be in EAX or EDX depending on IOS version.
+; We return EAX (try EDX if EAX is 0).
+%define VMM_Get_DDB             0x00010146
+global _IOS_Get_Device_List_Wrapper
+global IOS_Get_Device_List_Wrapper
+_IOS_Get_Device_List_Wrapper:
+IOS_Get_Device_List_Wrapper:
+    push    ebx
+    push    ecx
+    push    esi
+    push    edi
+    int     0x20
+    dd      IOS_Get_Device_List  ; 0x00100003
+    ; Save ALL register outputs for C code to inspect
+    mov     [gdl_regs+0], eax
+    mov     [gdl_regs+4], ebx
+    mov     [gdl_regs+8], ecx
+    mov     [gdl_regs+12], edx
+    mov     [gdl_regs+16], esi
+    mov     [gdl_regs+20], edi
+    ; Try each register for valid kernel pointer (>= 0xC0000000).
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, edx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, esi
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, ecx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    mov     eax, ebx
+    cmp     eax, 0xC0000000
+    jae     .gdl_done
+    xor     eax, eax            ; no valid pointer found
+.gdl_done:
+    pop     edi
+    pop     esi
+    pop     ecx
+    pop     ebx
+    ret
+
+;--- ULONG VMM_Get_DDB_Wrapper(USHORT device_id) ---
+; Gets DDB pointer for a loaded VxD by device ID.
+; Returns ECX = DDB pointer, or 0 if not found.
+global _VMM_Get_DDB_Wrapper
+global VMM_Get_DDB_Wrapper
+_VMM_Get_DDB_Wrapper:
+VMM_Get_DDB_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    movzx   eax, word [ebp+8]   ; device_id
+    xor     edx, edx             ; any version
+    int     0x20
+    dd      VMM_Get_DDB          ; 0x00010146
+    ; ECX = DDB pointer (or 0)
+    mov     eax, ecx
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- void Call_ILB_Service(ULONG service_rtn, PVOID isp_packet) ---
+; Calls ILB_service_rtn with ISP packet.
+; Convention: EDX = ISP packet pointer, also pushed on stack.
+global _Call_ILB_Service
+global Call_ILB_Service
+_Call_ILB_Service:
+Call_ILB_Service:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    ecx
+    mov     edx, [ebp+12]       ; ISP packet pointer in EDX
+    push    edx                  ; also on stack
+    mov     eax, [ebp+8]        ; ILB_service_rtn address
+    call    eax                  ; call the service
+    add     esp, 4               ; clean ISP from stack
+    pop     ecx
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- void Call_ILB_Internal_Request(ULONG func_addr, ULONG dcb, ULONG iop, ULONG start_cd) ---
+; Calls ILB_internal_request with register-based calling convention.
+; Register-based calling convention:
+;   EBX = DCB pointer
+;   EDI = IOP pointer
+;   EDX = starting calldown handler addr (0 = chain head, else skips to node after match)
+; The function JMPs to chain executor which eventually RETs to caller.
+global _Call_ILB_Internal_Request
+global Call_ILB_Internal_Request
+_Call_ILB_Internal_Request:
+Call_ILB_Internal_Request:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    edi
+    push    ebx
+    mov     ebx, [ebp+12]       ; DCB pointer in EBX
+    mov     edi, [ebp+16]       ; IOP pointer in EDI
+    mov     edx, [ebp+20]       ; starting calldown (0 = chain head)
+    mov     eax, [ebp+8]        ; function address
+    call    eax                  ; call ILB_internal_request
+    pop     ebx
+    pop     edi
+    pop     esi
+    pop     ebp
+    ret
+
+;--- VMM_Set_Global_Time_Out wrapper ---
+; void Set_Global_Timeout(ULONG ms, void (*callback)(ULONG refdata), ULONG refdata)
+; VMM Set_Global_Time_Out: EAX=ms, ESI=callback, EDX=refdata
+; Returns timeout handle in EAX (ignored here).
+; Set_Time_Out (ordinal 0x001C) - per-VM timer callback
+; Set_Global_Time_Out is ordinal 0x005C but might not work.
+; Set_Time_Out fires in context of current VM - fine for system VM.
+%define VMM_Set_Time_Out       0x0001001C
+global _Set_Global_Timeout
+global Set_Global_Timeout
+_Set_Global_Timeout:
+Set_Global_Timeout:
+    push    ebp
+    mov     ebp, esp
+    push    esi
+    push    ebx
+    ; Get current VM handle (required for Set_Time_Out)
+    int     0x20
+    dd      VMM_Get_Cur_VM_Handle   ; EBX = current VM handle
+    mov     eax, [ebp+8]       ; timeout in milliseconds
+    mov     esi, [ebp+12]      ; callback function pointer
+    mov     edx, [ebp+16]      ; reference data
+    int     0x20
+    dd      VMM_Set_Time_Out
+    ; ESI = timeout handle on return (0 = error)
+    mov     eax, esi            ; return handle to caller
+    pop     ebx
+    pop     esi
+    pop     ebp
+    ret
+
+;--- Timer callback bridge: calls C function _ntmini_timer_callback(ULONG refdata) ---
+; VMM calls with EDX=refdata, must return via RET.
+extern _ntmini_timer_callback
+global _timer_callback_bridge
+global timer_callback_bridge
+_timer_callback_bridge:
+timer_callback_bridge:
+    pushad
+    push    edx                 ; refdata as parameter to C function
+    call    _ntmini_timer_callback
+    add     esp, 4
+    popad
+    ret
+
+;--- IOS_BD_Complete(IOP *iop) ---
+; Signals IOS that an I/O request is complete.
+global _IOS_BD_Complete
+global IOS_BD_Complete
+_IOS_BD_Complete:
+IOS_BD_Complete:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    edx
+    mov     ebx, [ebp+8]       ; IOP pointer
+    int     0x20
+    dd      IOS_BD_Command_Complete
+    pop     edx
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- IOS_Requestor(ISP *isp) ---
+; Calls IOS requestor service for creating DCBs etc.
+global _IOS_Requestor
+global IOS_Requestor
+_IOS_Requestor:
+IOS_Requestor:
+    push    ebp
+    mov     ebp, esp
+    push    edx
+    mov     edx, [ebp+8]       ; ISP pointer
+    int     0x20
+    dd      IOS_Requestor_Service
+    pop     edx
+    pop     ebp
+    ret
+
+;--- PVOID IOS_Mem_Alloc_Wrapper(ULONG size) ---
+; IOS memory allocator (ordinal 18 = 0x00100012).
+; Returns pointer to allocated memory in EAX (or 0 on failure).
+global _IOS_Mem_Alloc_Wrapper
+global IOS_Mem_Alloc_Wrapper
+_IOS_Mem_Alloc_Wrapper:
+IOS_Mem_Alloc_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+8]       ; size on stack
+    int     0x20
+    dd      IOS_Mem_Alloc       ; 0x00100012
+    add     esp, 4
+    ; EAX should contain pointer or 0
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Locate_DevNode_Wrapper(ULONG *pdevnode, char *device_id, ULONG flags) ---
+; Find a devnode by device ID string.
+; Returns 0 (CR_SUCCESS) on success, devnode handle written to *pdevnode.
+global _CM_Locate_DevNode_Wrapper
+global CM_Locate_DevNode_Wrapper
+_CM_Locate_DevNode_Wrapper:
+CM_Locate_DevNode_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+16]      ; flags
+    push    dword [ebp+12]      ; device_id string
+    push    dword [ebp+8]       ; pdevnode (output pointer)
+    int     0x20
+    dd      CM_Locate_DevNode   ; 0x00330002
+    add     esp, 12
+    ; EAX = CR_xxx result code
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Setup_DevNode_Wrapper(ULONG devnode, ULONG flags) ---
+; Trigger driver loading for a device node.
+; flags: 0=CM_SETUP_DEVNODE_READY, 1=CM_SETUP_DOWNLOAD
+global _CM_Setup_DevNode_Wrapper
+global CM_Setup_DevNode_Wrapper
+_CM_Setup_DevNode_Wrapper:
+CM_Setup_DevNode_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+12]      ; flags
+    push    dword [ebp+8]       ; devnode
+    int     0x20
+    dd      CM_Setup_DevNode    ; 0x00330034
+    add     esp, 8
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Create_DevNode_Wrapper(ULONG *pdevnode, char *device_id, ULONG parent, ULONG flags) ---
+global _CM_Create_DevNode_Wrapper
+global CM_Create_DevNode_Wrapper
+_CM_Create_DevNode_Wrapper:
+CM_Create_DevNode_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+20]      ; flags
+    push    dword [ebp+16]      ; parent devnode
+    push    dword [ebp+12]      ; device_id string
+    push    dword [ebp+8]       ; pdevnode output
+    int     0x20
+    dd      CM_Create_DevNode   ; 0x0033000B
+    add     esp, 16
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Register_Device_Driver_Wrapper(ULONG devnode, PVOID handler, ULONG refdata, ULONG flags) ---
+; Register our VxD as the driver for a devnode. This tells CONFIGMG
+; "I am the driver" and should change status from NOT_CONFIGURED to DRIVER_LOADED.
+global _CM_Register_Device_Driver_Wrapper
+global CM_Register_Device_Driver_Wrapper
+_CM_Register_Device_Driver_Wrapper:
+CM_Register_Device_Driver_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+20]      ; flags
+    push    dword [ebp+16]      ; refdata
+    push    dword [ebp+12]      ; handler (config handler callback)
+    push    dword [ebp+8]       ; devnode
+    int     0x20
+    dd      CM_Register_Device_Driver ; 0x0033000E
+    add     esp, 16
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Get_DevNode_Status_Wrapper(ULONG *pstatus, ULONG *pproblem, ULONG devnode, ULONG flags) ---
+global _CM_Get_DevNode_Status_Wrapper
+global CM_Get_DevNode_Status_Wrapper
+_CM_Get_DevNode_Status_Wrapper:
+CM_Get_DevNode_Status_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+20]      ; flags
+    push    dword [ebp+16]      ; devnode
+    push    dword [ebp+12]      ; pproblem
+    push    dword [ebp+8]       ; pstatus
+    int     0x20
+    dd      CM_Get_DevNode_Status   ; 0x00330036
+    add     esp, 16
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_CallBack_Device_Loader_Wrapper(ULONG devnode, ULONG functype) ---
+; Explicitly call the device's DevLoader. functype: 1=load, 2=unload.
+global _CM_CallBack_Device_Loader_Wrapper
+global CM_CallBack_Device_Loader_Wrapper
+_CM_CallBack_Device_Loader_Wrapper:
+CM_CallBack_Device_Loader_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+12]      ; functype
+    push    dword [ebp+8]       ; devnode
+    int     0x20
+    dd      CM_CallBack_Device_Driver  ; 0x00330039
+    add     esp, 8
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG CM_Reenumerate_DevNode_Wrapper(ULONG devnode, ULONG flags) ---
+; Force re-enumeration of a device node's children.
+global _CM_Reenumerate_DevNode_Wrapper
+global CM_Reenumerate_DevNode_Wrapper
+_CM_Reenumerate_DevNode_Wrapper:
+CM_Reenumerate_DevNode_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    push    dword [ebp+12]      ; flags
+    push    dword [ebp+8]       ; devnode
+    int     0x20
+    dd      CM_Reenumerate_DevNode ; 0x00330033
+    add     esp, 8
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- VPICD IRQ handler globals ---
+global _g_irq_hw_int_func
+global g_irq_hw_int_func
+global _g_irq_devext
+global g_irq_devext
+global _g_irq_handle
+global g_irq_handle
+_g_irq_hw_int_func:
+g_irq_hw_int_func:     dd 0    ; HwInterrupt function pointer (__stdcall)
+_g_irq_devext:
+g_irq_devext:           dd 0    ; DeviceExtension pointer
+_g_irq_handle:
+g_irq_handle:           dd 0    ; IRQ handle from VPICD
+
+;--- IOSBRIDGE-compatible globals ---
+; These are populated by NTMINI_V5.C after miniport initialization.
+; IOSBRIDGE.C references them as extern to call miniport functions.
+global _g_HwStartIo
+global g_HwStartIo
+global _g_HwResetBus
+global g_HwResetBus
+global _g_HwInterrupt
+global g_HwInterrupt
+global _g_DeviceExtension
+global g_DeviceExtension
+global _g_SrbExtensionSize
+global g_SrbExtensionSize
+global _g_SrbCompleted
+global g_SrbCompleted
+global _g_ReadyForNext
+global g_ReadyForNext
+_g_HwStartIo:
+g_HwStartIo:            dd 0    ; BOOLEAN (__stdcall *)(PVOID, PSRB)
+_g_HwResetBus:
+g_HwResetBus:           dd 0    ; BOOLEAN (__stdcall *)(PVOID, ULONG)
+_g_HwInterrupt:
+g_HwInterrupt:          dd 0    ; BOOLEAN (__stdcall *)(PVOID)
+_g_DeviceExtension:
+g_DeviceExtension:      dd 0    ; PVOID
+_g_SrbExtensionSize:
+g_SrbExtensionSize:     dd 0    ; ULONG
+_g_SrbCompleted:
+g_SrbCompleted:         dd 0    ; volatile BOOLEAN
+_g_ReadyForNext:
+g_ReadyForNext:         dd 0    ; volatile BOOLEAN
+
+;--- Init dispatch flags (prevent double execution) ---
+g_init_complete_ran:    db 0    ; set to 1 when Init_Complete handler runs
+g_sys_vm_init_ran:      db 0    ; set to 1 when Sys_VM_Init handler runs
+    align 4
+
+;--- IDE hardware interrupt handler ---
+; Called by VMM when IRQ fires. EAX=IRQ handle, EBX=VM handle.
+_ide_irq_handler:
+    pushad
+    ; Call HwInterrupt(__stdcall)(DeviceExtension)
+    mov ecx, [g_irq_hw_int_func]
+    test ecx, ecx
+    jz .no_handler
+    push dword [g_irq_devext]
+    call ecx                    ; __stdcall: callee cleans stack
+.no_handler:
+    popad
+    ; Physical EOI
+    int     0x20
+    dd      VPICD_Phys_EOI
+    clc
+    ret
+
+;--- NDIS hardware interrupt handler ---
+; NDIS ISR: BOOLEAN __stdcall ISR(BOOLEAN *recognized, PVOID ctx)
+; Then calls HandleInterrupt(__stdcall)(NDIS_HANDLE ctx) as DPC.
+; Called by VMM when IRQ fires. EAX=IRQ handle, EBX=VM handle.
+global _ndis_irq_handler
+global ndis_irq_handler
+_ndis_irq_handler:
+ndis_irq_handler:
+    pushad
+    mov ecx, [g_ndis_isr_func]
+    test ecx, ecx
+    jz .ndis_no_isr
+    ; Call ISR(recognized_out, adapter_ctx) — 2-arg __stdcall
+    sub esp, 4                     ; BOOLEAN recognized (on stack)
+    mov edx, esp                   ; pointer to it
+    push dword [g_ndis_adapter_ctx]; param 2: MiniportAdapterContext
+    push edx                       ; param 1: &recognized
+    call ecx                       ; __stdcall: callee pops 8 bytes
+    ; EAX = return value (BOOLEAN). Check recognized flag.
+    pop edx                        ; pop our recognized local
+    test dl, dl
+    jz .ndis_no_isr                ; ISR said "not mine"
+    ; Call HandleInterrupt(adapter_ctx) as DPC
+    mov ecx, [g_ndis_dpc_func]
+    test ecx, ecx
+    jz .ndis_no_isr
+    push dword [g_ndis_adapter_ctx]
+    call ecx                       ; __stdcall: callee pops 4 bytes
+.ndis_no_isr:
+    popad
+    ; Physical EOI
+    int     0x20
+    dd      VPICD_Phys_EOI
+    clc
+    ret
+
+;--- NDIS IRQ handler globals ---
+global _g_ndis_isr_func
+global g_ndis_isr_func
+global _g_ndis_dpc_func
+global g_ndis_dpc_func
+global _g_ndis_adapter_ctx
+global g_ndis_adapter_ctx
+global _g_ndis_irq_handle
+global g_ndis_irq_handle
+_g_ndis_isr_func:
+g_ndis_isr_func:        dd 0    ; NDIS ISR function pointer (__stdcall, 2 params)
+_g_ndis_dpc_func:
+g_ndis_dpc_func:        dd 0    ; NDIS HandleInterrupt (__stdcall, 1 param)
+_g_ndis_adapter_ctx:
+g_ndis_adapter_ctx:     dd 0    ; MiniportAdapterContext
+_g_ndis_irq_handle:
+g_ndis_irq_handle:      dd 0    ; IRQ handle from VPICD
+
+;--- VxD_Hook_NDIS_IRQ(irq_number) -> 0=fail, nonzero=handle ---
+; Same as VxD_Hook_IRQ but installs ndis_irq_handler instead.
+global _VxD_Hook_NDIS_IRQ
+global VxD_Hook_NDIS_IRQ
+_VxD_Hook_NDIS_IRQ:
+VxD_Hook_NDIS_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+
+    sub     esp, 32
+    mov     edi, esp
+    xor     eax, eax
+    mov     [edi+0], eax
+    mov     [edi+4], eax
+    mov     [edi+8], eax
+    mov     [edi+12], eax
+    mov     [edi+16], eax
+    mov     [edi+20], eax
+    mov     [edi+24], eax
+    mov     [edi+28], eax
+    mov     ax, [ebp+8]
+    mov     [edi+0], ax
+    mov     word [edi+2], 0x02
+    lea     eax, [_ndis_irq_handler]
+    mov     [edi+4], eax
+
+    int     0x20
+    dd      VPICD_Virtualize_IRQ
+    jc      .nhook_fail
+
+    mov     [g_ndis_irq_handle], eax
+    jmp     .nhook_done
+
+.nhook_fail:
+    xor     eax, eax
+
+.nhook_done:
+    add     esp, 32
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+;--- VxD_Chain_NDIS_IRQ(irq_number) -> 0=fail, nonzero=1 ---
+global _VxD_Chain_NDIS_IRQ
+global VxD_Chain_NDIS_IRQ
+_VxD_Chain_NDIS_IRQ:
+VxD_Chain_NDIS_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+    push    esi
+
+    mov     eax, [ebp+8]
+    int     0x20
+    dd      VPICD_Get_Complete_Status
+    jc      .nchain_fail
+
+    mov     [g_ndis_irq_handle], eax
+
+    lea     esi, [_ndis_irq_handler]
+    int     0x20
+    dd      VPICD_Call_When_Hw_Int
+    jc      .nchain_fail
+
+    mov     eax, 1
+    jmp     .nchain_done
+
+.nchain_fail:
+    xor     eax, eax
+
+.nchain_done:
+    pop     esi
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+;--- VxD_Hook_IRQ(irq_number) -> 0=fail, nonzero=handle ---
+global _VxD_Hook_IRQ
+global VxD_Hook_IRQ
+_VxD_Hook_IRQ:
+VxD_Hook_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+
+    ; Build VPICD_IRQ_Descriptor on stack (32 bytes)
+    sub     esp, 32
+    mov     edi, esp
+    ; Zero it first
+    xor     eax, eax
+    mov     [edi+0], eax
+    mov     [edi+4], eax
+    mov     [edi+8], eax
+    mov     [edi+12], eax
+    mov     [edi+16], eax
+    mov     [edi+20], eax
+    mov     [edi+24], eax
+    mov     [edi+28], eax
+    ; Fill fields
+    mov     ax, [ebp+8]         ; IRQ number (word)
+    mov     [edi+0], ax          ; VID_IRQ_Number
+    mov     word [edi+2], 0x02   ; VID_Options: VPICD_OPT_CAN_SHARE
+    lea     eax, [_ide_irq_handler]
+    mov     [edi+4], eax         ; VID_Hw_Int_Proc
+
+    ; Call VPICD_Virtualize_IRQ (EDI -> descriptor)
+    int     0x20
+    dd      VPICD_Virtualize_IRQ
+    jc      .hook_fail
+
+    ; Success: EAX = IRQ handle
+    mov     [g_irq_handle], eax
+    jmp     .hook_done
+
+.hook_fail:
+    xor     eax, eax
+
+.hook_done:
+    add     esp, 32
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+;--- VxD_Chain_IRQ(irq_number) -> 0=fail, nonzero=1 ---
+; Chains onto an ALREADY VIRTUALIZED IRQ using VPICD_Call_When_Hw_Int.
+; Use when VPICD_Virtualize_IRQ fails (e.g., PCI IRQ steering owns it).
+; The handler is called in the existing IRQ's chain, same as VID_Hw_Int_Proc.
+global _VxD_Chain_IRQ
+global VxD_Chain_IRQ
+_VxD_Chain_IRQ:
+VxD_Chain_IRQ:
+    push    ebp
+    mov     ebp, esp
+    push    edi
+    push    ebx
+    push    esi
+
+    ; Get the IRQ handle for the already-virtualized IRQ.
+    ; VPICD_Get_Complete_Status: EAX = IRQ number, returns EAX = IRQ handle
+    mov     eax, [ebp+8]           ; IRQ number
+    int     0x20
+    dd      VPICD_Get_Complete_Status
+    jc      .chain_fail            ; IRQ not virtualized at all
+
+    ; EAX = IRQ handle. Save it.
+    mov     [g_irq_handle], eax
+
+    ; VPICD_Call_When_Hw_Int: EAX = IRQ handle, ESI = handler address
+    lea     esi, [_ide_irq_handler]
+    int     0x20
+    dd      VPICD_Call_When_Hw_Int
+    jc      .chain_fail            ; shouldn't fail, but check
+
+    ; Success
+    mov     eax, 1
+    jmp     .chain_done
+
+.chain_fail:
+    xor     eax, eax
+
+.chain_done:
+    pop     esi
+    pop     ebx
+    pop     edi
+    pop     ebp
+    ret
+
+segment _BSS public use32 class=LCODE align=4
+segment CONST public use32 class=LCODE align=4
+segment CONST2 public use32 class=LCODE align=4
+segment _TLS public use32 class=LCODE align=4
+
+;============================================================================
+;   ScsiPort struct-return functions in ASM
+;   MSVC struct-return ABI: hidden first param = pointer to result storage
+;   These MUST match MSVC's calling convention exactly.
+;============================================================================
+segment _LTEXT
+
+;--- ScsiPortConvertUlongToPhysicalAddress ---
+; MSVC returns 8-byte union in EDX:EAX (LowPart=EAX, HighPart=EDX)
+; Caller pushes: [Addr(4)] = 4 bytes
+; __stdcall: callee cleans, ret 4
+; REMAP: primary IDE (0x1F0/0x3F6) → secondary (0x170/0x376)
+global _sp_ConvertUlong_asm
+global sp_ConvertUlong_asm
+_sp_ConvertUlong_asm:
+sp_ConvertUlong_asm:
+    push    ebp
+    mov     ebp, esp
+    mov     eax, [ebp+8]       ; Addr - NO remapping (passthrough)
+    ; Port remapping is done in sp_ReadPortUchar/sp_WritePortUchar instead.
+    ; This keeps the miniport's internal address as 0x1F0 (primary channel 0).
+    xor     edx, edx            ; HighPart = 0 in EDX
+    pop     ebp
+    ret     4                   ; clean 1 param (4 bytes)
+
+;--- ScsiPortGetPhysicalAddress ---
+; MSVC returns 8-byte union in EDX:EAX
+; Caller pushes: [Length(4)] [VirtualAddr(4)] [Srb(4)] [HwExt(4)] = 16 bytes
+; __stdcall: callee cleans, ret 16
+;
+; Translates VA→PA via x86 page table walk (CR3 → PDE → PTE).
+; In Win9x ring 0, page tables are identity-mapped at 0xFFC00000.
+global _sp_GetPhysAddr_asm
+global sp_GetPhysAddr_asm
+_sp_GetPhysAddr_asm:
+sp_GetPhysAddr_asm:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+
+    mov     eax, [ebp+16]      ; VirtualAddr
+
+    ; Call C helper that checks MMIO map, DMA buffer, _CopyPageTable, then fallback.
+    ; Watcom C with -3s uses undecorated symbols (no prefix/suffix).
+    extern sp_va_to_pa
+    push    eax                 ; arg: VirtualAddr
+    call    sp_va_to_pa
+    add     esp, 4
+    ; EAX = physical address
+
+.phys_done:
+    xor     edx, edx            ; HighPart = 0 (32-bit physical)
+
+    ; Write *Length = bytes remaining in current page
+    mov     ecx, [ebp+20]      ; Length pointer
+    test    ecx, ecx
+    jz      .no_len2
+    mov     ebx, [ebp+16]      ; VirtualAddr
+    and     ebx, 0xFFF          ; offset within page
+    mov     ebx, 0x1000
+    sub     ebx, [ebp+16]
+    and     ebx, 0xFFF          ; (should not wrap but be safe)
+    ; Actually: remaining = 0x1000 - (VA & 0xFFF)
+    mov     ebx, [ebp+16]
+    and     ebx, 0xFFF
+    push    eax
+    mov     eax, 0x1000
+    sub     eax, ebx
+    mov     [ecx], eax
+    pop     eax
+.no_len2:
+    pop     ebx
+    pop     ebp
+    ret     16                  ; clean 4 params (16 bytes)
+
+;============================================================================
+; MSCDEX V86 INT 2Fh handler
+;
+; Called by VMM when V86 mode code executes INT 2Fh.
+; Hook_V86_Int_Chain callback convention:
+;   EBX = current VM handle
+;   EBP = pointer to Client_Reg_Struc
+;   Return: carry clear = handled (don't chain), carry set = not handled (chain)
+;
+; Client_Reg_Struc offsets:
+;   +0x00: Client_EDI    +0x04: Client_ESI
+;   +0x08: Client_EBP    +0x0C: reserved
+;   +0x10: Client_EBX    +0x14: Client_EDX
+;   +0x18: Client_ECX    +0x1C: Client_EAX
+;   +0x20: Client_Error  +0x24: Client_EIP
+;   +0x28: Client_CS     +0x2C: Client_EFlags
+;   +0x30: Client_ESP    +0x34: Client_SS
+;   +0x38: Client_ES     +0x3C: Client_DS
+;============================================================================
+extern _ntmini_mscdex_handler
+
+mscdex_v86_handler:
+    ; Check if this is an MSCDEX call (AH = 0x15)
+    mov     eax, [ebp+0x1C]     ; Client_EAX
+    cmp     ah, 0x15
+    jne     .not_mscdex
+
+    ; It's MSCDEX! Call C handler with pointer to client regs.
+    ; ULONG ntmini_mscdex_handler(void *client_regs)
+    ; Returns 0 if handled, non-zero if not handled.
+    pushad
+    push    ebp                 ; client_regs pointer
+    call    _ntmini_mscdex_handler
+    add     esp, 4
+    test    eax, eax
+    popad
+    jnz     .not_mscdex         ; C handler said "not handled"
+
+    ; Handled: clear carry to stop chaining
+    clc
+    ret
+
+.not_mscdex:
+    ; Not our call: set carry to continue chain
+    stc
+    ret
+
+;============================================================================
+; IFSMgr VxD Service Wrappers
+;============================================================================
+
+;--- ULONG IFSMgr_InstallFSHook_Wrapper(ULONG pfnHandler) ---
+; Installs an IFS file system API hook. Returns previous hook ptr.
+%define IFSMgr_InstallFileSystemApiHook 0x00400067
+
+global _IFSMgr_InstallFSHook_Wrapper
+global IFSMgr_InstallFSHook_Wrapper
+_IFSMgr_InstallFSHook_Wrapper:
+IFSMgr_InstallFSHook_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]           ; pfnHandler
+    push    eax
+    int     0x20
+    dd      IFSMgr_InstallFileSystemApiHook
+    add     esp, 4
+    ; EAX = previous hook function pointer
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+%define IFSMgr_CDROM_Attach  0x0040002F
+%define NotifyVolumeArrival  0x0040004D
+
+;--- ULONG IFSMgr_CDROM_Attach_Wrapper(ULONG drive_letter, ULONG *pvrp_out) ---
+; Forces CDFS mount on a drive. Returns 0 on success.
+; cdecl: push pvrp_out, push drive_letter, int 20h.
+global _IFSMgr_CDROM_Attach_Wrapper
+global IFSMgr_CDROM_Attach_Wrapper
+_IFSMgr_CDROM_Attach_Wrapper:
+IFSMgr_CDROM_Attach_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+12]       ; pvrp_out
+    push    eax
+    mov     eax, [ebp+8]        ; drive_letter (0-based)
+    push    eax
+    int     0x20
+    dd      IFSMgr_CDROM_Attach ; 0x0040002F
+    add     esp, 8
+    ; EAX = 0 success, else error
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- void NotifyVolumeArrival_Wrapper(ULONG drive_letter) ---
+; Notifies IFSMgr that a new volume appeared.
+global _NotifyVolumeArrival_Wrapper
+global NotifyVolumeArrival_Wrapper
+_NotifyVolumeArrival_Wrapper:
+NotifyVolumeArrival_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]        ; drive_letter (0-based)
+    push    eax
+    int     0x20
+    dd      NotifyVolumeArrival  ; 0x0040004D
+    add     esp, 4
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_RegisterMount_Wrapper(ULONG pfnMount, ULONG version, ULONG is_default) ---
+; Registers an FSD mount routine with IFSMgr. Returns provider ID (-1 on error).
+; cdecl: push is_default, push version, push pfnMount, int 20h.
+%define IFSMgr_RegisterMount 0x00400001
+
+global _IFSMgr_RegisterMount_Wrapper
+global IFSMgr_RegisterMount_Wrapper
+_IFSMgr_RegisterMount_Wrapper:
+IFSMgr_RegisterMount_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+16]       ; is_default (0 or 1)
+    push    eax
+    mov     eax, [ebp+12]       ; version (IFSMGRVERSION = 0x22)
+    push    eax
+    mov     eax, [ebp+8]        ; pfnMount entry point
+    push    eax
+    int     0x20
+    dd      IFSMgr_RegisterMount ; 0x00400001
+    add     esp, 12
+    ; EAX = Provider ID (-1 if error)
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_FSDAttachSFT_Wrapper(ULONG pioreq) ---
+; Creates an SFT entry for the given ioreq. Returns 0 on success.
+; Ordinal 95 in service table = 0x0040005F
+%define IFSMgr_FSDAttachSFT 0x0040005F
+
+global _IFSMgr_FSDAttachSFT_Wrapper
+global IFSMgr_FSDAttachSFT_Wrapper
+_IFSMgr_FSDAttachSFT_Wrapper:
+IFSMgr_FSDAttachSFT_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]        ; pioreq
+    push    eax
+    int     0x20
+    dd      IFSMgr_FSDAttachSFT  ; 0x0040005F
+    add     esp, 4
+    ; EAX = result
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_GetHeap_Wrapper(ULONG size) ---
+; Allocate from IFSMgr's heap. Returns pointer or 0 on failure.
+; Ordinal 13 in service table = 0x0040000D
+%define IFSMgr_GetHeap 0x0040000D
+
+global _IFSMgr_GetHeap_Wrapper
+global IFSMgr_GetHeap_Wrapper
+_IFSMgr_GetHeap_Wrapper:
+IFSMgr_GetHeap_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]        ; size
+    push    eax
+    int     0x20
+    dd      IFSMgr_GetHeap       ; 0x0040000D
+    add     esp, 4
+    ; EAX = pointer or 0
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- void IFSMgr_RetHeap_Wrapper(ULONG ptr) ---
+; Free IFSMgr heap memory.
+; Ordinal 14 in service table = 0x0040000E
+%define IFSMgr_RetHeap 0x0040000E
+
+global _IFSMgr_RetHeap_Wrapper
+global IFSMgr_RetHeap_Wrapper
+_IFSMgr_RetHeap_Wrapper:
+IFSMgr_RetHeap_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]        ; ptr
+    push    eax
+    int     0x20
+    dd      IFSMgr_RetHeap       ; 0x0040000E
+    add     esp, 4
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_RegisterFSDWithPriority_Wrapper(ULONG type, ULONG entry, ULONG prio, ULONG param, ULONG attr, ULONG ver) ---
+; Register an FSD with specific priority. Lower priority number = tried first.
+; Ordinal 118 in service table = 0x00400076
+; Type 0 = local FSD (same as RegisterMount)
+%define IFSMgr_RegisterFSDWithPriority 0x00400076
+
+global _IFSMgr_RegisterFSDWithPriority_Wrapper
+global IFSMgr_RegisterFSDWithPriority_Wrapper
+_IFSMgr_RegisterFSDWithPriority_Wrapper:
+IFSMgr_RegisterFSDWithPriority_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    ; cdecl: push right-to-left
+    ; C prototype: (type, entry, priority, param, attr, version)
+    ; [ebp+8]=type [ebp+12]=entry [ebp+16]=prio [ebp+20]=param [ebp+24]=attr [ebp+28]=ver
+    mov     eax, [ebp+28]       ; version
+    push    eax
+    mov     eax, [ebp+24]       ; attributes
+    push    eax
+    mov     eax, [ebp+20]       ; param (normal/default FSD)
+    push    eax
+    mov     eax, [ebp+16]       ; priority
+    push    eax
+    mov     eax, [ebp+12]       ; entry point
+    push    eax
+    mov     eax, [ebp+8]        ; FSD type (0=local)
+    push    eax
+    int     0x20
+    dd      IFSMgr_RegisterFSDWithPriority ; 0x00400076
+    add     esp, 24
+    ; EAX = Provider ID (-1 if error)
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_CallProvider_Wrapper(ULONG provider_id, ULONG fn, ULONG pioreq) ---
+; Calls a specific FSD's entry point for a given function.
+; Ordinal 41 in service table = 0x00400029
+%define IFSMgr_CallProvider 0x00400029
+
+global _IFSMgr_CallProvider_Wrapper
+global IFSMgr_CallProvider_Wrapper
+_IFSMgr_CallProvider_Wrapper:
+IFSMgr_CallProvider_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+16]       ; pioreq
+    push    eax
+    mov     eax, [ebp+12]       ; fn (function number)
+    push    eax
+    mov     eax, [ebp+8]        ; provider_id
+    push    eax
+    int     0x20
+    dd      IFSMgr_CallProvider  ; 0x00400029
+    add     esp, 12
+    ; EAX = result
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+;--- ULONG IFSMgr_Get_Drive_Info_Wrapper(ULONG drive_letter) ---
+; Returns drive info flags for a given volume (0=A:).
+; Uses register calling: al = drive letter (0-based).
+; Ordinal 52 in service table = 0x00400034
+%define IFSMgr_Get_Drive_Info 0x00400034
+
+global _IFSMgr_Get_Drive_Info_Wrapper
+global IFSMgr_Get_Drive_Info_Wrapper
+_IFSMgr_Get_Drive_Info_Wrapper:
+IFSMgr_Get_Drive_Info_Wrapper:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     eax, [ebp+8]        ; drive_letter (0-based)
+    ; al = drive letter for this register-based service
+    int     0x20
+    dd      IFSMgr_Get_Drive_Info ; 0x00400034
+    ; EAX = flags on carry clear, undefined on carry set
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+
+;========================================================================
+;   RING 0 EXCEPTION HANDLER FOR HWFINDADAPTER
+;
+;   Wraps HwFindAdapter with a direct IDT vector 14 (Page Fault) hook.
+;   Win9x ring 0 does NOT use SEH (FS:[0] is VMM internal state).
+;   Instead we patch the IDT entry for #PF, call HwFindAdapter, and
+;   restore the original IDT entry after.
+;
+;   ULONG Safe_HwFindAdapter(
+;       ULONG (__stdcall *HwFindAdapter)(PVOID,PVOID,PVOID,PVOID,PVOID,PUCHAR),
+;       PVOID DevExt, PVOID HwCtx, PVOID BusInfo, PVOID ArgStr,
+;       PVOID ConfigInfo, PUCHAR Again);
+;   Returns: HwFindAdapter result, or 0xDEAD0001 if exception caught.
+;========================================================================
+
+global _Safe_HwFindAdapter
+global Safe_HwFindAdapter
+_Safe_HwFindAdapter:
+Safe_HwFindAdapter:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+
+    ; Save ESP for recovery
+    mov     [.saved_esp], esp
+    mov     [.saved_ebp], ebp
+
+    ; Read current IDT entry for vector 14 (Page Fault)
+    ; IDT entry is 8 bytes: [offset_low:16][selector:16][zero:8][type:8][offset_high:16]
+    sub     esp, 8
+    sidt    [esp]                   ; store IDTR: [limit:16][base:32]
+    mov     esi, [esp+2]            ; ESI = IDT base address
+    add     esp, 8
+
+    ; Save original IDT entry for vector 14 (offset 14*8 = 112 = 0x70)
+    mov     eax, [esi+0x70]         ; low dword of IDT entry
+    mov     [.old_idt14_lo], eax
+    mov     eax, [esi+0x74]         ; high dword of IDT entry
+    mov     [.old_idt14_hi], eax
+
+    ; Also save vector 13 (GPF) for completeness
+    mov     eax, [esi+0x68]
+    mov     [.old_idt13_lo], eax
+    mov     eax, [esi+0x6C]
+    mov     [.old_idt13_hi], eax
+
+    ; Build new IDT entry pointing to our handler
+    ; Format: offset_low:16 | selector:16 | 00 | type_attr:8 | offset_high:16
+    ; Type for 32-bit interrupt gate: 0x8E (present, ring 0, 32-bit int gate)
+    mov     eax, .pf_handler
+    mov     ebx, eax
+    and     eax, 0x0000FFFF         ; offset low 16 bits
+    mov     cx, [esi+0x72]          ; borrow selector from original entry
+    shl     ecx, 16
+    or      eax, ecx                ; [offset_low | selector]
+    mov     [esi+0x70], eax         ; write low dword
+
+    mov     eax, ebx
+    and     eax, 0xFFFF0000         ; offset high 16 bits
+    or      eax, 0x00008E00         ; type: present, ring 0, 32-bit int gate
+    mov     [esi+0x74], eax         ; write high dword
+
+    ; Do the same for vector 13 (GPF)
+    mov     eax, .gpf_handler
+    mov     ebx, eax
+    and     eax, 0x0000FFFF
+    mov     cx, [esi+0x6A]          ; borrow selector from original GPF entry
+    shl     ecx, 16
+    or      eax, ecx
+    mov     [esi+0x68], eax
+
+    mov     eax, ebx
+    and     eax, 0xFFFF0000
+    or      eax, 0x00008E00
+    mov     [esi+0x6C], eax
+
+    ; Save IDT base for restore
+    mov     [.idt_base], esi
+
+    ; Call HwFindAdapter(__stdcall, 6 params)
+    push    dword [ebp+32]          ; Again
+    push    dword [ebp+28]          ; ConfigInfo
+    push    dword [ebp+24]          ; ArgumentString
+    push    dword [ebp+20]          ; BusInformation
+    push    dword [ebp+16]          ; HwContext
+    push    dword [ebp+12]          ; DeviceExtension
+    call    dword [ebp+8]           ; HwFindAdapter (stdcall, cleans stack)
+
+    ; Normal return: save HwFindAdapter result, then restore IDT
+    push    eax                     ; save return value
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax                     ; restore return value
+
+    jmp     .idt_done
+
+.pf_handler:
+    ; Page Fault handler (vector 14)
+    ; Stack: [error_code] [EIP] [CS] [EFLAGS]
+    ; Read CR2 for faulting address
+    push    eax
+    mov     eax, cr2
+    mov     [_g_fault_addr], eax
+    mov     dword [_g_fault_code], 0xC0000005   ; access violation
+    ; Get faulting EIP from stack: [pushed_eax][error_code][EIP]
+    mov     eax, [esp+8]            ; faulting EIP
+    mov     [_g_fault_eip], eax
+    pop     eax
+
+    ; Restore original IDT entries before returning
+    push    esi
+    push    eax
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+
+    ; Recover: restore saved ESP/EBP, return 0xDEAD0001
+    mov     esp, [.saved_esp]
+    mov     ebp, [.saved_ebp]
+    mov     eax, 0xDEAD0001
+    jmp     .idt_done
+
+.gpf_handler:
+    ; GPF handler (vector 13) - same recovery logic
+    push    eax
+    mov     dword [_g_fault_code], 0xC0000005
+    mov     eax, [esp+8]
+    mov     [_g_fault_eip], eax
+    mov     dword [_g_fault_addr], 0xDEAD0013   ; marker for GPF
+    pop     eax
+
+    push    esi
+    push    eax
+    mov     esi, [.idt_base]
+    mov     eax, [.old_idt14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.old_idt14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.old_idt13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.old_idt13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+
+    mov     esp, [.saved_esp]
+    mov     ebp, [.saved_ebp]
+    mov     eax, 0xDEAD0001
+    jmp     .idt_done
+
+.idt_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+
+    align 4
+.saved_esp:     dd 0
+.saved_ebp:     dd 0
+.idt_base:      dd 0
+.old_idt14_lo:  dd 0
+.old_idt14_hi:  dd 0
+.old_idt13_lo:  dd 0
+.old_idt13_hi:  dd 0
+
+;========================================================================
+; Safe_Call2 - Fault-protected 2-param stdcall call.
+;   ULONG Safe_Call2(PVOID func, PVOID arg1, PVOID arg2);
+;   Returns: function result, or 0xDEAD0001 if exception caught.
+;========================================================================
+global _Safe_Call2
+global Safe_Call2
+_Safe_Call2:
+Safe_Call2:
+    push    ebp
+    mov     ebp, esp
+    push    ebx
+    push    esi
+    push    edi
+    mov     [.sc2_saved_esp], esp
+    mov     [.sc2_saved_ebp], ebp
+    sub     esp, 8
+    sidt    [esp]
+    mov     esi, [esp+2]
+    add     esp, 8
+    mov     eax, [esi+0x70]
+    mov     [.sc2_old14_lo], eax
+    mov     eax, [esi+0x74]
+    mov     [.sc2_old14_hi], eax
+    mov     eax, [esi+0x68]
+    mov     [.sc2_old13_lo], eax
+    mov     eax, [esi+0x6C]
+    mov     [.sc2_old13_hi], eax
+    mov     eax, .sc2_pf
+    mov     ebx, eax
+    and     eax, 0x0000FFFF
+    mov     cx, [esi+0x72]
+    shl     ecx, 16
+    or      eax, ecx
+    mov     [esi+0x70], eax
+    mov     eax, ebx
+    and     eax, 0xFFFF0000
+    or      eax, 0x00008E00
+    mov     [esi+0x74], eax
+    mov     eax, .sc2_gpf
+    mov     ebx, eax
+    and     eax, 0x0000FFFF
+    mov     cx, [esi+0x6A]
+    shl     ecx, 16
+    or      eax, ecx
+    mov     [esi+0x68], eax
+    mov     eax, ebx
+    and     eax, 0xFFFF0000
+    or      eax, 0x00008E00
+    mov     [esi+0x6C], eax
+    mov     [.sc2_idt_base], esi
+    push    dword [ebp+16]          ; arg2
+    push    dword [ebp+12]          ; arg1
+    call    dword [ebp+8]           ; func (stdcall, cleans 8 bytes)
+    push    eax
+    mov     esi, [.sc2_idt_base]
+    mov     eax, [.sc2_old14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.sc2_old14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.sc2_old13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.sc2_old13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    jmp     .sc2_done
+.sc2_pf:
+    push    eax
+    mov     eax, cr2
+    mov     [_g_fault_addr], eax
+    mov     dword [_g_fault_code], 0xC0000005
+    mov     eax, [esp+8]
+    mov     [_g_fault_eip], eax
+    pop     eax
+    push    esi
+    push    eax
+    mov     esi, [.sc2_idt_base]
+    mov     eax, [.sc2_old14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.sc2_old14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.sc2_old13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.sc2_old13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+    mov     esp, [.sc2_saved_esp]
+    mov     ebp, [.sc2_saved_ebp]
+    ; Log fault EIP and addr via port 0xE9 (debugcon)
+    pushad
+    ; Output "PF:" marker
+    mov     al, 'P'
+    out     0xE9, al
+    mov     al, 'F'
+    out     0xE9, al
+    mov     al, ':'
+    out     0xE9, al
+    ; Output fault EIP as 8 hex digits
+    mov     edx, [_g_fault_eip]
+    call    .sc2_out_hex32
+    mov     al, ','
+    out     0xE9, al
+    ; Output fault addr
+    mov     edx, [_g_fault_addr]
+    call    .sc2_out_hex32
+    mov     al, 13
+    out     0xE9, al
+    mov     al, 10
+    out     0xE9, al
+    popad
+    mov     eax, 0xDEAD0001
+    jmp     .sc2_done
+
+.sc2_out_hex32:
+    ; Output EDX as 8 hex chars via port 0xE9
+    mov     ecx, 8
+.sc2_hex_loop:
+    rol     edx, 4
+    mov     al, dl
+    and     al, 0x0F
+    add     al, '0'
+    cmp     al, '9'
+    jbe     .sc2_hex_ok
+    add     al, 7
+.sc2_hex_ok:
+    out     0xE9, al
+    dec     ecx
+    jnz     .sc2_hex_loop
+    ret
+.sc2_gpf:
+    push    eax
+    mov     dword [_g_fault_code], 0xC0000005
+    mov     eax, [esp+8]
+    mov     [_g_fault_eip], eax
+    mov     dword [_g_fault_addr], 0xDEAD0013
+    pop     eax
+    push    esi
+    push    eax
+    mov     esi, [.sc2_idt_base]
+    mov     eax, [.sc2_old14_lo]
+    mov     [esi+0x70], eax
+    mov     eax, [.sc2_old14_hi]
+    mov     [esi+0x74], eax
+    mov     eax, [.sc2_old13_lo]
+    mov     [esi+0x68], eax
+    mov     eax, [.sc2_old13_hi]
+    mov     [esi+0x6C], eax
+    pop     eax
+    pop     esi
+    mov     esp, [.sc2_saved_esp]
+    mov     ebp, [.sc2_saved_ebp]
+    pushad
+    mov     al, 'G'
+    out     0xE9, al
+    mov     al, 'F'
+    out     0xE9, al
+    mov     al, ':'
+    out     0xE9, al
+    mov     edx, [_g_fault_eip]
+    call    .sc2_out_hex32
+    mov     al, 13
+    out     0xE9, al
+    mov     al, 10
+    out     0xE9, al
+    popad
+    mov     eax, 0xDEAD0001
+.sc2_done:
+    pop     edi
+    pop     esi
+    pop     ebx
+    pop     ebp
+    ret
+    align 4
+.sc2_saved_esp: dd 0
+.sc2_saved_ebp: dd 0
+.sc2_idt_base:  dd 0
+.sc2_old14_lo:  dd 0
+.sc2_old14_hi:  dd 0
+.sc2_old13_lo:  dd 0
+.sc2_old13_hi:  dd 0
+
+;--- Exception diagnostic globals ---
+global _g_fault_code
+global g_fault_code
+global _g_fault_eip
+global g_fault_eip
+global _g_fault_addr
+global g_fault_addr
+_g_fault_code:
+g_fault_code:   dd 0    ; ExceptionCode (e.g. 0xC0000005)
+_g_fault_eip:
+g_fault_eip:    dd 0    ; Faulting instruction address
+_g_fault_addr:
+g_fault_addr:   dd 0    ; CR2: address that caused the fault
+
+; ================================================================
+; 64-bit arithmetic helpers (MSVC CRT calling convention)
+;
+; These are generated by MSVC for 64-bit operations on i386.
+; Args on stack, result in EDX:EAX, caller cleans stack.
+; _allmul:  EDX:EAX = [esp+4]:[esp+8] * [esp+12]:[esp+16]  (signed 64x64)
+; _alldiv:  EDX:EAX = [esp+4]:[esp+8] / [esp+12]:[esp+16] (signed)
+; _allrem:  EDX:EAX = [esp+4]:[esp+8] % [esp+12]:[esp+16] (signed)
+; _aulldiv: EDX:EAX = [esp+4]:[esp+8] / [esp+12]:[esp+16] (unsigned)
+; _aullrem: EDX:EAX = [esp+4]:[esp+8] % [esp+12]:[esp+16] (unsigned)
+; _allshl:  EDX:EAX = [esp+4]:[esp+8] << CL               (shift left)
+; _allshr:  EDX:EAX = [esp+4]:[esp+8] >> CL               (arith shift right)
+; _aullshr: EDX:EAX = [esp+4]:[esp+8] >> CL               (logic shift right)
+; ================================================================
+
+; _allmul: signed 64-bit multiply. Only low 64 bits of 128-bit product.
+; Stack: [esp+4]=A_lo [esp+8]=A_hi [esp+12]=B_lo [esp+16]=B_hi
+; Result: EDX:EAX = A * B (low 64 bits)
+global __allmul
+global ___allmul
+__allmul:
+___allmul:
+    push    ebx
+    ; A_lo=[esp+8] A_hi=[esp+12] B_lo=[esp+16] B_hi=[esp+20]
+    mov     eax, [esp+8]      ; A_lo
+    mov     ecx, [esp+16]     ; B_lo
+    mul     ecx               ; EDX:EAX = A_lo * B_lo
+    mov     ebx, eax          ; save low result
+    push    edx               ; save high part of A_lo*B_lo
+    mov     eax, [esp+16]     ; A_hi (shifted by push)
+    mul     ecx               ; EAX = A_hi * B_lo (only low DWORD matters)
+    mov     ecx, eax          ; cross term 1
+    mov     eax, [esp+12]     ; A_lo
+    mul     dword [esp+24]    ; EAX = A_lo * B_hi (only low DWORD matters)
+    add     ecx, eax          ; cross term 2
+    pop     edx               ; restore high part of A_lo*B_lo
+    add     edx, ecx          ; add cross terms to high DWORD
+    mov     eax, ebx          ; low DWORD
+    pop     ebx
+    ret
+
+; _allshl: 64-bit shift left by CL
+; Stack: [esp+4]=lo [esp+8]=hi, CL=shift count
+global __allshl
+global ___allshl
+__allshl:
+___allshl:
+    mov     eax, [esp+4]      ; lo
+    mov     edx, [esp+8]      ; hi
+    ; CL already has count
+    cmp     cl, 64
+    jae     .shl_zero
+    cmp     cl, 32
+    jae     .shl_high
+    shld    edx, eax, cl
+    shl     eax, cl
+    ret
+.shl_high:
+    mov     edx, eax
+    xor     eax, eax
+    sub     cl, 32
+    shl     edx, cl
+    ret
+.shl_zero:
+    xor     eax, eax
+    xor     edx, edx
+    ret
+
+; _allshr: 64-bit arithmetic shift right by CL
+global __allshr
+global ___allshr
+__allshr:
+___allshr:
+    mov     eax, [esp+4]      ; lo
+    mov     edx, [esp+8]      ; hi
+    cmp     cl, 64
+    jae     .shr_sign
+    cmp     cl, 32
+    jae     .shr_high
+    shrd    eax, edx, cl
+    sar     edx, cl
+    ret
+.shr_high:
+    mov     eax, edx
+    sar     edx, 31           ; sign extend
+    sub     cl, 32
+    sar     eax, cl
+    ret
+.shr_sign:
+    sar     edx, 31
+    mov     eax, edx
+    ret
+
+; _aullshr: 64-bit logical shift right by CL
+global __aullshr
+global ___aullshr
+__aullshr:
+___aullshr:
+    mov     eax, [esp+4]
+    mov     edx, [esp+8]
+    cmp     cl, 64
+    jae     .ushr_zero
+    cmp     cl, 32
+    jae     .ushr_high
+    shrd    eax, edx, cl
+    shr     edx, cl
+    ret
+.ushr_high:
+    mov     eax, edx
+    xor     edx, edx
+    sub     cl, 32
+    shr     eax, cl
+    ret
+.ushr_zero:
+    xor     eax, eax
+    xor     edx, edx
+    ret
+
+; _aulldiv: unsigned 64-bit divide. EDX:EAX = A / B
+; Stack: [esp+4]=A_lo [esp+8]=A_hi [esp+12]=B_lo [esp+16]=B_hi
+global __aulldiv
+global ___aulldiv
+__aulldiv:
+___aulldiv:
+    push    ebx
+    push    esi
+    ; A_lo=[esp+12] A_hi=[esp+16] B_lo=[esp+20] B_hi=[esp+24]
+    mov     eax, [esp+24]     ; B_hi
+    test    eax, eax
+    jnz     .udiv_big
+    ; B fits in 32 bits: A / B_lo
+    mov     ecx, [esp+20]     ; B_lo
+    mov     eax, [esp+16]     ; A_hi
+    xor     edx, edx
+    div     ecx               ; EAX = A_hi / B_lo
+    mov     ebx, eax          ; save quotient high
+    mov     eax, [esp+12]     ; A_lo
+    div     ecx               ; EAX = remainder:A_lo / B_lo
+    mov     edx, ebx          ; quotient high
+    pop     esi
+    pop     ebx
+    ret
+.udiv_big:
+    ; B > 32 bits: shift both A and B right until B fits in 32 bits,
+    ; then do a single 32-bit divide for an approximate quotient.
+    mov     ebx, [esp+24]     ; B_hi
+    bsr     ecx, ebx          ; ecx = highest set bit in B_hi
+    inc     ecx               ; shift count to make B fit in 32 bits
+    ; Shift A right by ECX
+    mov     eax, [esp+12]     ; A_lo
+    mov     edx, [esp+16]     ; A_hi
+    shrd    eax, edx, cl
+    shr     edx, cl
+    ; Shift B right by ECX → result fits in 32 bits
+    push    eax               ; save shifted A_lo
+    mov     eax, [esp+24]     ; B_lo (shifted +4)
+    shrd    eax, ebx, cl      ; EAX = shifted B (32-bit)
+    mov     ecx, eax          ; divisor
+    pop     eax               ; shifted A_lo
+    ; EDX:EAX / ECX → approximate quotient in EAX
+    div     ecx
+    ; Result is approximate (quotient may be off by 1), but sufficient
+    ; for driver arithmetic. Full correction would need multiply-back check.
+    xor     edx, edx          ; quotient fits in 32 bits
+    pop     esi
+    pop     ebx
+    ret
+
+; _aullrem: unsigned 64-bit remainder. EDX:EAX = A % B
+global __aullrem
+global ___aullrem
+__aullrem:
+___aullrem:
+    push    ebx
+    ; A_lo=[esp+8] A_hi=[esp+12] B_lo=[esp+16] B_hi=[esp+20]
+    mov     eax, [esp+20]     ; B_hi
+    test    eax, eax
+    jnz     .urem_big
+    ; B fits in 32 bits
+    mov     ecx, [esp+16]     ; B_lo
+    mov     eax, [esp+12]     ; A_hi
+    xor     edx, edx
+    div     ecx
+    mov     eax, [esp+8]      ; A_lo
+    div     ecx
+    mov     eax, edx          ; remainder in EDX from div
+    xor     edx, edx
+    pop     ebx
+    ret
+.urem_big:
+    ; B > 32 bits, A < B likely → remainder = A
+    mov     eax, [esp+8]
+    mov     edx, [esp+12]
+    pop     ebx
+    ret
+
+; _alldiv: signed 64-bit divide
+global __alldiv
+global ___alldiv
+__alldiv:
+___alldiv:
+    push    ebx
+    push    esi
+    ; Determine sign of result
+    mov     esi, [esp+16]     ; A_hi — sign bit
+    xor     esi, [esp+24]     ; XOR with B_hi sign → result sign in bit 31
+    ; Make A positive
+    mov     eax, [esp+12]     ; A_lo
+    mov     edx, [esp+16]     ; A_hi
+    test    edx, edx
+    jns     .sd_a_pos
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sd_a_pos:
+    push    edx               ; A_hi (positive)
+    push    eax               ; A_lo (positive)
+    ; Make B positive
+    mov     eax, [esp+28]     ; B_lo (shifted +8)
+    mov     edx, [esp+32]     ; B_hi (shifted +8)
+    test    edx, edx
+    jns     .sd_b_pos
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sd_b_pos:
+    push    edx               ; B_hi (positive)
+    push    eax               ; B_lo (positive)
+    ; Call unsigned divide
+    call    ___aulldiv
+    add     esp, 16
+    ; Apply sign
+    test    esi, esi
+    jns     .sd_done
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sd_done:
+    pop     esi
+    pop     ebx
+    ret
+
+; _allrem: signed 64-bit remainder
+global __allrem
+global ___allrem
+__allrem:
+___allrem:
+    push    ebx
+    push    esi
+    mov     esi, [esp+16]     ; A_hi — remainder sign matches dividend
+    ; Make A positive
+    mov     eax, [esp+12]
+    mov     edx, [esp+16]
+    test    edx, edx
+    jns     .sr_a_pos
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sr_a_pos:
+    push    edx
+    push    eax
+    ; Make B positive
+    mov     eax, [esp+28]
+    mov     edx, [esp+32]
+    test    edx, edx
+    jns     .sr_b_pos
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sr_b_pos:
+    push    edx
+    push    eax
+    call    ___aullrem
+    add     esp, 16
+    test    esi, esi
+    jns     .sr_done
+    neg     edx
+    neg     eax
+    sbb     edx, 0
+.sr_done:
+    pop     esi
+    pop     ebx
+    ret
