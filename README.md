@@ -2,7 +2,7 @@
 
 **Load Windows NT kernel-mode drivers on Windows 9x. Any NT version. Any architecture.**
 
-Janus is a driver translation framework that bridges the fundamental incompatibility between Windows NT kernel-mode drivers (.sys PE files) and the Windows 9x VxD subsystem. It loads, relocates, resolves imports, and executes unmodified NT drivers inside a Win98 VxD wrapper, spanning 12 years of Windows history and three CPU architectures.
+Janus is a driver translation framework that bridges the fundamental incompatibility between Windows NT kernel-mode drivers (.sys PE files) and the Windows 9x VxD subsystem. It loads, relocates, and resolves imports for unmodified NT drivers inside a Win98 VxD wrapper, spanning 12 years of Windows history and three CPU architectures. i386 drivers execute through to live hardware I/O; 64-bit AMD64 and Itanium drivers load with all imports resolved, the ceiling for a 32-bit host.
 
 Named after the Roman god of doorways, transitions, and passages — depicted with two faces looking in opposite directions. Janus presides over the passage between incompatible kernel architectures, connecting the beginning of NT (3.1, 1993) to the end of 9x (ME, 2000).
 
@@ -147,6 +147,11 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 | Windows XP SP3 | 2005 | i386 | 8 drivers proven (SCSI/NDIS/Video/HID/Audio) |
 | Windows XP x64 | 2005 | AMD64 | 5 drivers PE32+ loaded |
 | Windows XP IA-64 | 2003 | Itanium | 1 driver PE32+ loaded |
+| NT 3.51 / 4.0 | 1995–96 | PowerPC PReP (0x01F0) | Drivers on NT4 media (/PPC); PE load proof planned |
+| NT 3.1–4.0 | 1993–96 | Alpha AXP (0x0184) | Drivers on NT4 media (/ALPHA); PE load proof planned |
+| NT 3.1–4.0 | 1993–96 | MIPS R4000 LE (0x0166) | Drivers on NT4 media (/MIPS); PE load proof planned |
+
+Target: every architecture NT (and its siblings) ever ran on. See Roadmap → Architecture coverage.
 
 ## Win9x Target Support
 
@@ -176,23 +181,53 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 ## Roadmap
 
 ### Near-term
+- Reverse-direction DMA: route a hosted VxD's `_PageAllocate` to real NT `MmAllocateContiguousMemory` so a hosted class moves real data. The import-mode shim (with ntoskrnl imports) already loads and initializes on a real Windows 2000 kernel; real contiguous-physical allocation with a linear/physical readback proof is next.
 - Win95 and WinME testing
-- More IA-64 Itanium drivers (ne2000, vga)
 - VideoPort Int10 timing fix (defer V86 to Init_Complete)
 - NDIS to Win98 TCP/IP bridge for real networking
-- MIPS (0x0166) and Alpha AXP (0x0184) architecture support from NT 3.51/4.0
+- More IA-64 Itanium drivers (ne2000, vga); MIPS (0x0166) and Alpha AXP (0x0184) support from NT 3.51/4.0
 
 ### Medium-term
-- Bidirectional reverse direction — **in progress**: 7 Win9x VxD classes (VNETBIOS, DSOUND, ISAPNP, VSERVER, SB16, MGAXDD, MMDEVLDR) fully initialize on the NT kernel under ReactOS, loader proven across 12 VxDs, and real Windows 2000 boots in cloud x86 emulation. See [STATUS.md](STATUS.md).
+- **Reverse direction — proven and advancing**: 6 Win9x VxD classes (VSERVER, SB16, MGAXDD, MMDEVLDR, PCI, VJOYD) fully initialize on a real Microsoft Windows 2000 kernel (9 on ReactOS); the loader and a harvest-build-host pipeline are proven across many real vendor VxDs. **Function frontier crossed for PCI**: a Win9x VxD's own configuration-read code reads the live i440fx PCI bus on a real Win2K kernel, not merely initializing against fakes. See [STATUS.md](STATUS.md).
+- **Function frontier**: drive more hosted classes from "init runs" to "device functions" (DMA, IRQ, bus-enumeration, real I/O). This is the per-device-class grind, and the prize. Widening OS coverage adds init checkmarks; function is the real measure.
+- **V86 monitor** in the reverse shim: unlocks real-mode-thunking VxDs (the MRCI2 / DriveSpace class) and, on the same 32-bit substrate, hosting DOS real-mode drivers.
+- **Span extension**: backward to Windows 3.1 386-Enhanced `.386` VxDs (same VMM/VxD mechanism, a subset of services) and forward to 32-bit Vista/7/8/10 kernels. x64 and Windows 11 need a binary lifter, which is a separate programme.
 - Runtime driver loading from filesystem (bypass VxD size limit)
 - Full WDM IRP stack for complex drivers
 - Real hardware testing (beyond QEMU)
+
+### Longer-term
+- **Binary lifter / recompiler**: statically translate a 32-bit VxD (or a legacy NT driver) into a native x64 WDM driver, mapping VMM and legacy NT services onto modern HAL/WDM equivalents. This is the only route to hosting legacy drivers on x64 Windows 10/11 and ARM64, where in-place execution is blocked by long mode and HVCI. A substantial research programme in its own right.
+- **Production isolation**: run an imported legacy driver under IOMMU / VBS containment with a real threat model, so an unpatchable industrial, medical, or SCADA system can be retired while its hardware keeps working in the field, not only inside QEMU. The mission, fully realized.
+- **Real-mode and 16-bit coverage**: DOS real-mode device drivers and TSRs hosted through the V86 monitor; Windows 3.1 16-bit `.DRV` modules through a minimal Win16 environment (wine-NE / WOW style).
+- **Automated translation**: generalize the harvest-build-host pipeline so an arbitrary vendor driver is ingested and bridged with minimal hand work, using assisted reverse engineering and service-usage inference to generate shims.
+- **Cross-architecture hosting**: legacy x86 drivers on ARM64 and RISC-V maintained hosts via lifting or embedded CPU emulation.
+- **Upstream and preserve**: contribute the reverse VxD-on-NT capability to ReactOS, release a public preservation toolkit, and partner with computing museums and digital archives.
+
+### Architecture coverage
+The ambition is **every architecture NT (and its siblings) ever ran on.** Proven so far: i386, AMD64 (x64), Itanium (IA-64). To add:
+
+- **PowerPC (PReP)** — NT 3.51/4.0, PE machine `0x01F0`. Drivers ship in the `/PPC` tree of the NT4 media already in hand; a static load + relocation + import proof completes the NT 4.0 architecture quad. Highest payoff for lowest cost.
+- **Alpha AXP** — NT 3.1–4.0 plus the cancelled Windows 2000 Alpha RC betas, PE machine `0x0184` (64-bit AXP64 is `0x0284`). The furthest-developed non-x86 NT, with the richest third-party driver set.
+- **MIPS R4000 LE** — NT 3.1–4.0, PE machine `0x0166`. The original ARC platform (Jazz/Magnum).
+
+Those three are static PE load + relocation + import proofs (cheap, cross-arch). Native execution needs the matching CPU: QEMU has MIPS and PowerPC system targets with partial NT ARC/PReP firmware support, while Alpha and IA-64 execution are impractical. Load-proof first, execution as a research effort.
+
+Adjacent ecosystems that reuse the same or similar machinery:
+
+- **OS/2 (LE/LX)** — OS/2 physical/virtual device drivers use the LX format, the pure-32-bit sibling of the VxD LE format the loader already parses (x86). This extends Janus from cross-Windows-version to genuine **cross-OS** driver translation at near-zero loader cost. OS/2 also had a PowerPC port.
+- **Windows CE** — ran on ARM, MIPS, SH3, and SH-4 (`0x01A6`) with its own stream-interface/native driver model (not NT's), so it needs a distinct shim. Preservation hook: the Sega Dreamcast is an SH-4 running Windows CE.
+
+Historical and future endpoints:
+
+- **Intel i860 ("N-Ten")** — NT's original prototype architecture and the source of the "NT" name. No real driver ecosystem to harvest; included for completeness of the "every architecture NT touched" framing.
+- **ARM64 and RISC-V** — future maintained hosts with no vintage drivers, reachable only via the binary lifter. RISC-V is the open, maintainable endpoint for the security and preservation mission.
 
 ## Project History
 
 Originally developed for the [Vogons retro-computing community](https://vogons.org) to solve CD-ROM driver issues on Windows 98 with NEC ATAPI controllers. Grew into a universal driver translation framework spanning the full NT driver ecosystem.
 
-Approximately 200 million tokens of Claude (Opus 4.6) reverse engineering compute over 3 months of development, March-May 2026.
+Approximately 500 million tokens of Claude (Opus 4.5-4.8) reverse engineering compute over 4 months of development, March-June 2026.
 
 ## License
 

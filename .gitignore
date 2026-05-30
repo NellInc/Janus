@@ -36,3 +36,6 @@ source/*_EMBEDDED.H
 
 # Vogons forum-post draft — not part of the published framework
 VOGONS_POST_DRAFT.md
+
+# Internal session continuation prompts / working notes — not part of the published framework
+_contprompts/

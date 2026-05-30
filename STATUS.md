@@ -4,23 +4,37 @@
 
 ## Reverse Direction — Janus's Other Face (the migration & security path)
 
-The reverse loader runs unmodified Win9x VxD drivers as native kernel modules on a modern NT-family kernel. Validated headless in cloud x86 emulation (QEMU TCG, no KVM) against ReactOS 0.4.15.
+The reverse loader runs unmodified Win9x VxD drivers as native kernel modules on a modern NT-family kernel. Validated headless in cloud x86 emulation (QEMU TCG, no KVM) on **both ReactOS 0.4.15 and a genuine Microsoft Windows 2000 kernel.**
 
-**Seven Win9x VxD classes fully initialize on the NT kernel** — DDB located, the full `Sys_Critical_Init → Device_Init → Init_Complete → Create_VM` lifecycle returns OK, service RUNNING, no bugcheck:
+**Nine Win9x VxD classes fully initialize on ReactOS; six of them also fully initialize on a real Windows 2000 kernel** — DDB located, the full `Sys_Critical_Init → Device_Init → Init_Complete` lifecycle returns OK, no bugcheck:
 
-| VxD | Class |
-|-----|-------|
-| VNETBIOS | NetBIOS / network |
-| DSOUND | DirectSound audio |
-| ISAPNP | Plug-and-Play enumerator |
-| VSERVER | File/print sharing server |
-| SB16 | Sound Blaster 16 audio |
-| MGAXDD | Matrox display |
-| MMDEVLDR | Multimedia device loader |
+| VxD | Class | ReactOS | Real Win2K |
+|-----|-------|:-------:|:----------:|
+| VSERVER | File/print sharing server | ✓ | ✓ |
+| SB16 | Sound Blaster 16 audio | ✓ | ✓ |
+| MGAXDD | Matrox display | ✓ | ✓ |
+| MMDEVLDR | Multimedia device loader | ✓ | ✓ |
+| PCI | PCI bus enumerator | ✓ | ✓ |
+| VJOYD | Joystick (input) | ✓ | ✓ |
+| VNETBIOS | NetBIOS / network | ✓ | — |
+| DSOUND | DirectSound audio | ✓ | — |
+| ISAPNP | Plug-and-Play enumerator | ✓ | — |
 
-**Loader generality:** the LE loader, source-list fixup engine, parameterized DDB-name scan, and control-proc dispatch are proven across **12 VxDs** (every one loads, DDB located at +0x0C, control proc invoked, no BSOD). Seven complete the full init sequence; the rest load and dispatch but their `Device_Init` declines or faults (shim-caught, no crash) when it probes hardware absent from the emulator or hits an unsatisfied VMM service. That is a per-driver service-coverage frontier, not a loader limitation.
+The Win2K-kernel control-proc addresses (`0xBF9Exxxx`, kernel space) confirm these run on the genuine Microsoft kernel, not ReactOS. Delivered via a fully unattended floppy install plus registry auto-load (Start=2), no `sc.exe`.
 
-**Real Windows 2000 boots in the cloud x86 emulator** — the architecture wall that blocked local ARM emulation — opening the path to hosting legacy VxDs on genuine Microsoft NT rather than only ReactOS.
+**Harvest → build → host pipeline:** VJOYD was sourced fresh from Windows 98 SE media, embedded, built, and hosted end-to-end, proving the workflow on an arbitrary real vendor VxD rather than a hand-picked set.
+
+**Loader generality:** the LE loader, source-list fixup engine, parameterized DDB-name scan, and control-proc dispatch are proven across **12+ VxDs** (every one loads, DDB located at +0x0C, control proc invoked, no BSOD). Those above complete the full init sequence; the rest load and dispatch but their `Device_Init` declines or faults (shim-caught, no crash) when it probes hardware absent from the emulator or hits an unsatisfied VMM service. That is a per-driver service-coverage frontier, not a loader limitation.
+
+### Function frontier — beyond "init runs"
+Initialization completing is necessary but not sufficient; the real measure is the hosted driver performing its function (DMA, IRQ, bus-enumeration, real I/O). **Crossed for PCI on a real Windows 2000 kernel:**
+
+- **Host-side bus I/O:** the hosted ring-0 context performs real PCI configuration I/O (ports 0xCF8/0xCFC) on the live i440fx bus and reads back the actual device list (440FX host bridge, PIIX3 ISA/IDE, PIIX4 ACPI, VGA, NIC), with the device IDs matching exactly what the emulated chipset presents.
+- **The VxD's own code:** PCI.VXD's own configuration-read primitive, driven on the real Win2K kernel, reads back four distinct correct vendor:device IDs from the live bus — the VxD's own enumeration code doing real hardware I/O, not merely initializing against fakes.
+
+**DMA / real NT memory:** an import-mode reverse shim (linking real `ntoskrnl.exe` imports, the first non-standalone reverse shim) loads and initializes on a real Windows 2000 kernel — the step toward routing a hosted driver's allocation to genuine NT contiguous-physical memory (`MmAllocateContiguousMemory`) for real DMA.
+
+**Depth methodology:** the MRCI2 (DriveSpace compression) VxD was driven through three chained `Device_Init` fixes to a V86 real-mode boundary, validating a repeatable fault → disassemble → stub → rebuild loop for promoting decline/fault classes toward full init.
 
 This is the face that lets a system stranded on Windows 9x carry its irreplaceable driver onto a modern, maintained kernel.
 
@@ -88,8 +102,9 @@ This is the face that lets a system stranded on Windows 9x carry its irreplaceab
 | PE32 | 0x014C | i386 (x86-32) | Full load + execute |
 | PE32+ | 0x8664 | AMD64 (x86-64) | Full load + import resolution |
 | PE32+ | 0x0200 | IA-64 (Itanium) | Full load + import resolution |
-| PE32 | 0x0166 | MIPS R4000 | Planned |
-| PE32 | 0x0184 | Alpha AXP | Planned |
+| PE32 | 0x0166 | MIPS R4000 LE | Planned (drivers on NT4 media) |
+| PE32 | 0x0184 | Alpha AXP | Planned (drivers on NT4 media) |
+| PE32 | 0x01F0 | PowerPC (PReP) | Planned (drivers on NT4 media) |
 
 ## Key Technical Achievements
 

@@ -210,34 +210,39 @@ File-absolute: Nonresident name table
 
 ## Current State
 
+(STATUS.md and the README "What's Proven" table are the authoritative, current results; this section summarizes the integration state.)
+
 ### Working
 
-IOS registration succeeds (DRP_reg_result returns REMAIN_RESIDENT). The ILB
-pointer is acquired from the APIX driver via DDB chain walking. A DCB is created
-with CD-ROM device type. The calldown chain entry is installed so IOS routes
-requests to NTMINI.VXD. A drive letter is associated. Win98 boots to desktop
-with the driver loaded.
+IOS registration / late-create succeeds: the ILB is acquired from the stock port
+driver (ESDI_506) via DDB chain walking, and the calldown entry is spliced in as a
+PORT_DRIVER above it so IOS routes requests to NTMINI.VXD. The IOR handler is no
+longer a stub — it translates IOS READ/WRITE requests and serves **real file I/O**:
 
-### Not Yet Working
+- **CD-ROM**: an NT5 WDM `atapi.sys` serves ISO-9660 file reads through Win98's IFS
+  layer (SREAD/WREAD read correct file content).
+- **HDD**: secondary-channel ATA sector reads complete via direct port I/O through
+  the calldown chain.
+- **SCSI**: the miniport path is proven end to end — `sym_hi.sys` (LSI 53C810) does
+  9/9 sector READ+WRITE via IOR → SRB → `HwStartIo`.
 
-The IOR handler is a stub. When IOS sends an I/O request through the calldown
-chain, the driver does not yet translate it into SRB commands for the miniport.
-Full VMM page allocation for DMA buffers is not implemented. PE section mapping
-at runtime is incomplete. VPICD interrupt wiring is written but not connected.
+DMA buffer allocation works: the Win9x page-table self-map at PDE 0x3FE resolves
+VA → PA, and contiguous physical pages back full NIC DMA TX/RX (rtl8139). Win98
+boots to desktop with the driver loaded.
 
-### Remaining Work
+### Current limitations
 
-1. **IOR handler**: translate IOS block requests into SCSI CDBs, dispatch through
-   the miniport's HwStartIo, handle completion via the DPC mechanism.
-2. **DMA buffer allocation**: use VMM_PageAllocate to obtain physically contiguous
-   memory below 16 MB for ISA DMA, or use scatter/gather descriptors for PCI.
-3. **Runtime PE mapping**: fully map all .sys sections with correct page
-   protections, not just code and import sections.
-4. **Interrupt wiring**: connect IRQHOOK.C's VPICD callbacks into the main driver
-   path so hardware interrupts reach the miniport's HwInterrupt.
-5. **SCSI command coverage**: implement remaining CDB formats beyond INQUIRY,
-   READ(10), and TEST UNIT READY. MODE SENSE, REQUEST SENSE, and READ CAPACITY
-   are the most critical.
+1. **Interrupt virtualization**: the VPICD IRQ hook (IRQHOOK.C) is written but
+   disabled (`#if 0`); polling mode is used instead, because VPICD virtualization
+   crashes on the restored image. Proposed fix: defer the hook until after
+   StartDevice and the first successful I/O.
+2. **Multi-device**: the bridge handles one device at a time (CD-ROM or HDD);
+   simultaneous multi-device is untested.
+3. **Hardware wizard**: Win98 PCI re-enumeration can pop the Add-New-Hardware
+   wizard on first boot, delaying `run=` programs. Currently suppressed via image
+   preparation, not yet from within the VxD.
+4. **SCSI command coverage**: beyond INQUIRY, READ(10), WRITE, and TEST UNIT READY,
+   formats such as MODE SENSE, REQUEST SENSE, and READ CAPACITY are partial.
 
 
 ## Build and Deploy
@@ -309,5 +314,7 @@ PCI bus simulation uses direct port access (0xCF8/0xCFC), the same mechanism as
 the existing ScsiPort path. The bus interface callbacks wrap this access in the
 NT BUS_INTERFACE_STANDARD structure that pciidex.sys expects.
 
-All five modules are compiled and structurally complete. Integration testing with
-actual NT5 driver binaries has not yet been performed.
+All five modules are compiled and structurally complete. NT5 WDM integration is
+proven end to end through `atapi.sys` (a Windows 2000 driver) serving real CD-ROM
+file I/O via the IFS / IOS calldown path; the `BUS_INTERFACE_STANDARD` path for
+`pciidex.sys` is built and awaits its own integration test.
