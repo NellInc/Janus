@@ -124,6 +124,47 @@ static struct {
     PVOID PhysicalDeviceObject;
 } g_audio_adapter;
 
+/* Fake DRIVER_EXTENSION: just need AddDevice at offset +0x04.
+ * Real layout: +0x00=DriverObject, +0x04=AddDevice, +0x08=Count, +0x0C=ServiceKeyName */
+static ULONG g_fake_driver_ext[4];  /* 16 bytes */
+
+/* Fake DRIVER_OBJECT: 0x168 bytes on XP i386.
+ * DriverExtension is at offset +0x28. */
+static ULONG g_fake_driver_object[0x60]; /* 0x180 bytes, zero-filled */
+
+static ULONG __stdcall safe_irp_dispatch(PVOID DevObj, PVOID Irp)
+{
+    return 0xC00000BBUL; /* STATUS_NOT_SUPPORTED */
+}
+
+PVOID audio_get_fake_driver_object(void)
+{
+    ULONG i;
+    PULONG drvObj = g_fake_driver_object;
+
+    /* Zero the entire DRIVER_OBJECT */
+    for (i = 0; i < 0x60; i++) drvObj[i] = 0;
+
+    /* DRIVER_OBJECT layout (XP i386):
+       +0x00 Type(2) Size(2) +0x04 DeviceObject +0x08 Flags
+       +0x0C DriverStart +0x10 DriverSize +0x14 DriverSection
+       +0x18 DriverExtension +0x1C DriverName(8) +0x24 HardwareDatabase
+       +0x28 FastIoDispatch +0x2C DriverInit +0x30 DriverStartIo
+       +0x34 DriverUnload +0x38 MajorFunction[28] */
+    drvObj[0] = 4 | (0x168 << 16); /* Type=4 (IO_TYPE_DRIVER), Size=0x168 */
+    drvObj[6] = (ULONG)&g_fake_driver_ext[0]; /* DriverExtension at +0x18 */
+    g_fake_driver_ext[0] = (ULONG)drvObj;     /* DriverExtension->DriverObject */
+
+    /* MajorFunction[0..27] at +0x38 (ULONG index 14..41) */
+    for (i = 14; i < 14 + 28; i++)
+        drvObj[i] = (ULONG)safe_irp_dispatch;
+
+    /* DriverInit at +0x2C (index 11) */
+    drvObj[11] = (ULONG)safe_irp_dispatch;
+
+    return (PVOID)drvObj;
+}
+
 /* ================================================================
  * COM Vtable: IPortWaveCyclic
  *
@@ -419,9 +460,12 @@ static NTSTATUS __stdcall pc_InitializeAdapterDriver(
      * DriverObject->DriverExtension->AddDevice and sets up IRP dispatch.
      * We store it for potential later invocation. */
     if (DriverObject) {
-        /* DriverExtension is at DriverObject+0x28, AddDevice at +0x04 within it.
-         * But the DriverExtension pointer itself may be NULL in our fake object.
-         * Just store to our global for now. */
+        PULONG drvObj = (PULONG)DriverObject;
+        PULONG drvExt = (PULONG)drvObj[10]; /* DriverExtension at +0x28 */
+        if (drvExt) {
+            drvExt[1] = (ULONG)AddDeviceCallback; /* AddDevice at DriverExtension+0x04 */
+            VxD_Debug_Printf("PC: Stored AddDevice into DriverExtension\r\n");
+        }
     }
     return STATUS_SUCCESS;
 }

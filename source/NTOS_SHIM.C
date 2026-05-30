@@ -697,34 +697,18 @@ static ULONG __stdcall ntos_except_handler3(void)
  * (hi=0). Drivers that need full 64-bit math will need asm helpers.
  * ================================================================ */
 
-/* _allmul: 32x32->64 is sufficient for most driver use.
- * Full 64x64 without long long: a_lo*b_lo + cross terms. */
-static void __cdecl ntos_allmul(void)
-{
-    /* Stub: most drivers only multiply small values.
-     * EDX:EAX = result. We'll implement properly if needed. */
-    VxD_Debug_Printf("NTOS: _allmul called (stub)\r\n");
-}
-
-static void __cdecl ntos_alldiv(void)
-{
-    VxD_Debug_Printf("NTOS: _alldiv called (stub)\r\n");
-}
-
-static void __cdecl ntos_allshr(void)
-{
-    VxD_Debug_Printf("NTOS: _allshr called (stub)\r\n");
-}
-
-static void __cdecl ntos_aulldiv(void)
-{
-    VxD_Debug_Printf("NTOS: _aulldiv called (stub)\r\n");
-}
-
-static void __cdecl ntos_aullrem(void)
-{
-    VxD_Debug_Printf("NTOS: _aullrem called (stub)\r\n");
-}
+/* 64-bit arithmetic helpers — real implementations in VXDWRAP_V4.ASM.
+ * MSVC CRT calling convention: args on stack, result EDX:EAX.
+ * ASM exports: ___allmul (NASM global) → Watcom sees _allmul → linker matches.
+ * Watcom prepends _ to C names, so _allmul → __allmul in object file. */
+extern void __cdecl _allmul(void);
+extern void __cdecl _alldiv(void);
+extern void __cdecl _allshr(void);
+extern void __cdecl _allshl(void);
+extern void __cdecl _aulldiv(void);
+extern void __cdecl _aullrem(void);
+extern void __cdecl _aullshr(void);
+extern void __cdecl _allrem(void);
 
 /* ================================================================
  * Unicode/ANSI string structures and helpers
@@ -1413,6 +1397,20 @@ static PVOID __stdcall ntos_MmMapLockedPages(PVOID Mdl, ULONG AccessMode)
     return NULL;
 }
 
+/* RtlZeroMemory -- on IA-64/AMD64, this is an actual ntoskrnl export
+ * (on x86 it's a macro for memset). 2 params, void return. */
+static void __stdcall ntos_RtlZeroMemory(PVOID Destination, ULONG Length)
+{
+    ntos_memset(Destination, 0, Length);
+}
+
+/* RtlCopyMemory -- on IA-64/AMD64, actual ntoskrnl export.
+ * 3 params, void return. */
+static void __stdcall ntos_RtlCopyMemory(PVOID Destination, PVOID Source, ULONG Length)
+{
+    ntos_memcpy(Destination, Source, Length);
+}
+
 /* ================================================================
  *
  *  ntoskrnl.exe Import Function Table
@@ -1476,11 +1474,14 @@ static const IMPORT_FUNC_ENTRY ntos_funcs[] = {
     { "memmove",                        (PVOID)ntos_memmove },
     { "_except_handler3",               (PVOID)ntos_except_handler3 },
     { "__C_specific_handler",          (PVOID)ntos_except_handler3 },
-    { "_alldiv",                        (PVOID)ntos_alldiv },
-    { "_allmul",                         (PVOID)ntos_allmul },
-    { "_allshr",                        (PVOID)ntos_allshr },
-    { "_aulldiv",                       (PVOID)ntos_aulldiv },
-    { "_aullrem",                       (PVOID)ntos_aullrem },
+    { "_alldiv",                        (PVOID)_alldiv },
+    { "_allmul",                         (PVOID)_allmul },
+    { "_allshr",                        (PVOID)_allshr },
+    { "_allshl",                        (PVOID)_allshl },
+    { "_aulldiv",                       (PVOID)_aulldiv },
+    { "_aullrem",                       (PVOID)_aullrem },
+    { "_aullshr",                       (PVOID)_aullshr },
+    { "_allrem",                        (PVOID)_allrem },
 
     /* x64 drivers import these from ntoskrnl (not HAL) */
     { "ExAcquireFastMutex",            (PVOID)hal_ExAcquireFastMutex },
@@ -1553,6 +1554,11 @@ static const IMPORT_FUNC_ENTRY ntos_funcs[] = {
 
     /* NE2000 x64: memory-mapped I/O */
     { "MmMapLockedPages",              (PVOID)ntos_MmMapLockedPages },
+
+    /* IA-64/AMD64: RtlZeroMemory and RtlCopyMemory are actual exports
+     * (on x86 they're macros, but 64-bit compilers import them) */
+    { "RtlZeroMemory",                 (PVOID)ntos_RtlZeroMemory },
+    { "RtlCopyMemory",                 (PVOID)ntos_RtlCopyMemory },
 
     { NULL, NULL }
 };
@@ -1702,10 +1708,32 @@ extern int pe_parse_exports(void *image_base, ULONG image_size, NTOS_LOADED_IMAG
 #include "AHA154X_NT31_EMBEDDED.H"
 #include "BUSLOGIC_NT351_EMBEDDED.H"
 #include "NCR53C9X_NT351_EMBEDDED.H"
+#include "AHA154X_NT35_EMBEDDED.H"
+#include "NE2000_NT35_EMBEDDED.H"
 #endif
 
 #ifdef NTOS_TEST_IA64
 #include "PCIIDE_IA64_EMBEDDED.H"
+#endif
+
+#ifdef NTOS_TEST_IA64_NE2K
+#include "NE2000_IA64_EMBEDDED.H"
+#endif
+
+#ifdef NTOS_TEST_IA64_VGA
+#include "VGA_IA64_EMBEDDED.H"
+#endif
+
+#ifdef NTOS_TEST_MIPS
+#include "AHA154X_MIPS_EMBEDDED.H"
+#endif
+
+#ifdef NTOS_TEST_ALPHA
+#include "AHA154X_ALPHA_EMBEDDED.H"
+#endif
+
+#ifdef NTOS_TEST_PPC
+#include "JOYPORT_PPC_EMBEDDED.H"
 #endif
 
 int ntos_test_driver(void)
@@ -1842,6 +1870,7 @@ int ntos_test_driver(void)
     PFN_DRIVER_ENTRY pfnDriverEntry;
 
     extern void audio_shim_register(void);
+    extern PVOID audio_get_fake_driver_object(void);
 
     ntos_shim_register();
     audio_shim_register();
@@ -1857,18 +1886,60 @@ int ntos_test_driver(void)
     ntos_log_hex(" entry=", (ULONG)entry_point, "\r\n");
 
     {
-        PVOID fake_drv = VxD_PageAllocate(1, PAGEFIXED);
+        PVOID fake_drv = audio_get_fake_driver_object();
         PVOID fake_reg = VxD_PageAllocate(1, PAGEFIXED);
-        if (!fake_drv || !fake_reg) {
-            VxD_Debug_Printf("NTOS: alloc fake DRIVER_OBJECT failed\r\n");
+        if (!fake_reg) {
+            VxD_Debug_Printf("NTOS: alloc fake RegistryPath failed\r\n");
             return -2;
         }
-        ntos_memset(fake_drv, 0, PAGESIZE);
         ntos_memset(fake_reg, 0, PAGESIZE);
+        /* UNICODE_STRING: Length(2), MaxLength(2), Buffer(4).
+         * Point Buffer to a valid empty wide string (just two null bytes). */
+        {
+            PUSHORT reg = (PUSHORT)fake_reg;
+            reg[0] = 0;    /* Length = 0 */
+            reg[1] = 2;    /* MaximumLength = 2 */
+            /* Buffer at offset 4 points to offset 8 which has \0\0 */
+            ((PULONG)fake_reg)[1] = (ULONG)fake_reg + 8;
+        }
+        ntos_log_hex("NTOS: fake DriverObject @", (ULONG)fake_drv, "");
+        ntos_log_hex(" DriverExt @", ((PULONG)fake_drv)[6], "\r\n");
 
-        pfnDriverEntry = (PFN_DRIVER_ENTRY)entry_point;
-        VxD_Debug_Printf("NTOS: Calling es1371mp DriverEntry...\r\n");
-        status = pfnDriverEntry(fake_drv, fake_reg);
+        {
+            extern ULONG Safe_Call2(PVOID func, PVOID arg1, PVOID arg2);
+            extern ULONG g_fault_code, g_fault_eip, g_fault_addr;
+            /* Dump non-zero DriverObject fields for crash diagnosis */
+            {
+                PULONG d = (PULONG)fake_drv;
+                ULONG di;
+                VxD_Debug_Printf("NTOS: DriverObject dump:\r\n");
+                for (di = 0; di < 0x60; di++) {
+                    if (d[di] != 0) {
+                        ntos_log_hex("  +", di*4, "=");
+                        ntos_log_hex("", d[di], "\r\n");
+                    }
+                }
+            }
+            /* Dump first 32 bytes at entry point for disassembly */
+            {
+                PUCHAR ep = (PUCHAR)entry_point;
+                ULONG bi;
+                VxD_Debug_Printf("NTOS: Entry bytes:");
+                for (bi = 0; bi < 32; bi++)
+                    ntos_log_hex(" ", (ULONG)ep[bi], "");
+                VxD_Debug_Printf("\r\n");
+            }
+            g_fault_code = 0; g_fault_eip = 0; g_fault_addr = 0;
+            VxD_Debug_Printf("NTOS: Calling es1371mp DriverEntry (safe)...\r\n");
+            status = Safe_Call2((PVOID)entry_point, fake_drv, fake_reg);
+            ntos_log_hex("NTOS: Safe_Call2 returned ", status, "\r\n");
+            if (status == 0xDEAD0001UL) {
+                VxD_Debug_Printf("NTOS: *** FAULT IN DRIVERENTRY ***\r\n");
+                ntos_log_hex("  FAULT code=", g_fault_code, "\r\n");
+                ntos_log_hex("  FAULT eip=", g_fault_eip, "\r\n");
+                ntos_log_hex("  FAULT addr=", g_fault_addr, " (CR2)\r\n");
+            }
+        }
     }
     ntos_log_hex("NTOS: es1371mp DriverEntry returned ", status, "\r\n");
 
@@ -2007,7 +2078,7 @@ int ntos_test_driver(void)
         VxD_Debug_Printf("NTOS: === NT 3.x DRIVER TEST ===\r\n");
 
         /* Test 1: NT 3.51 aha154x.sys (1995, Adaptec 154x SCSI, 9K) */
-        VxD_Debug_Printf("NTOS: [1/4] aha154x.sys NT 3.51 (1995)...\r\n");
+        VxD_Debug_Printf("NTOS: [1/6] aha154x.sys NT 3.51 (1995)...\r\n");
         rc = pe_load_image(aha154x_nt351_embedded_data,
                            sizeof(aha154x_nt351_embedded_data),
                            scsiport_funcs, &ep, &ib);
@@ -2016,7 +2087,7 @@ int ntos_test_driver(void)
         else fail++;
 
         /* Test 2: NT 3.1 aha154x.sys (1993, first NT ever) */
-        VxD_Debug_Printf("NTOS: [2/4] aha154x.sys NT 3.1 (1993)...\r\n");
+        VxD_Debug_Printf("NTOS: [2/6] aha154x.sys NT 3.1 (1993)...\r\n");
         rc = pe_load_image(aha154x_nt31_embedded_data,
                            sizeof(aha154x_nt31_embedded_data),
                            scsiport_funcs, &ep, &ib);
@@ -2024,7 +2095,7 @@ int ntos_test_driver(void)
         if (rc == 0) pass++; else fail++;
 
         /* Test 3: NT 3.51 buslogic.sys (BusLogic SCSI) */
-        VxD_Debug_Printf("NTOS: [3/4] buslogic.sys NT 3.51...\r\n");
+        VxD_Debug_Printf("NTOS: [3/6] buslogic.sys NT 3.51...\r\n");
         rc = pe_load_image(buslogic_nt351_embedded_data,
                            sizeof(buslogic_nt351_embedded_data),
                            scsiport_funcs, &ep, &ib);
@@ -2032,9 +2103,25 @@ int ntos_test_driver(void)
         if (rc == 0) pass++; else fail++;
 
         /* Test 4: NT 3.51 ncr53c9x.sys (NCR 53C9x SCSI) */
-        VxD_Debug_Printf("NTOS: [4/4] ncr53c9x.sys NT 3.51...\r\n");
+        VxD_Debug_Printf("NTOS: [4/6] ncr53c9x.sys NT 3.51...\r\n");
         rc = pe_load_image(ncr53c9x_nt351_embedded_data,
                            sizeof(ncr53c9x_nt351_embedded_data),
+                           scsiport_funcs, &ep, &ib);
+        ntos_log_hex("  rc=", (ULONG)rc, rc == 0 ? " PASS\r\n" : " FAIL\r\n");
+        if (rc == 0) pass++; else fail++;
+
+        /* Test 5: NT 3.5 aha154x.sys (1994, Adaptec 154x SCSI) */
+        VxD_Debug_Printf("NTOS: [5/6] aha154x.sys NT 3.5 (1994)...\r\n");
+        rc = pe_load_image(aha154x_nt35_embedded_data,
+                           sizeof(aha154x_nt35_embedded_data),
+                           scsiport_funcs, &ep, &ib);
+        ntos_log_hex("  rc=", (ULONG)rc, rc == 0 ? " PASS\r\n" : " FAIL\r\n");
+        if (rc == 0) pass++; else fail++;
+
+        /* Test 6: NT 3.5 ne2000.sys (1994, NE2000 NDIS) */
+        VxD_Debug_Printf("NTOS: [6/6] ne2000.sys NT 3.5 (1994)...\r\n");
+        rc = pe_load_image(ne2000_nt35_embedded_data,
+                           sizeof(ne2000_nt35_embedded_data),
                            scsiport_funcs, &ep, &ib);
         ntos_log_hex("  rc=", (ULONG)rc, rc == 0 ? " PASS\r\n" : " FAIL\r\n");
         if (rc == 0) pass++; else fail++;
@@ -2066,6 +2153,122 @@ int ntos_test_driver(void)
             VxD_Debug_Printf("NTOS: (Cannot execute IA-64 code on i386 Win98)\r\n");
         } else {
             ntos_log_hex("NTOS: IA-64 load failed rc=", (ULONG)rc, "\r\n");
+        }
+        return rc;
+    }
+
+#elif defined(NTOS_TEST_IA64_NE2K)
+    {
+        PVOID ep, ib;
+        int rc;
+
+        extern void ndis_shim_register(void);
+        ntos_shim_register();
+        ndis_shim_register();
+
+        VxD_Debug_Printf("NTOS: === IA-64 NE2000 PE32+ TEST ===\r\n");
+        VxD_Debug_Printf("NTOS: Loading ne2000.sys IA-64 (53K network)...\r\n");
+        rc = pe_load_image(ne2000_ia64_embedded_data,
+                           sizeof(ne2000_ia64_embedded_data),
+                           NULL, &ep, &ib);
+        if (rc == 0) {
+            ntos_log_hex("NTOS: IA-64 ne2000 at ", (ULONG)ib, " PASS\r\n");
+            VxD_Debug_Printf("NTOS: *** IA-64 NE2000 PE32+ LOAD SUCCEEDED ***\r\n");
+            VxD_Debug_Printf("NTOS: (Cannot execute IA-64 code on i386 Win98)\r\n");
+        } else {
+            ntos_log_hex("NTOS: IA-64 ne2000 load failed rc=", (ULONG)rc, "\r\n");
+        }
+        return rc;
+    }
+
+#elif defined(NTOS_TEST_IA64_VGA)
+    {
+        PVOID ep, ib;
+        int rc;
+
+        extern void video_shim_register(void);
+        ntos_shim_register();
+        video_shim_register();
+
+        VxD_Debug_Printf("NTOS: === IA-64 VGA PE32+ TEST ===\r\n");
+        VxD_Debug_Printf("NTOS: Loading vga.sys IA-64 (67K display)...\r\n");
+        rc = pe_load_image(vga_ia64_embedded_data,
+                           sizeof(vga_ia64_embedded_data),
+                           NULL, &ep, &ib);
+        if (rc == 0) {
+            ntos_log_hex("NTOS: IA-64 vga at ", (ULONG)ib, " PASS\r\n");
+            VxD_Debug_Printf("NTOS: *** IA-64 VGA PE32+ LOAD SUCCEEDED ***\r\n");
+            VxD_Debug_Printf("NTOS: (Cannot execute IA-64 code on i386 Win98)\r\n");
+        } else {
+            ntos_log_hex("NTOS: IA-64 vga load failed rc=", (ULONG)rc, "\r\n");
+        }
+        return rc;
+    }
+
+#elif defined(NTOS_TEST_MIPS)
+    {
+        extern const IMPORT_FUNC_ENTRY scsiport_funcs[];
+        PVOID ep, ib;
+        int rc;
+
+        ntos_shim_register();
+
+        VxD_Debug_Printf("NTOS: === MIPS R4000 PE32 TEST ===\r\n");
+        VxD_Debug_Printf("NTOS: Loading aha154x.sys MIPS (16K SCSI)...\r\n");
+        rc = pe_load_image(aha154x_mips_embedded_data,
+                           sizeof(aha154x_mips_embedded_data),
+                           scsiport_funcs, &ep, &ib);
+        if (rc == 0) {
+            ntos_log_hex("NTOS: MIPS aha154x at ", (ULONG)ib, " PASS\r\n");
+            VxD_Debug_Printf("NTOS: *** MIPS R4000 PE32 LOAD SUCCEEDED ***\r\n");
+            VxD_Debug_Printf("NTOS: (Cannot execute MIPS code on i386 Win98)\r\n");
+        } else {
+            ntos_log_hex("NTOS: MIPS load failed rc=", (ULONG)rc, "\r\n");
+        }
+        return rc;
+    }
+
+#elif defined(NTOS_TEST_ALPHA)
+    {
+        extern const IMPORT_FUNC_ENTRY scsiport_funcs[];
+        PVOID ep, ib;
+        int rc;
+
+        ntos_shim_register();
+
+        VxD_Debug_Printf("NTOS: === DEC ALPHA AXP PE32 TEST ===\r\n");
+        VxD_Debug_Printf("NTOS: Loading aha154x.sys Alpha (16K SCSI)...\r\n");
+        rc = pe_load_image(aha154x_alpha_embedded_data,
+                           sizeof(aha154x_alpha_embedded_data),
+                           scsiport_funcs, &ep, &ib);
+        if (rc == 0) {
+            ntos_log_hex("NTOS: Alpha aha154x at ", (ULONG)ib, " PASS\r\n");
+            VxD_Debug_Printf("NTOS: *** ALPHA AXP PE32 LOAD SUCCEEDED ***\r\n");
+            VxD_Debug_Printf("NTOS: (Cannot execute Alpha code on i386 Win98)\r\n");
+        } else {
+            ntos_log_hex("NTOS: Alpha load failed rc=", (ULONG)rc, "\r\n");
+        }
+        return rc;
+    }
+
+#elif defined(NTOS_TEST_PPC)
+    {
+        PVOID ep, ib;
+        int rc;
+
+        ntos_shim_register();
+
+        VxD_Debug_Printf("NTOS: === PowerPC PE32 TEST ===\r\n");
+        VxD_Debug_Printf("NTOS: Loading joyport.sys PPC (2K)...\r\n");
+        rc = pe_load_image(joyport_ppc_embedded_data,
+                           sizeof(joyport_ppc_embedded_data),
+                           NULL, &ep, &ib);
+        if (rc == 0) {
+            ntos_log_hex("NTOS: PPC joyport at ", (ULONG)ib, " PASS\r\n");
+            VxD_Debug_Printf("NTOS: *** POWERPC PE32 LOAD SUCCEEDED ***\r\n");
+            VxD_Debug_Printf("NTOS: (Cannot execute PPC code on i386 Win98)\r\n");
+        } else {
+            ntos_log_hex("NTOS: PPC load failed rc=", (ULONG)rc, "\r\n");
         }
         return rc;
     }

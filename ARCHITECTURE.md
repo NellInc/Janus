@@ -1,5 +1,7 @@
 # ARCHITECTURE: NT5 Miniport Backport to Windows 9x
 
+> **Why this exists:** the security and migration mission is to free critical legacy systems (industrial, medical, utility, lab) from the unpatchable Windows installs they are stranded on by a single un-ported driver. Forward translation (an NT driver on Win9x) keeps vintage hardware repairable; reverse translation (a Win9x VxD on a modern NT kernel) lets the unpatchable host be retired while the equipment keeps working. The same machinery serves digital preservation and software archaeology (retro gaming and emulation, computing museums, digital forensics, keeping vintage software runnable). The machinery below serves all of these ends. See the README for the full rationale.
+
 ## Overview
 
 This project backports Windows NT5 (2000/XP era) miniport storage drivers to run

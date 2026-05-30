@@ -1,5 +1,29 @@
 # Janus: Project Status
 
+> **Mission:** improved global security and migration for the world's most important and often highly vulnerable legacy systems, by translating the device drivers that keep them stranded on unsupported Windows. The reverse direction (Win9x VxD on a modern NT kernel) is the migration path that lets unpatchable hosts be retired without scrapping the equipment. The same machinery serves digital preservation and software archaeology: retro gaming and emulation, computing museums, digital forensics, and keeping vintage software runnable. See the README "Why Janus Matters" for the full rationale.
+
+## Reverse Direction — Janus's Other Face (the migration & security path)
+
+The reverse loader runs unmodified Win9x VxD drivers as native kernel modules on a modern NT-family kernel. Validated headless in cloud x86 emulation (QEMU TCG, no KVM) against ReactOS 0.4.15.
+
+**Seven Win9x VxD classes fully initialize on the NT kernel** — DDB located, the full `Sys_Critical_Init → Device_Init → Init_Complete → Create_VM` lifecycle returns OK, service RUNNING, no bugcheck:
+
+| VxD | Class |
+|-----|-------|
+| VNETBIOS | NetBIOS / network |
+| DSOUND | DirectSound audio |
+| ISAPNP | Plug-and-Play enumerator |
+| VSERVER | File/print sharing server |
+| SB16 | Sound Blaster 16 audio |
+| MGAXDD | Matrox display |
+| MMDEVLDR | Multimedia device loader |
+
+**Loader generality:** the LE loader, source-list fixup engine, parameterized DDB-name scan, and control-proc dispatch are proven across **12 VxDs** (every one loads, DDB located at +0x0C, control proc invoked, no BSOD). Seven complete the full init sequence; the rest load and dispatch but their `Device_Init` declines or faults (shim-caught, no crash) when it probes hardware absent from the emulator or hits an unsatisfied VMM service. That is a per-driver service-coverage frontier, not a loader limitation.
+
+**Real Windows 2000 boots in the cloud x86 emulator** — the architecture wall that blocked local ARM emulation — opening the path to hosting legacy VxDs on genuine Microsoft NT rather than only ReactOS.
+
+This is the face that lets a system stranded on Windows 9x carry its irreplaceable driver onto a modern, maintained kernel.
+
 ## Proven Drivers (19)
 
 ### i386 PE32 — Full Hardware I/O
