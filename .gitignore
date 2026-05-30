@@ -6,3 +6,26 @@ __pycache__/
 *.err
 .DS_Store
 logs/
+
+# --- 2026-05-30: keep transient / binary / copyright material out of the public repo ---
+# transient experiment + instrumentation dumps
+artifacts/
+artifacts_*/
+# built and vendor driver binaries — load drivers from your OWN media, do not redistribute
+binaries/
+*.VXD
+*.vxd
+*.sys
+*.SYS
+# copyright reference material
+*.pdf
+reference/
+# local harness / environment config (may contain secrets)
+*.env
+# stray top-level build outputs
+/E
+/x
+# Embedded third-party driver binaries (byte-array headers) embed proprietary vendor
+# .sys/.vxd files. Keep them OUT of public mirrors; users regenerate them from their own
+# licensed driver copies via tools/embed_sys.py. Uncomment to enforce:
+# source/*_EMBEDDED.H

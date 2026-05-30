@@ -849,9 +849,19 @@ int pe_load_image(
         return pe_load_image64(pe_data, pe_size, func_table, out_entry, out_base);
     }
 
-    /* Verify i386 machine type */
-    if (nt->FileHeader.Machine != 0x014C) {
-        DBGPRINT("PELOAD: not an i386 image (Machine=0x%04X)\n",
+    /* Accept i386 (0x014C), MIPS R4000 (0x0166), Alpha AXP (0x0184), PPC (0x01F0) */
+    if (nt->FileHeader.Machine == 0x0166) {
+        DBGPRINT("PELOAD: MIPS R4000 (little-endian) image detected\n");
+    } else if (nt->FileHeader.Machine == 0x0184) {
+        DBGPRINT("PELOAD: DEC Alpha AXP image detected\n");
+    } else if (nt->FileHeader.Machine == 0x01F0) {
+        DBGPRINT("PELOAD: PowerPC (little-endian) image detected\n");
+    }
+    if (nt->FileHeader.Machine != 0x014C &&
+        nt->FileHeader.Machine != 0x0166 &&
+        nt->FileHeader.Machine != 0x0184 &&
+        nt->FileHeader.Machine != 0x01F0) {
+        DBGPRINT("PELOAD: unsupported machine type (Machine=0x%04X)\n",
                  (unsigned)nt->FileHeader.Machine);
         return PE_ERR_NOT_I386;
     }
@@ -880,6 +890,7 @@ int pe_load_image(
     /* ---- Allocate ring 0 memory for image ---- */
 
     num_pages = (image_size + PAGESIZE - 1) / PAGESIZE;
+    num_pages += 4; /* guard pages: RTL8029 accesses 0x1613 past SizeOfImage */
     DBGPRINT("PELOAD: allocating %lu pages (%lu bytes) for image\n",
              num_pages, num_pages * PAGESIZE);
 

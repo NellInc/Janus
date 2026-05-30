@@ -6,6 +6,31 @@ Janus is a driver translation framework that bridges the fundamental incompatibi
 
 Named after the Roman god of doorways, transitions, and passages — depicted with two faces looking in opposite directions. Janus presides over the passage between incompatible kernel architectures, connecting the beginning of NT (3.1, 1993) to the end of 9x (ME, 2000).
 
+## Why Janus Matters
+
+The world runs on stranded legacy systems. Industrial controllers, medical imaging suites, laboratory instruments, utility SCADA stations, transit signalling, and manufacturing lines: a large and quietly critical population still runs Windows 9x, and the same predicament reaches embedded XP, NT4, and older. They stay there for one stubborn reason. The expensive, irreplaceable equipment ships with a kernel driver that was never ported forward, so the operating system cannot be upgraded without abandoning the machine. The result is a fleet of unpatchable, decades-old hosts with no modern memory protections and ancient network stacks, sitting in exactly the environments where a compromise does the most harm.
+
+Janus has two faces, and each addresses one half of this problem.
+
+- **Forward (a modern driver on a legacy OS)** keeps vintage systems alive and repairable. When original hardware fails and only newer parts remain, a current driver can run on the old OS, extending the service life of equipment that would otherwise be scrapped. This face is also the engine: it proves the loader, the import resolution, and the inter-generational ABI machinery that the reverse face reuses.
+- **Reverse (a legacy driver on a modern OS)** is the security and migration path. It carries a stranded system's original driver onto a modern, maintained kernel, so the unpatchable host can finally be retired while the equipment keeps working. This dissolves the most common technical excuse for keeping vulnerable systems in production: "we can't upgrade because of the driver." The decisive gain is not the cleverness of loading. It is that rip-and-replace becomes optional, and migration becomes possible for systems that were treated as frozen.
+
+Two honest conditions keep this from being a false promise. A translation layer must isolate what it imports: a 1990s ring-0 driver carries no modern threat model, so it belongs behind hardware isolation (IOMMU, virtualization-based driver isolation), not merely made to load. And loading is necessary without being sufficient, since real migrations also turn on timing, DMA, and bus-enumeration assumptions, which Janus treats as first-class problems.
+
+Used well, Janus is a decommissioning path for the world's most important and most vulnerable legacy systems, and an instrumented, sandboxed analysis bench for the drivers and malware of that era.
+
+The same machinery serves preservation, and its reach is broad:
+
+- **Retro gaming and emulation** depend on period-accurate drivers to reproduce how the hardware actually behaved, down to its driver-level quirks.
+- **Computing museums** need exhibits that still run, so visitors see living machines rather than static relics.
+- **Digital forensics and incident response** must boot and instrument seized legacy systems to recover evidence and reconstruct what happened.
+- **Long-term digital preservation** needs software that stays executable across decades, because bits archived with no way to run them slowly become unreadable.
+- **Software archaeology**, the study of how vanished systems were built, needs the original binaries executing under a microscope, where static disassembly stops short.
+
+Janus loads unmodified vendor drivers in an instrumented, sandboxed environment, which is the bench each of these disciplines wants.
+
+Security, migration, and preservation are the same work, seen from the two faces of one doorway.
+
 ## What's Proven
 
 **19 drivers loaded across 3 architectures and a 12-year span:**
@@ -158,7 +183,7 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 - MIPS (0x0166) and Alpha AXP (0x0184) architecture support from NT 3.51/4.0
 
 ### Medium-term
-- Bidirectional: Win9x VxD drivers running on NT (VxD-on-NT loader)
+- Bidirectional reverse direction — **in progress**: 7 Win9x VxD classes (VNETBIOS, DSOUND, ISAPNP, VSERVER, SB16, MGAXDD, MMDEVLDR) fully initialize on the NT kernel under ReactOS, loader proven across 12 VxDs, and real Windows 2000 boots in cloud x86 emulation. See [STATUS.md](STATUS.md).
 - Runtime driver loading from filesystem (bypass VxD size limit)
 - Full WDM IRP stack for complex drivers
 - Real hardware testing (beyond QEMU)

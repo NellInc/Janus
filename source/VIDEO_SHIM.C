@@ -250,14 +250,35 @@ static ULONG __stdcall vp_Initialize(
         ULONG again = 0;
         PVOID configInfo;
 
-        /* VIDEO_PORT_CONFIG_INFO (~100 bytes): BusInterruptLevel, etc.
-         * Allocate and zero — miniport reads fields from it. */
+        /* VIDEO_PORT_CONFIG_INFO (0x70 = 112 bytes on i386):
+         *   +0x00 Length (ULONG) — must be >= 0x70
+         *   +0x04 SystemIoBusNumber
+         *   +0x08 AdapterInterfaceType (Isa=1, PCIBus=5)
+         *   +0x0C BusInterruptLevel
+         *   +0x10 BusInterruptVector
+         *   +0x14 InterruptMode
+         *   +0x18 NumEmulatorAccessEntries
+         *   +0x1C EmulatorAccessEntries (ptr)
+         *   +0x20 EmulatorAccessEntriesContext
+         *   +0x28 VdmPhysicalVideoMemoryAddress (8 bytes, aligned)
+         *   +0x30 VdmPhysicalVideoMemoryLength
+         *   +0x34 HardwareStateSize
+         *   +0x60 VideoPortGetProcAddress (ptr)
+         *   +0x64 DriverRegistryPath (ptr)
+         *   +0x68 SystemMemorySize (8 bytes)
+         */
         configInfo = VxD_PageAllocate(1, PAGEFIXED);
         if (configInfo) {
             PULONG ci = (PULONG)configInfo;
             vp_memset(configInfo, 0, PAGESIZE);
-            ci[0] = 100;   /* Length */
-            ci[2] = g_video_miniport.AdapterInterfaceType; /* AdapterInterfaceType */
+            ci[0] = 0x70;  /* Length = sizeof(VIDEO_PORT_CONFIG_INFO) */
+            ci[1] = 0;     /* SystemIoBusNumber = 0 */
+            ci[2] = g_video_miniport.AdapterInterfaceType;
+            /* VGA BIOS video memory at physical A0000h, 128K */
+            ci[10] = 0x000A0000;  /* VdmPhysicalVideoMemoryAddress low (+0x28) */
+            ci[11] = 0;           /* VdmPhysicalVideoMemoryAddress high */
+            ci[12] = 0x00020000;  /* VdmPhysicalVideoMemoryLength = 128K (+0x30) */
+            ci[13] = 0x1000;      /* HardwareStateSize (+0x34) */
 
             VxD_Debug_Printf("VP: Calling HwFindAdapter...\r\n");
             findResult = pfnFind(g_video_miniport.DeviceExtension,
@@ -304,7 +325,14 @@ static PVOID __stdcall vp_GetDeviceBase(
     if (InIoSpace) {
         return (PVOID)IoAddress_Low;
     } else {
-        PVOID mapped = VxD_MapPhysToLinear(IoAddress_Low, NumberOfUchars);
+        PVOID mapped;
+        /* Legacy VGA/ISA memory (below 1MB) is identity-mapped in ring 0.
+         * _MapPhysToLinear fails for RAM regions on Win98. */
+        if (IoAddress_Low < 0x100000) {
+            vp_log_hex("  -> identity (legacy) ", IoAddress_Low, "\r\n");
+            return (PVOID)IoAddress_Low;
+        }
+        mapped = VxD_MapPhysToLinear(IoAddress_Low, NumberOfUchars);
         vp_log_hex("  -> mapped=", (ULONG)mapped, "\r\n");
         return mapped;
     }
@@ -720,6 +748,41 @@ static VP_STATUS __stdcall vp_Int10(PVOID HwDeviceExtension, PVOID BiosArguments
 
     vp_log_hex("VP: Int10 EAX=", args[0], "");
     vp_log_hex(" EBX=", args[1], "\r\n");
+
+    /* Diagnostic: dump IVT entry for INT 10h.
+       Real-mode IVT is at linear address 0x0000. Each entry is 4 bytes
+       (segment:offset). INT 10h entry is at 0x10 * 4 = 0x40.
+       In V86 mode, linear addresses below 1MB map to the V86 address space. */
+    {
+        volatile ULONG *ivt = (volatile ULONG *)0x00000000;
+        ULONG ivt10 = ivt[0x10];
+        USHORT seg = (USHORT)(ivt10 >> 16);
+        USHORT off = (USHORT)(ivt10 & 0xFFFF);
+        ULONG bios_linear = ((ULONG)seg << 4) + off;
+        vp_log_hex("VP: IVT[10h]=", ivt10, "");
+        vp_log_hex(" seg:off=", (ULONG)seg, ":");
+        vp_log_hex("", (ULONG)off, "");
+        vp_log_hex(" linear=", bios_linear, "\r\n");
+        if (bios_linear >= 0xC0000 && bios_linear < 0x100000) {
+            volatile UCHAR *rom = (volatile UCHAR *)bios_linear;
+            vp_log_hex("VP: ROM[0]=", (ULONG)rom[0], "");
+            vp_log_hex(" [1]=", (ULONG)rom[1], "");
+            vp_log_hex(" [2]=", (ULONG)rom[2], "\r\n");
+        } else if (bios_linear == 0) {
+            VxD_Debug_Printf("VP: IVT[10h] is NULL! No BIOS handler.\r\n");
+        } else {
+            volatile UCHAR *handler = (volatile UCHAR *)bios_linear;
+            vp_log_hex("VP: Handler[0]=", (ULONG)handler[0], "");
+            vp_log_hex(" [1]=", (ULONG)handler[1], "");
+            vp_log_hex(" [2]=", (ULONG)handler[2], "");
+            vp_log_hex(" [3]=", (ULONG)handler[3], "\r\n");
+        }
+        /* Also check BIOS Data Area at 0x0449 (current video mode) */
+        {
+            volatile UCHAR *bda = (volatile UCHAR *)0x0449;
+            vp_log_hex("VP: BDA[449h] video mode=", (ULONG)*bda, "\r\n");
+        }
+    }
 
     /* Copy to static buffer, call V86, copy back.
      * This is necessary because VMM V86 nesting clobbers the ring-0
