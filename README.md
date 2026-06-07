@@ -33,28 +33,61 @@ Security, migration, and preservation are the same work, seen from the two faces
 
 ## What's Proven
 
-**19 drivers loaded across 3 architectures and a 12-year span:**
+Two ladders, kept deliberately separate. **Function-level** means the hosted driver's own code moved real data against **faithful stock QEMU**, no device-model patches: a frame on the wire, or a host-seeded disk sector returned through the driver's own busmaster DMA, each verified by an unfakeable sentinel and confirmed by adversarial review. **Load-proven** means full PE load, relocation, and import resolution, the ceiling a 32-bit host can reach for 64-bit binaries.
 
-| # | Era | Driver | Class | Result |
-|---|-----|--------|-------|--------|
-| 1 | XP SP3 | sym_hi.sys (LSI 53C810) | SCSI | 9/9 sector READ+WRITE |
-| 2 | XP SP3 | rtl8029.sys (NE2000 PCI) | NDIS 4.0 | Full ARP TX+RX |
-| 3 | XP SP3 | rtl8139.sys (Realtek) | NDIS 5.0 | Full ARP TX+RX |
-| 4 | XP SP3 | ne2000.sys | NDIS 3.0 | Full ARP TX+RX |
-| 5 | XP SP3 | vga.sys (21K) | VideoPort | DriverEntry + Init |
-| 6 | XP SP3 | hidparse.sys (25K) | ntoskrnl | DriverEntry + 30 exports |
-| 7 | XP SP3 | hidgame.sys (9K) | HID | DriverEntry + HidRegister |
-| 8 | XP SP3 | es1371mp.sys (41K) | PortCls | 60/60 imports resolved |
-| 9 | XP x64 | hidparse.sys (41K) | AMD64 PE32+ | Load + imports |
-| 10 | XP x64 | pciide.sys (6K) | AMD64 PE32+ | Load + PCIIDEX |
-| 11 | XP x64 | hidgame.sys (12K) | AMD64 PE32+ | Load + HIDCLASS |
-| 12 | XP x64 | vgapnp.sys (33K) | AMD64 PE32+ | Load + VideoPort |
-| 13 | XP x64 | ne2000.sys (22K) | AMD64 PE32+ | Load + NDIS |
-| 14 | NT 3.51 | aha154x.sys (9K) | ScsiPort | Load + 17/17 imports |
-| 15 | NT 3.1 | aha154x.sys (15K) | ScsiPort | Load + all imports |
-| 16 | NT 3.51 | buslogic.sys (8.5K) | ScsiPort | Load + ScsiPort |
-| 17 | NT 3.51 | ncr53c9x.sys (12K) | ScsiPort | Load + ScsiPort |
-| 18 | XP IA-64 | pciide.sys (6.7K) | Itanium PE32+ | Load + PCIIDEX |
+### Forward — function-level crossings (18, faithful stock QEMU)
+
+Each is the foreign driver's own code performing live hardware I/O. The sentinel is unfakeable: a captured ARP frame attributed by the own-MAC + opcode + IP triple, or a host-only sector signature written into a zeroed buffer and returned through the driver's own DMA.
+
+| # | Device / Driver | Class | Unfakeable sentinel |
+|---|-----------------|-------|---------------------|
+| 1 | ne2000 / rtl8029.sys | NDIS | ARP frame on the wire + TX-ring port I/O |
+| 2 | AMD PCnet | NDIS | busmaster ring PA + received ARP via own HandleInterrupt + ARP TX |
+| 3 | Realtek rtl8139 | NDIS 5.0 | TSAD0 ring PA + full ARP TX+RX |
+| 4 | DEC tulip / dc21x4 | NDIS | ARP frame on the wire (pcap 0x0806) via own MiniportSend → busmaster DMA, reclaimed by own ISR DPC |
+| 5 | Intel eepro100 / 8255x (e100bnt5.sys) | NDIS | own-code ARP on the wire + own ISR/DPC TX completion (MMIO-CSR) |
+| 6 | virtio-net / netkvm.sys | NDIS 5.1 | own-code ARP on the wire + TX vring avail-idx post (busmaster DMA) |
+| 7 | Intel e1000 / 82540EM (e1000325.sys) | NDIS 5.1 | own-MAC ARP on the wire + SLIRP reply, busmaster DMA |
+| 8 | Intel e1000e / 82574L (e1q5132.sys) | NDIS 5.2 | own-MAC ARP on the wire + SLIRP reply, TDH/TDT descriptor post |
+| 9 | virtio-scsi / vioscsi.sys | ScsiPort | host-seeded READ(10) sector via virtio ring |
+| 10 | VMware PVSCSI / pvscsi.sys | ScsiPort | host-seeded LBA1 sentinel via own HwStartIo READ(10) + busmaster ring DMA |
+| 11 | LSI MegaRAID SAS1078 / megasas.sys | ScsiPort (MFI) | host-seeded LBA1 sentinel via own PD_SCSI_IO READ(10) + busmaster DMA |
+| 12 | USB-EHCI MSC / usbehci | USB / EHCI | INQUIRY 'QEMU' + seeded sector via shim-built CBW (busmaster qTD) |
+| 13 | USB-MSC / usbstor.sys | USB / BOT | own SRB → CBW → BOT READ(10), seeded LBA 0x10 sector |
+| 14 | ATAPI / atapi.sys | IDE/ATAPI | IDE command-block register crossing |
+| 15 | serial 16550 / serial.sys | serial | own DLAB + divisor, LCR/FCR/IER/MCR on 0x3F8 |
+| 16 | i8042 keyboard START / i8042prt | input | own 0x60/0x64 START sequence |
+| 17 | parport LPT / parport.sys | parallel | own OUT 0x378 + device-computed IN 0x379 → 0xD8 |
+| 18 | Cirrus display DAC | VideoPort | V86-free OUT 0x3C8/0x3C9 DAC write |
+
+### Forward — load-proven across architectures (3 architectures, a 12-year span)
+
+Full PE load, relocation, and all imports resolved. The 64-bit binaries reach the 32-bit-host ceiling; they resolve and relocate but do not execute in long mode on a 32-bit guest.
+
+| Driver | Era | Architecture | Result |
+|--------|-----|--------------|--------|
+| vga.sys | XP SP3 | i386 | DriverEntry + VideoPortInit |
+| hidparse.sys | XP SP3 | i386 | DriverEntry + 30 HidP_* exports |
+| hidgame.sys | XP SP3 | i386 | DriverEntry + HidRegisterMinidriver |
+| hidparse.sys | XP x64 SP2 | AMD64 PE32+ | load + all imports |
+| pciide.sys | XP x64 SP2 | AMD64 PE32+ | load + PCIIDEX |
+| hidgame.sys | XP x64 SP2 | AMD64 PE32+ | load + HIDCLASS |
+| vgapnp.sys | XP x64 SP2 | AMD64 PE32+ | load + VideoPort |
+| ne2000.sys | XP x64 SP2 | AMD64 PE32+ | load + NDIS |
+| pciide.sys | XP IA-64 | Itanium PE32+ | load + PCIIDEX |
+| aha154x.sys | NT 3.1 (1993) | i386 ScsiPort | load + all imports |
+| aha154x.sys | NT 3.51 (1995) | i386 ScsiPort | load + 17/17 imports |
+| ncr53c9x.sys | NT 3.51 | i386 ScsiPort | load + ScsiPort |
+
+### Demonstrated against a patched QEMU (superseded by the stock-QEMU bar)
+
+These crossed only with QEMU device-model patches, so they are held below the faithful-stock-QEMU bar that the 18 above clear. The matrix records them as walled at the current bar, recoverable on real silicon (vfio-pci) or via an upstream QEMU fix, not via the shim.
+
+| Device / Driver | Demonstrated | Why not stock QEMU |
+|-----------------|--------------|---------------------|
+| LSI 53C810 / sym_hi.sys | 9/9 sector READ+WRITE | needed a 5-patch QEMU for the 53C8xx SCRIPTS engine |
+| LSI 53C895a SCRIPTS | READ+WRITE crossed | QEMU SCRIPTS MOVE-MEM device-model fidelity bug; wrong-PA IID |
+| buslogic.sys (NT 3.51) | load + ScsiPort | no faithful QEMU path for the BT-958 at the function bar |
 
 ## Architecture
 
@@ -113,7 +146,7 @@ All VMM services for VA to PA translation fail on Win98. The self-map is the onl
 
 - Docker (for the `ntmini-builder` image with Open Watcom 2.0 + NASM)
 - Python 3
-- QEMU (patched build for LSI fixes, or stock for non-SCSI tests)
+- QEMU (stock for the 18 function crossings, including SCSI; patched build only for the legacy LSI 53C8xx SCRIPTS path)
 - Windows 98 SE disk image (FAT32)
 
 ### Build
@@ -143,8 +176,9 @@ Build modes: SCSI (1,2), NDIS (3), VideoPort (4), Generic test (5).
 | NT 3.5 | 1994 | i386 | 146 drivers extracted, untested |
 | NT 3.51 | 1995 | i386 | PE load proven (3 SCSI drivers) |
 | NT 4.0 | 1996 | i386 | Compatible (same ScsiPort API) |
-| Windows 2000 | 2000 | i386 | Compatible (NT5, same APIs as XP) |
-| Windows XP SP3 | 2005 | i386 | 8 drivers proven (SCSI/NDIS/Video/HID/Audio) |
+| Windows 2000 | 2000 | i386 | Source-compatible (NT5, shared NDIS5/ScsiPort ABI) |
+| Windows XP SP3 | 2001 | i386 | Primary forward source; bulk of the 18 function crossings (NDIS/ScsiPort/USB/serial/IDE) |
+| Windows Server 2003 R2 | 2003 | i386 | Source for megasas, mptsas/symmpi, e1000 (ScsiPort/StorPort storage + NDIS5) |
 | Windows XP x64 | 2005 | AMD64 | 5 drivers PE32+ loaded |
 | Windows XP IA-64 | 2003 | Itanium | 1 driver PE32+ loaded |
 | NT 3.51 / 4.0 | 1995–96 | PowerPC PReP (0x01F0) | Drivers on NT4 media (/PPC); PE load proof planned |
@@ -165,14 +199,15 @@ Target: every architecture NT (and its siblings) ever ran on. See Roadmap → Ar
 
 | Class | Shim | Functions | Status |
 |-------|------|-----------|--------|
-| ScsiPort (SCSI storage) | NTMINI_V5.C | 22+ | Proven (R/W) |
-| NDIS (network) | NDIS_SHIM.C | 75+ | Proven (TX/RX) |
-| VideoPort (display) | VIDEO_SHIM.C | 47+ | Proven (init) |
+| ScsiPort (SCSI storage) | NTMINI_V5.C | 22+ | Proven (seeded-sector READ via busmaster DMA: pvscsi, megasas, vioscsi; megasas also WRITE+readback) |
+| NDIS (network) | NDIS_SHIM.C | 75+ | Proven (ARP TX/RX, 8 NICs with frames on the wire) |
+| StorPort (SCSI/SAS/SATA) | STORPORT_SHIM.C | — | Import layer (XP/Server 2003+); Method-C port pending |
+| VideoPort (display) | VIDEO_SHIM.C | 47+ | Proven (Cirrus DAC write; init) |
 | ntoskrnl/HAL | NTOS_SHIM.C | 130+ | Proven |
-| HID | HID_SHIM.C | 3 | Proven |
+| HID | HID_SHIM.C | 3 | Proven (load); live-report walled (headless input) |
 | PCI IDE | PCIIDE_SHIM.C | 3 | Proven |
-| PortCls (audio) | AUDIO_SHIM.C | 20+ | Partial |
-| USBD (USB) | USB_SHIM.C | 15 | Written |
+| PortCls (audio) | AUDIO_SHIM.C | 20+ | Partial (es1370 register sub-crossing; full path structural) |
+| USBD (USB) | USB_SHIM.C | 15 | Proven (usbstor/usbehci seeded sector) |
 | DirectDraw/D3D | DDRAW_SHIM.C | 15+ | Written |
 | 802.11 WiFi | WIFI_SHIM.C | 8 | Written |
 | AGP | AGP_SHIM.C | 10 | Written |
@@ -188,7 +223,7 @@ Target: every architecture NT (and its siblings) ever ran on. See Roadmap → Ar
 - More IA-64 Itanium drivers (ne2000, vga); MIPS (0x0166) and Alpha AXP (0x0184) support from NT 3.51/4.0
 
 ### Medium-term
-- **Reverse direction — proven and advancing**: 6 Win9x VxD classes (VSERVER, SB16, MGAXDD, MMDEVLDR, PCI, VJOYD) fully initialize on a real Microsoft Windows 2000 kernel (9 on ReactOS); the loader and a harvest-build-host pipeline are proven across many real vendor VxDs. **Function frontier crossed for PCI**: a Win9x VxD's own configuration-read code reads the live i440fx PCI bus on a real Win2K kernel, not merely initializing against fakes. See [STATUS.md](STATUS.md).
+- **Reverse direction — two function crossings at the frame bar**, plus broad init-bar coverage. At the **frame bar** (the VxD's own code moving real data on a modern NT kernel): (a) **am1500t** (AMD Lance ISA NIC, am1500t.PDR) puts a **TX frame on the wire**; (b) **PCI.VXD** reads four distinct live i440fx vendor:device IDs through its own C2 configuration-read primitive on a real Windows 2000 kernel, not merely initializing against fakes. At the **init bar** (full lifecycle returns OK, no bugcheck): 6 Win9x VxD classes (VSERVER, SB16, MGAXDD, MMDEVLDR, PCI, VJOYD) initialize on a real Win2K kernel, 9 on ReactOS; the loader and harvest-build-host pipeline are proven across 12+ real vendor VxDs. See [STATUS.md](STATUS.md).
 - **Function frontier**: drive more hosted classes from "init runs" to "device functions" (DMA, IRQ, bus-enumeration, real I/O). This is the per-device-class grind, and the prize. Widening OS coverage adds init checkmarks; function is the real measure.
 - **V86 monitor** in the reverse shim: unlocks real-mode-thunking VxDs (the MRCI2 / DriveSpace class) and, on the same 32-bit substrate, hosting DOS real-mode drivers.
 - **Span extension**: backward to Windows 3.1 386-Enhanced `.386` VxDs (same VMM/VxD mechanism, a subset of services) and forward to 32-bit Vista/7/8/10 kernels. x64 and Windows 11 need a binary lifter, which is a separate programme.
@@ -200,7 +235,7 @@ Target: every architecture NT (and its siblings) ever ran on. See Roadmap → Ar
 - **Binary lifter / recompiler**: statically translate a 32-bit VxD (or a legacy NT driver) into a native x64 WDM driver, mapping VMM and legacy NT services onto modern HAL/WDM equivalents. This is the only route to hosting legacy drivers on x64 Windows 10/11 and ARM64, where in-place execution is blocked by long mode and HVCI. A substantial research programme in its own right.
 - **Production isolation**: run an imported legacy driver under IOMMU / VBS containment with a real threat model, so an unpatchable industrial, medical, or SCADA system can be retired while its hardware keeps working in the field, not only inside QEMU. The mission, fully realized.
 - **Real-mode and 16-bit coverage**: DOS real-mode device drivers and TSRs hosted through the V86 monitor; Windows 3.1 16-bit `.DRV` modules through a minimal Win16 environment (wine-NE / WOW style).
-- **Automated translation**: generalize the harvest-build-host pipeline so an arbitrary vendor driver is ingested and bridged with minimal hand work, using assisted reverse engineering and service-usage inference to generate shims.
+- **Automated translation**: generalize the harvest-build-host pipeline so an arbitrary vendor driver is ingested and bridged with minimal hand work, using assisted agentic engineering and service-usage inference to generate shims.
 - **Cross-architecture hosting**: legacy x86 drivers on ARM64 and RISC-V maintained hosts via lifting or embedded CPU emulation.
 - **Upstream and preserve**: contribute the reverse VxD-on-NT capability to ReactOS, release a public preservation toolkit, and partner with computing museums and digital archives.
 
@@ -227,7 +262,7 @@ Historical and future endpoints:
 
 Originally developed for the [Vogons retro-computing community](https://vogons.org) to solve CD-ROM driver issues on Windows 98 with NEC ATAPI controllers. Grew into a universal driver translation framework spanning the full NT driver ecosystem.
 
-Approximately 500 million tokens of Claude (Opus 4.5-4.8) reverse engineering compute over 4 months of development, March-June 2026.
+Approximately 500 million tokens of Claude (Opus 4.5-4.8) agentic engineering compute over 4 months of development, March-June 2026.
 
 ## License
 

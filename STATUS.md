@@ -27,10 +27,10 @@ The Win2K-kernel control-proc addresses (`0xBF9Exxxx`, kernel space) confirm the
 **Loader generality:** the LE loader, source-list fixup engine, parameterized DDB-name scan, and control-proc dispatch are proven across **12+ VxDs** (every one loads, DDB located at +0x0C, control proc invoked, no BSOD). Those above complete the full init sequence; the rest load and dispatch but their `Device_Init` declines or faults (shim-caught, no crash) when it probes hardware absent from the emulator or hits an unsatisfied VMM service. That is a per-driver service-coverage frontier, not a loader limitation.
 
 ### Function frontier — beyond "init runs"
-Initialization completing is necessary but not sufficient; the real measure is the hosted driver performing its function (DMA, IRQ, bus-enumeration, real I/O). **Crossed for PCI on a real Windows 2000 kernel:**
+Initialization completing is necessary but not sufficient; the real measure is the hosted driver performing its function (DMA, IRQ, bus-enumeration, real I/O). **Two classes crossed at this frame bar:**
 
-- **Host-side bus I/O:** the hosted ring-0 context performs real PCI configuration I/O (ports 0xCF8/0xCFC) on the live i440fx bus and reads back the actual device list (440FX host bridge, PIIX3 ISA/IDE, PIIX4 ACPI, VGA, NIC), with the device IDs matching exactly what the emulated chipset presents.
-- **The VxD's own code:** PCI.VXD's own configuration-read primitive, driven on the real Win2K kernel, reads back four distinct correct vendor:device IDs from the live bus — the VxD's own enumeration code doing real hardware I/O, not merely initializing against fakes.
+- **am1500t (AMD Lance ISA NIC, am1500t.PDR) — a TX frame on the wire.** The hosted VxD's own send path puts a real Ethernet frame onto the emulated network (captured in pcap), the operational trigger synthesized by the shim. This is the strongest reverse result: not configuration reads, but a packet egressing under the VxD's own code.
+- **PCI.VXD — live bus enumeration on a real Windows 2000 kernel.** The hosted ring-0 context performs real PCI configuration I/O (ports 0xCF8/0xCFC) on the live i440fx bus and reads back the actual device list (440FX host bridge, PIIX3 ISA/IDE, PIIX4 ACPI, VGA, NIC); PCI.VXD's own configuration-read primitive reads back four distinct correct vendor:device IDs from the live bus, the VxD's own enumeration code doing real hardware I/O, not merely initializing against fakes.
 
 **DMA / real NT memory:** an import-mode reverse shim (linking real `ntoskrnl.exe` imports, the first non-standalone reverse shim) loads and initializes on a real Windows 2000 kernel — the step toward routing a hosted driver's allocation to genuine NT contiguous-physical memory (`MmAllocateContiguousMemory`) for real DMA.
 
@@ -38,31 +38,49 @@ Initialization completing is necessary but not sufficient; the real measure is t
 
 This is the face that lets a system stranded on Windows 9x carry its irreplaceable driver onto a modern, maintained kernel.
 
-## Proven Drivers (19)
+## Proven Drivers
 
-### i386 PE32 — Full Hardware I/O
-| Driver | NT Version | Class | Test |
-|--------|-----------|-------|------|
-| sym_hi.sys (LSI 53C810) | XP SP3 | ScsiPort | 9/9 sector READ+WRITE |
-| rtl8029.sys (NE2000 PCI) | XP SP3 | NDIS 4.0 | Full ARP TX+RX |
-| rtl8139.sys (Realtek) | XP SP3 | NDIS 5.0 | Full ARP TX+RX (DMA) |
-| ne2000.sys | XP SP3 | NDIS 3.0 | Full ARP TX+RX |
+Two ladders, kept separate. **Function-level** crossings (the driver's own code moved real data against faithful stock QEMU, unfakeable sentinel, adversarial review) and **load-proven** drivers (full PE load + imports resolved). The patched-QEMU set is held below the function bar.
 
-### i386 PE32 — DriverEntry Proven
+### i386 PE32 — Function-level crossings (18, faithful stock QEMU)
+| Device / Driver | Class | Sentinel |
+|-----------------|-------|----------|
+| ne2000 / rtl8029.sys | NDIS | ARP on the wire + TX-ring port I/O |
+| AMD PCnet | NDIS | busmaster ring PA + received ARP via own HandleInterrupt + ARP TX |
+| Realtek rtl8139 | NDIS 5.0 | TSAD0 ring PA + full ARP TX+RX |
+| DEC tulip / dc21x4 | NDIS | ARP on the wire (0x0806) via own MiniportSend → busmaster DMA + own ISR DPC reclaim |
+| Intel eepro100 / 8255x (e100bnt5.sys) | NDIS | own-code ARP on the wire + own ISR/DPC TX completion (MMIO-CSR) |
+| virtio-net / netkvm.sys | NDIS 5.1 | own-code ARP on the wire + TX vring avail-idx post |
+| Intel e1000 / 82540EM (e1000325.sys) | NDIS 5.1 | own-MAC ARP on the wire + SLIRP reply, busmaster DMA |
+| Intel e1000e / 82574L (e1q5132.sys) | NDIS 5.2 | own-MAC ARP on the wire + SLIRP reply, TDH/TDT post |
+| virtio-scsi / vioscsi.sys | ScsiPort | host-seeded READ(10) sector via virtio ring |
+| VMware PVSCSI / pvscsi.sys | ScsiPort | host-seeded LBA1 sentinel via own HwStartIo READ(10) + busmaster DMA |
+| LSI MegaRAID SAS1078 / megasas.sys | ScsiPort (MFI) | host-seeded LBA1 sentinel via own PD_SCSI_IO READ(10) + busmaster DMA |
+| USB-EHCI MSC / usbehci | USB / EHCI | INQUIRY 'QEMU' + seeded sector via shim-built CBW |
+| USB-MSC / usbstor.sys | USB / BOT | own SRB → CBW → BOT READ(10), seeded LBA 0x10 |
+| ATAPI / atapi.sys | IDE/ATAPI | IDE command-block register crossing |
+| serial 16550 / serial.sys | serial | own DLAB + divisor on 0x3F8 |
+| i8042 keyboard START / i8042prt | input | own 0x60/0x64 START sequence |
+| parport LPT / parport.sys | parallel | own OUT 0x378 + device-computed IN 0x379 → 0xD8 |
+| Cirrus display DAC | VideoPort | V86-free OUT 0x3C8/0x3C9 DAC write |
+
+### i386 PE32 — Load / DriverEntry proven
 | Driver | NT Version | Class | Test |
 |--------|-----------|-------|------|
 | vga.sys (21K) | XP SP3 | VideoPort | DriverEntry + VideoPortInit |
 | hidparse.sys (25K) | XP SP3 | ntoskrnl | DriverEntry + 30 HidP_* exports |
 | hidgame.sys (9K) | XP SP3 | HID | DriverEntry + HidRegisterMinidriver |
+| es1371mp.sys (41K) | XP SP3 | PortCls audio | 60/60 imports |
+| aha154x.sys (9K) | **NT 3.51 (1995)** | ScsiPort | 17/17 imports |
+| aha154x.sys (15K) | **NT 3.1 (1993)** | ScsiPort | all imports |
+| ncr53c9x.sys (12K) | **NT 3.51** | ScsiPort | all imports |
 
-### i386 PE32 — PE Load Proven (all imports resolved)
-| Driver | NT Version | Class | Imports |
-|--------|-----------|-------|---------|
-| es1371mp.sys (41K) | XP SP3 | PortCls audio | 60/60 |
-| aha154x.sys (9K) | **NT 3.51 (1995)** | ScsiPort | 17/17 |
-| aha154x.sys (15K) | **NT 3.1 (1993)** | ScsiPort | all |
-| buslogic.sys (8.5K) | **NT 3.51** | ScsiPort | all |
-| ncr53c9x.sys (12K) | **NT 3.51** | ScsiPort | all |
+### Demonstrated against a patched QEMU (below the stock-QEMU function bar)
+| Device / Driver | Demonstrated | Why not stock QEMU |
+|-----------------|--------------|---------------------|
+| sym_hi.sys (LSI 53C810) | 9/9 sector READ+WRITE | needed a 5-patch QEMU for the 53C8xx SCRIPTS engine |
+| LSI 53C895a SCRIPTS | READ+WRITE crossed | QEMU SCRIPTS MOVE-MEM device-model fidelity bug |
+| buslogic.sys (8.5K, NT 3.51) | load + ScsiPort | no faithful QEMU path for BT-958 at the function bar |
 
 ### AMD64 PE32+ — PE Load Proven
 | Driver | NT Version | Class | Imports |
@@ -82,14 +100,15 @@ This is the face that lets a system stranded on Windows 9x carry its irreplaceab
 
 | Shim | Functions | Status | Proven Drivers |
 |------|-----------|--------|---------------|
-| ScsiPort (NTMINI_V5.C) | 22+ | **Production** | sym_hi, aha154x, buslogic, ncr53c9x |
-| NDIS (NDIS_SHIM.C) | 75+ | **Production** | rtl8029, rtl8139, ne2000 |
-| VideoPort (VIDEO_SHIM.C) | 47+ | **Working** | vga.sys, vgapnp x64 |
+| ScsiPort (NTMINI_V5.C) | 22+ | **Production** | pvscsi, megasas, vioscsi (seeded-sector READ; megasas also WRITE+readback); aha154x, ncr53c9x (load) |
+| NDIS (NDIS_SHIM.C) | 75+ | **Production** | ne2000, rtl8139, pcnet, tulip, eepro100, virtio-net, e1000, e1000e (8 NICs, frames on the wire) |
+| StorPort (STORPORT_SHIM.C) | — | Written | XP/Server 2003+ import layer; Method-C port pending |
+| VideoPort (VIDEO_SHIM.C) | 47+ | **Working** | Cirrus (DAC write); vga.sys, vgapnp x64 (init) |
 | ntoskrnl+HAL (NTOS_SHIM.C) | 130+ | **Working** | hidparse, hidgame, pciide, ne2000 (x64) |
-| HID (HID_SHIM.C) | 3 | **Working** | hidgame |
+| HID (HID_SHIM.C) | 3 | **Working** | hidgame (load); live-report walled (headless input) |
 | PCI IDE (PCIIDE_SHIM.C) | 3 | **Working** | pciide (x64, IA-64) |
-| PortCls (AUDIO_SHIM.C) | 20+ | Partial | es1371mp (loads, crash in init) |
-| USBD (USB_SHIM.C) | 15 | Written | — |
+| PortCls (AUDIO_SHIM.C) | 20+ | Partial | es1370 (register sub-crossing; full path structural) |
+| USBD (USB_SHIM.C) | 15 | **Working** | usbstor, usbehci (seeded sector) |
 | DirectDraw (DDRAW_SHIM.C) | 15+ | Written | — |
 | WiFi (WIFI_SHIM.C) | 8 | Written | — |
 | AGP (AGP_SHIM.C) | 10 | Written | — |
