@@ -266,4 +266,4 @@ Approximately 500 million tokens of Claude (Opus 4.5-4.8) agentic engineering co
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+Apache-2.0 — permissive, with an explicit patent grant. See [LICENSE](LICENSE). Copyright 2026 Nell Watson.
