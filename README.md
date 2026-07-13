@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="janus-icon.svg" alt="Janus" width="128" height="128">
+</p>
+
 # Janus: A Universal Bidirectional NT/9x Driver Translation Framework
 
 **Load Windows NT kernel-mode drivers on Windows 9x. Any NT version. Any architecture.**
